@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""
+aphex-deploy-stack: Application stack deployment script
+
+This script downloads build artifacts from S3, synthesizes CDK stacks for a target environment,
+and deploys them to CloudFormation in dependency order.
+
+Usage:
+    aphex-deploy-stack <repo-url> <commit-sha> <environment> <stack-list> <artifact-bucket>
+
+Arguments:
+    repo-url: Git repository URL
+    commit-sha: Git commit SHA to deploy
+    environment: Target environment name (e.g., dev, staging, prod)
+    stack-list: Comma-separated list of stack names to deploy
+    artifact-bucket: S3 bucket containing build artifacts
+
+Environment Variables:
+    AWS_REGION: Target AWS region
+    AWS_ACCOUNT: Target AWS account
+    AWS_ROLE_ARN: IAM role ARN for IRSA (required)
+    AWS_WEB_IDENTITY_TOKEN_FILE: Path to IRSA token file (set automatically by Kubernetes)
+"""
+
+import sys
+import json
+import logging
+import subprocess
+import os
+import shutil
+import tarfile
+from datetime import datetime
+from typing import Dict, Any, List
+
+# Import common utilities
+sys.path.insert(0, '/usr/local/lib/python3.11/site-packages/aphex_common')
+try:
+    from aphex_common import (
+        setup_logging, output_result, ensure_no_long_lived_credentials
+    )
+except ImportError:
+    # Fallback if common module not available
+    def setup_logging():
+        """Configure logging to output to stdout/stderr for CloudWatch"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            stream=sys.stdout
+        )
+
+    def output_result(success: bool, data: Dict[str, Any]):
+        """Output structured JSON result"""
+        result = {
+            "success": success,
+            "data": data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        output = json.dumps(result, indent=2)
+        if success:
+            print(output, file=sys.stdout)
+        else:
+            print(output, file=sys.stderr)
+
+    def ensure_no_long_lived_credentials():
+        """Fallback credential validation"""
+        # Check for long-lived credentials
+        if os.environ.get('AWS_ACCESS_KEY_ID') or os.environ.get('AWS_SECRET_ACCESS_KEY'):
+            return False, "Long-lived AWS credentials detected. Use IRSA instead."
+        
+        # Check for IRSA configuration
+        role_arn = os.environ.get('AWS_ROLE_ARN')
+        token_file = os.environ.get('AWS_WEB_IDENTITY_TOKEN_FILE')
+        
+        if not role_arn:
+            return False, "AWS_ROLE_ARN not set. IRSA configuration required."
+        
+        if not token_file or not os.path.exists(token_file):
+            return False, "AWS_WEB_IDENTITY_TOKEN_FILE not found. IRSA configuration required."
+        
+        return True, None
+
+
+def run_command(command: List[str], cwd: str = None, env: Dict[str, str] = None) -> subprocess.CompletedProcess:
+    """Run a shell command and return the result"""
+    logging.info(f"Running command: {' '.join(command)}")
+    
+    # Merge environment variables
+    cmd_env = os.environ.copy()
+    if env:
+        cmd_env.update(env)
+    
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=cmd_env
+    )
+    
+    if result.stdout:
+        logging.info(f"stdout: {result.stdout}")
+    if result.stderr:
+        logging.warning(f"stderr: {result.stderr}")
+    
+    return result
+
+
+def download_artifact_from_s3(bucket: str, commit_sha: str, target_dir: str) -> str:
+    """Download the most recent artifact for the given commit SHA from S3"""
+    logging.info(f"Downloading artifact for commit {commit_sha} from S3 bucket {bucket}")
+    
+    # List artifacts with the commit SHA prefix
+    result = run_command([
+        'aws', 's3', 'ls',
+        f's3://{bucket}/artifacts/',
+        '--recursive'
+    ])
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to list S3 artifacts: {result.stderr}")
+    
+    # Find the most recent artifact matching the commit SHA
+    artifacts = []
+    for line in result.stdout.strip().split('\n'):
+        if commit_sha[:8] in line:
+            parts = line.split()
+            if len(parts) >= 4:
+                artifacts.append(parts[-1])  # S3 key
+    
+    if not artifacts:
+        raise Exception(f"No artifacts found for commit {commit_sha}")
+    
+    # Use the most recent artifact (last in sorted list)
+    artifact_key = sorted(artifacts)[-1]
+    artifact_name = os.path.basename(artifact_key)
+    local_path = os.path.join(target_dir, artifact_name)
+    
+    logging.info(f"Downloading artifact: {artifact_key}")
+    
+    result = run_command([
+        'aws', 's3', 'cp',
+        f's3://{bucket}/{artifact_key}',
+        local_path
+    ])
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to download artifact: {result.stderr}")
+    
+    logging.info(f"Successfully downloaded artifact to {local_path}")
+    return local_path
+
+
+def extract_artifact(artifact_path: str, target_dir: str) -> str:
+    """Extract the artifact tarball"""
+    logging.info(f"Extracting artifact: {artifact_path}")
+    
+    with tarfile.open(artifact_path, "r:gz") as tar:
+        tar.extractall(path=target_dir)
+    
+    # Find the extracted directory (should be the only directory in target_dir)
+    extracted_dirs = [d for d in os.listdir(target_dir) 
+                     if os.path.isdir(os.path.join(target_dir, d))]
+    
+    if not extracted_dirs:
+        raise Exception("No directory found in extracted artifact")
+    
+    extracted_path = os.path.join(target_dir, extracted_dirs[0])
+    logging.info(f"Artifact extracted to: {extracted_path}")
+    return extracted_path
+
+
+def install_dependencies(repo_dir: str) -> None:
+    """Install npm dependencies for the CDK project"""
+    logging.info("Installing npm dependencies")
+    
+    result = run_command(['npm', 'install'], cwd=repo_dir)
+    if result.returncode != 0:
+        raise Exception(f"Failed to install dependencies: {result.stderr}")
+    
+    logging.info("Dependencies installed successfully")
+
+
+def get_stack_dependencies(stack_name: str, repo_dir: str) -> List[str]:
+    """Get dependencies for a stack by analyzing CDK metadata"""
+    logging.info(f"Analyzing dependencies for stack: {stack_name}")
+    
+    # Synthesize to get the cloud assembly
+    result = run_command(['cdk', 'synth', stack_name, '--quiet'], cwd=repo_dir)
+    if result.returncode != 0:
+        logging.warning(f"Could not synthesize stack for dependency analysis: {result.stderr}")
+        return []
+    
+    # For now, return empty list - dependency ordering would require parsing
+    # the CDK cloud assembly manifest
+    return []
+
+
+def order_stacks_by_dependencies(stacks: List[str], repo_dir: str) -> List[str]:
+    """Order stacks based on their dependencies"""
+    logging.info("Ordering stacks by dependencies")
+    
+    # Build dependency graph
+    dependencies = {}
+    for stack in stacks:
+        dependencies[stack] = get_stack_dependencies(stack, repo_dir)
+    
+    # Topological sort
+    ordered = []
+    visited = set()
+    
+    def visit(stack: str):
+        if stack in visited:
+            return
+        visited.add(stack)
+        for dep in dependencies.get(stack, []):
+            if dep in stacks:
+                visit(dep)
+        ordered.append(stack)
+    
+    for stack in stacks:
+        visit(stack)
+    
+    logging.info(f"Stack deployment order: {ordered}")
+    return ordered
+
+
+def synthesize_stack(stack_name: str, environment: str, repo_dir: str) -> str:
+    """Synthesize a CDK stack for the target environment"""
+    logging.info(f"Synthesizing stack {stack_name} for environment {environment}")
+    
+    # Set environment context
+    env_context = {
+        'ENVIRONMENT': environment
+    }
+    
+    result = run_command(
+        ['cdk', 'synth', stack_name],
+        cwd=repo_dir,
+        env=env_context
+    )
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to synthesize stack {stack_name}: {result.stderr}")
+    
+    logging.info(f"Stack {stack_name} synthesized successfully")
+    return result.stdout
+
+
+def deploy_stack(stack_name: str, environment: str, repo_dir: str) -> Dict[str, Any]:
+    """Deploy a CDK stack to CloudFormation"""
+    logging.info(f"Deploying stack {stack_name} to environment {environment}")
+    
+    start_time = datetime.utcnow()
+    
+    # Set environment context
+    env_context = {
+        'ENVIRONMENT': environment
+    }
+    
+    # Deploy with --require-approval never to avoid interactive prompts
+    outputs_file = f'/tmp/stack-outputs-{stack_name}.json'
+    result = run_command([
+        'cdk', 'deploy', stack_name,
+        '--require-approval', 'never',
+        '--outputs-file', outputs_file
+    ], cwd=repo_dir, env=env_context)
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to deploy stack {stack_name}: {result.stderr}")
+    
+    end_time = datetime.utcnow()
+    duration = (end_time - start_time).total_seconds()
+    
+    logging.info(f"Stack {stack_name} deployed successfully in {duration}s")
+    
+    # Read stack outputs if available
+    outputs = {}
+    if os.path.exists(outputs_file):
+        with open(outputs_file, 'r') as f:
+            stack_outputs = json.load(f)
+            # Extract outputs for this specific stack
+            if stack_name in stack_outputs:
+                outputs = stack_outputs[stack_name]
+    
+    return {
+        "stack_name": stack_name,
+        "outputs": outputs,
+        "status": "DEPLOYED",
+        "duration": duration
+    }
+
+
+def main():
+    """Main execution function"""
+    setup_logging()
+    
+    # Validate arguments
+    if len(sys.argv) != 6:
+        logging.error("Invalid number of arguments")
+        output_result(False, {
+            "error": "Usage: aphex-deploy-stack <repo-url> <commit-sha> <environment> <stack-list> <artifact-bucket>"
+        })
+        sys.exit(1)
+    
+    repo_url = sys.argv[1]
+    commit_sha = sys.argv[2]
+    environment = sys.argv[3]
+    stack_list = sys.argv[4]
+    artifact_bucket = sys.argv[5]
+    
+    # Parse stack list
+    stacks = [s.strip() for s in stack_list.split(',') if s.strip()]
+    
+    if not stacks:
+        logging.error("No stacks specified")
+        output_result(False, {"error": "Stack list cannot be empty"})
+        sys.exit(1)
+    
+    # Validate environment variables
+    aws_region = os.environ.get('AWS_REGION')
+    aws_account = os.environ.get('AWS_ACCOUNT')
+    
+    if not aws_region:
+        logging.error("AWS_REGION environment variable not set")
+        output_result(False, {"error": "AWS_REGION environment variable required"})
+        sys.exit(2)
+    
+    if not aws_account:
+        logging.error("AWS_ACCOUNT environment variable not set")
+        output_result(False, {"error": "AWS_ACCOUNT environment variable required"})
+        sys.exit(2)
+    
+    # Validate IRSA credentials (ensure no long-lived credentials)
+    credentials_valid, error_msg = ensure_no_long_lived_credentials()
+    if not credentials_valid:
+        logging.error(f"Credential validation failed: {error_msg}")
+        output_result(False, {"error": error_msg})
+        sys.exit(2)
+    
+    try:
+        # Create temporary directories
+        work_dir = '/tmp/aphex-deploy-stack'
+        artifact_dir = os.path.join(work_dir, 'artifacts')
+        extract_dir = os.path.join(work_dir, 'extracted')
+        
+        # Clean up any existing work directory
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+        
+        os.makedirs(artifact_dir, exist_ok=True)
+        os.makedirs(extract_dir, exist_ok=True)
+        
+        # Download and extract artifact
+        artifact_path = download_artifact_from_s3(artifact_bucket, commit_sha, artifact_dir)
+        repo_dir = extract_artifact(artifact_path, extract_dir)
+        
+        # Install dependencies
+        install_dependencies(repo_dir)
+        
+        # Order stacks by dependencies
+        ordered_stacks = order_stacks_by_dependencies(stacks, repo_dir)
+        
+        # Synthesize and deploy each stack
+        deployment_results = []
+        for stack_name in ordered_stacks:
+            synthesize_stack(stack_name, environment, repo_dir)
+            result = deploy_stack(stack_name, environment, repo_dir)
+            deployment_results.append(result)
+        
+        # Output success result
+        output_result(True, {
+            "message": "Stack deployment completed successfully",
+            "environment": environment,
+            "commit_sha": commit_sha,
+            "stacks_deployed": len(deployment_results),
+            "deployment_results": deployment_results
+        })
+        
+        # Clean up
+        shutil.rmtree(work_dir)
+        
+        sys.exit(0)
+        
+    except Exception as e:
+        logging.error(f"Deployment failed: {str(e)}", exc_info=True)
+        output_result(False, {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        sys.exit(4)
+
+
+if __name__ == "__main__":
+    main()

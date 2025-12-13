@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""
+aphex-validate: Configuration validation script for the Arbiter Pipeline Infrastructure
+
+This script validates configuration files, AWS credentials, and CDK context
+to ensure all prerequisites are met before deployment.
+
+Usage:
+    aphex-validate <config-path>
+
+Environment Variables:
+    AWS_REGION: AWS region (optional)
+    AWS_ROLE_ARN: IAM role to assume (via IRSA, optional)
+"""
+
+import sys
+import json
+import logging
+import os
+import subprocess
+from datetime import datetime, timezone
+from typing import Dict, Any, Tuple
+import yaml
+import jsonschema
+
+
+def setup_logging():
+    """Configure logging to output to stdout/stderr for CloudWatch"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
+
+
+def output_result(success: bool, data: Dict[str, Any]):
+    """Output structured JSON result"""
+    result = {
+        "success": success,
+        "data": data,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    output = json.dumps(result, indent=2)
+    if success:
+        print(output, file=sys.stdout)
+    else:
+        print(output, file=sys.stderr)
+
+
+def load_config(config_path: str) -> Tuple[Dict[str, Any], str]:
+    """
+    Load configuration file (JSON or YAML)
+    
+    Returns:
+        Tuple of (config_dict, file_format)
+    """
+    logging.info(f"Loading configuration from: {config_path}")
+    
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Configuration file not found: {config_path}")
+    
+    with open(config_path, 'r') as f:
+        content = f.read()
+    
+    # Try to parse as JSON first
+    try:
+        config = json.loads(content)
+        return config, "json"
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to parse as YAML
+    try:
+        config = yaml.safe_load(content)
+        return config, "yaml"
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse configuration file as JSON or YAML: {str(e)}")
+
+
+def validate_json_schema(config: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Validate configuration against JSON schema
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    logging.info("Validating configuration against JSON schema")
+    
+    # Define the schema for Arbiter pipeline configuration
+    schema = {
+        "type": "object",
+        "properties": {
+            "pipeline": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "repository": {"type": "string"},
+                    "branch": {"type": "string"}
+                },
+                "required": ["name", "repository"]
+            },
+            "build": {
+                "type": "object",
+                "properties": {
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "artifactBucket": {"type": "string"}
+                }
+            },
+            "deploy": {
+                "type": "object",
+                "properties": {
+                    "stacks": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "environment": {"type": "string"}
+                }
+            },
+            "test": {
+                "type": "object",
+                "properties": {
+                    "commands": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                }
+            }
+        },
+        "required": ["pipeline"]
+    }
+    
+    try:
+        jsonschema.validate(instance=config, schema=schema)
+        logging.info("Configuration is valid according to JSON schema")
+        return True, ""
+    except jsonschema.ValidationError as e:
+        error_msg = f"Schema validation failed: {e.message}"
+        logging.error(error_msg)
+        return False, error_msg
+    except jsonschema.SchemaError as e:
+        error_msg = f"Invalid schema: {str(e)}"
+        logging.error(error_msg)
+        return False, error_msg
+
+
+def validate_aws_credentials() -> Tuple[bool, str]:
+    """
+    Validate that AWS credentials are available
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    logging.info("Validating AWS credentials")
+    
+    try:
+        # Try to get caller identity to verify credentials work
+        result = subprocess.run(
+            ['aws', 'sts', 'get-caller-identity'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode == 0:
+            identity = json.loads(result.stdout)
+            logging.info(f"AWS credentials valid for account: {identity.get('Account')}")
+            return True, ""
+        else:
+            error_msg = f"AWS credentials validation failed: {result.stderr}"
+            logging.error(error_msg)
+            return False, error_msg
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "AWS credentials validation timed out"
+        logging.error(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"AWS credentials validation error: {str(e)}"
+        logging.error(error_msg)
+        return False, error_msg
+
+
+def validate_cdk_context(config: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Validate that required CDK context values are present
+    
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    logging.info("Validating CDK context values")
+    
+    # Check for CDK context in the configuration
+    cdk_context = config.get('cdk', {}).get('context', {})
+    
+    # Define required context keys (these are common CDK context values)
+    # This is a basic validation - actual requirements may vary by project
+    required_keys = []
+    
+    # Check if any context is expected
+    if 'cdk' in config and 'context' in config['cdk']:
+        # Validate that context is a dictionary
+        if not isinstance(cdk_context, dict):
+            error_msg = "CDK context must be a dictionary"
+            logging.error(error_msg)
+            return False, error_msg
+        
+        # Check for any explicitly required keys in the config
+        if 'requiredContext' in config.get('cdk', {}):
+            required_keys = config['cdk']['requiredContext']
+            if not isinstance(required_keys, list):
+                error_msg = "CDK requiredContext must be a list"
+                logging.error(error_msg)
+                return False, error_msg
+            
+            missing_keys = [key for key in required_keys if key not in cdk_context]
+            if missing_keys:
+                error_msg = f"Missing required CDK context keys: {', '.join(missing_keys)}"
+                logging.error(error_msg)
+                return False, error_msg
+    
+    logging.info("CDK context validation passed")
+    return True, ""
+
+
+def validate_configuration(config_path: str) -> Dict[str, Any]:
+    """
+    Run all validation checks in sequence
+    
+    Returns:
+        Dictionary containing validation results
+    """
+    validation_results = {
+        "schema_validation": {"passed": False, "error": ""},
+        "aws_credentials": {"passed": False, "error": ""},
+        "cdk_context": {"passed": False, "error": ""}
+    }
+    
+    # Load configuration
+    try:
+        config, file_format = load_config(config_path)
+        logging.info(f"Configuration loaded successfully (format: {file_format})")
+    except Exception as e:
+        error_msg = f"Failed to load configuration: {str(e)}"
+        logging.error(error_msg)
+        return {
+            "error": error_msg,
+            "validation_results": validation_results
+        }
+    
+    # Validation 1: JSON Schema
+    is_valid, error_msg = validate_json_schema(config)
+    validation_results["schema_validation"]["passed"] = is_valid
+    validation_results["schema_validation"]["error"] = error_msg
+    
+    if not is_valid:
+        return {
+            "error": "Schema validation failed",
+            "validation_results": validation_results
+        }
+    
+    # Validation 2: AWS Credentials
+    is_valid, error_msg = validate_aws_credentials()
+    validation_results["aws_credentials"]["passed"] = is_valid
+    validation_results["aws_credentials"]["error"] = error_msg
+    
+    if not is_valid:
+        return {
+            "error": "AWS credentials validation failed",
+            "validation_results": validation_results
+        }
+    
+    # Validation 3: CDK Context
+    is_valid, error_msg = validate_cdk_context(config)
+    validation_results["cdk_context"]["passed"] = is_valid
+    validation_results["cdk_context"]["error"] = error_msg
+    
+    if not is_valid:
+        return {
+            "error": "CDK context validation failed",
+            "validation_results": validation_results
+        }
+    
+    # All validations passed
+    return {
+        "validation_results": validation_results
+    }
+
+
+def main():
+    """Main execution function"""
+    setup_logging()
+    
+    # Validate arguments
+    if len(sys.argv) != 2:
+        logging.error("Invalid number of arguments")
+        output_result(False, {
+            "error": "Usage: aphex-validate <config-path>"
+        })
+        sys.exit(1)
+    
+    config_path = sys.argv[1]
+    
+    try:
+        # Run validation sequence
+        results = validate_configuration(config_path)
+        
+        # Check if all validations passed
+        if "error" in results:
+            # At least one validation failed
+            output_result(False, {
+                "message": "Validation failed",
+                "error": results["error"],
+                "validation_results": results["validation_results"]
+            })
+            sys.exit(1)
+        else:
+            # All validations passed
+            output_result(True, {
+                "message": "All validations passed",
+                "validation_results": results["validation_results"]
+            })
+            sys.exit(0)
+        
+    except Exception as e:
+        logging.error(f"Validation failed: {str(e)}", exc_info=True)
+        output_result(False, {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

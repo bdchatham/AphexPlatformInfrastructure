@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+aphex-test: Test execution script for the Arbiter Pipeline Infrastructure
+
+This script executes test commands, captures output and exit codes,
+and reports pass/fail status.
+
+Usage:
+    aphex-test <test-commands>
+
+Environment Variables:
+    AWS_REGION: AWS region (optional, for tests that interact with AWS)
+    AWS_ROLE_ARN: IAM role to assume (via IRSA, optional)
+"""
+
+import sys
+import json
+import logging
+import subprocess
+from datetime import datetime, timezone
+from typing import Dict, Any
+
+
+def setup_logging():
+    """Configure logging to output to stdout/stderr for CloudWatch"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
+
+
+def output_result(success: bool, data: Dict[str, Any]):
+    """Output structured JSON result"""
+    result = {
+        "success": success,
+        "data": data,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    output = json.dumps(result, indent=2)
+    if success:
+        print(output, file=sys.stdout)
+    else:
+        print(output, file=sys.stderr)
+
+
+def execute_test_commands(test_commands: str) -> Dict[str, Any]:
+    """
+    Execute test commands and capture results
+    
+    Returns:
+        Dictionary containing test results including stdout, stderr, exit code, and status
+    """
+    logging.info(f"Executing test commands: {test_commands}")
+    
+    # Split commands by semicolon or newline
+    commands = [cmd.strip() for cmd in test_commands.replace('\n', ';').split(';') if cmd.strip()]
+    
+    all_stdout = []
+    all_stderr = []
+    final_exit_code = 0
+    
+    # Determine working directory - use /workspace in container, current dir otherwise
+    import os
+    work_dir = '/workspace' if os.path.exists('/workspace') else os.getcwd()
+    
+    for command in commands:
+        logging.info(f"Executing: {command}")
+        
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=work_dir
+        )
+        
+        # Capture output
+        if result.stdout:
+            all_stdout.append(result.stdout)
+            logging.info(f"stdout: {result.stdout}")
+        
+        if result.stderr:
+            all_stderr.append(result.stderr)
+            if result.returncode != 0:
+                logging.error(f"stderr: {result.stderr}")
+            else:
+                logging.warning(f"stderr: {result.stderr}")
+        
+        # Track exit code - if any command fails, mark as failed
+        if result.returncode != 0:
+            final_exit_code = result.returncode
+            logging.error(f"Command failed with exit code {result.returncode}: {command}")
+            # Continue executing remaining commands to capture all output
+    
+    # Determine pass/fail status based on exit code
+    status = "pass" if final_exit_code == 0 else "fail"
+    
+    logging.info(f"Test execution completed with status: {status}")
+    
+    return {
+        "status": status,
+        "exit_code": final_exit_code,
+        "stdout": "\n".join(all_stdout),
+        "stderr": "\n".join(all_stderr),
+        "commands_executed": commands
+    }
+
+
+def main():
+    """Main execution function"""
+    setup_logging()
+    
+    # Validate arguments
+    if len(sys.argv) != 2:
+        logging.error("Invalid number of arguments")
+        output_result(False, {
+            "error": "Usage: aphex-test <test-commands>"
+        })
+        sys.exit(1)
+    
+    test_commands = sys.argv[1]
+    
+    try:
+        # Execute tests
+        test_results = execute_test_commands(test_commands)
+        
+        # Determine if this is a success or failure
+        success = test_results['status'] == 'pass'
+        
+        # Output result
+        output_result(success, {
+            "message": f"Tests {test_results['status']}ed",
+            "test_results": test_results
+        })
+        
+        # Exit with appropriate code
+        sys.exit(0 if success else test_results['exit_code'])
+        
+    except Exception as e:
+        logging.error(f"Test execution failed: {str(e)}", exc_info=True)
+        output_result(False, {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        sys.exit(4)
+
+
+if __name__ == "__main__":
+    main()

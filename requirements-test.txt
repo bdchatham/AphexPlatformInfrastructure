@@ -1,0 +1,6 @@
+# Python testing dependencies
+# Used for property-based testing of execution scripts
+
+hypothesis>=6.92.0
+pytest>=7.4.0
+pytest-cov>=4.1.0

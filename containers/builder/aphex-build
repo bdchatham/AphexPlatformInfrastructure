@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+"""
+aphex-build: Build execution script for the Arbiter Pipeline Infrastructure
+
+This script clones a repository, executes build commands, packages artifacts,
+and uploads them to S3 with metadata tagging.
+
+Usage:
+    aphex-build <repo-url> <commit-sha> <build-commands> <artifact-bucket>
+
+Environment Variables:
+    AWS_REGION: AWS region for S3 operations
+    AWS_ROLE_ARN: IAM role ARN for IRSA (required)
+    AWS_WEB_IDENTITY_TOKEN_FILE: Path to IRSA token file (set automatically by Kubernetes)
+"""
+
+import sys
+import json
+import logging
+import subprocess
+import os
+import shutil
+import tarfile
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any, List
+
+# Import common utilities
+sys.path.insert(0, '/usr/local/lib/python3.11/site-packages/aphex_common')
+try:
+    from aphex_common import (
+        setup_logging, output_result, validate_required_args,
+        validate_aws_environment, ensure_no_long_lived_credentials,
+        ExitCode, handle_script_error, ResourceError, ExecutionError
+    )
+except ImportError:
+    # Fallback if common module not available
+    pass
+
+
+def setup_logging():
+    """Configure logging to output to stdout/stderr for CloudWatch"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
+
+
+def output_result(success: bool, data: Dict[str, Any]):
+    """Output structured JSON result"""
+    result = {
+        "success": success,
+        "data": data,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    output = json.dumps(result, indent=2)
+    if success:
+        print(output, file=sys.stdout)
+    else:
+        print(output, file=sys.stderr)
+
+
+def run_command(command: List[str], cwd: str = None) -> subprocess.CompletedProcess:
+    """Run a shell command and return the result"""
+    logging.info(f"Running command: {' '.join(command)}")
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True
+    )
+    
+    if result.stdout:
+        logging.info(f"stdout: {result.stdout}")
+    if result.stderr:
+        logging.warning(f"stderr: {result.stderr}")
+    
+    return result
+
+
+def clone_repository(repo_url: str, commit_sha: str, target_dir: str) -> None:
+    """Clone a repository at a specific commit"""
+    logging.info(f"Cloning repository {repo_url} at commit {commit_sha}")
+    
+    # Clone the repository
+    result = run_command(['git', 'clone', repo_url, target_dir])
+    if result.returncode != 0:
+        raise Exception(f"Failed to clone repository: {result.stderr}")
+    
+    # Checkout the specific commit
+    result = run_command(['git', 'checkout', commit_sha], cwd=target_dir)
+    if result.returncode != 0:
+        raise Exception(f"Failed to checkout commit {commit_sha}: {result.stderr}")
+    
+    logging.info(f"Successfully cloned repository at commit {commit_sha}")
+
+
+def execute_build_commands(build_commands: str, repo_dir: str) -> None:
+    """Execute build commands in the repository directory"""
+    logging.info(f"Executing build commands: {build_commands}")
+    
+    # Split commands by semicolon or newline
+    commands = [cmd.strip() for cmd in build_commands.replace('\n', ';').split(';') if cmd.strip()]
+    
+    for command in commands:
+        logging.info(f"Executing: {command}")
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=repo_dir,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.stdout:
+            logging.info(f"stdout: {result.stdout}")
+        if result.stderr:
+            logging.warning(f"stderr: {result.stderr}")
+        
+        if result.returncode != 0:
+            raise Exception(f"Build command failed: {command}\nError: {result.stderr}")
+    
+    logging.info("Build commands completed successfully")
+
+
+def package_artifacts(repo_dir: str, commit_sha: str, output_path: str) -> Dict[str, Any]:
+    """Package build artifacts into a tarball"""
+    logging.info(f"Packaging artifacts from {repo_dir}")
+    
+    timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+    artifact_name = f"build-{commit_sha[:8]}-{timestamp}.tar.gz"
+    artifact_path = os.path.join(output_path, artifact_name)
+    
+    # Create tarball of the repository (excluding .git directory)
+    with tarfile.open(artifact_path, "w:gz") as tar:
+        tar.add(repo_dir, arcname=os.path.basename(repo_dir), 
+                filter=lambda x: None if '.git' in x.name else x)
+    
+    artifact_size = os.path.getsize(artifact_path)
+    logging.info(f"Created artifact: {artifact_path} ({artifact_size} bytes)")
+    
+    return {
+        "artifact_name": artifact_name,
+        "artifact_path": artifact_path,
+        "artifact_size": artifact_size,
+        "commit_sha": commit_sha,
+        "timestamp": timestamp
+    }
+
+
+def upload_to_s3(artifact_path: str, artifact_name: str, bucket: str, 
+                 commit_sha: str, timestamp: str) -> str:
+    """Upload artifact to S3 with metadata"""
+    s3_key = f"artifacts/{artifact_name}"
+    s3_path = f"s3://{bucket}/{s3_key}"
+    
+    logging.info(f"Uploading artifact to {s3_path}")
+    
+    # Upload with metadata
+    result = run_command([
+        'aws', 's3', 'cp',
+        artifact_path,
+        s3_path,
+        '--metadata',
+        f'commit-sha={commit_sha},timestamp={timestamp}'
+    ])
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to upload to S3: {result.stderr}")
+    
+    logging.info(f"Successfully uploaded artifact to {s3_path}")
+    return s3_path
+
+
+def main():
+    """Main execution function"""
+    setup_logging()
+    
+    # Validate arguments
+    if len(sys.argv) != 5:
+        logging.error("Invalid number of arguments")
+        output_result(False, {
+            "error": "Usage: aphex-build <repo-url> <commit-sha> <build-commands> <artifact-bucket>"
+        })
+        sys.exit(1)
+    
+    repo_url = sys.argv[1]
+    commit_sha = sys.argv[2]
+    build_commands = sys.argv[3]
+    artifact_bucket = sys.argv[4]
+    
+    # Validate environment variables
+    aws_region = os.environ.get('AWS_REGION')
+    if not aws_region:
+        logging.error("AWS_REGION environment variable not set")
+        output_result(False, {"error": "AWS_REGION environment variable required"})
+        sys.exit(2)
+    
+    # Validate IRSA credentials (ensure no long-lived credentials)
+    credentials_valid, error_msg = ensure_no_long_lived_credentials()
+    if not credentials_valid:
+        logging.error(f"Credential validation failed: {error_msg}")
+        output_result(False, {"error": error_msg})
+        sys.exit(2)
+    
+    try:
+        # Create temporary directories
+        work_dir = '/tmp/aphex-build'
+        repo_dir = os.path.join(work_dir, 'repo')
+        artifact_dir = os.path.join(work_dir, 'artifacts')
+        
+        # Clean up any existing work directory
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+        
+        os.makedirs(repo_dir, exist_ok=True)
+        os.makedirs(artifact_dir, exist_ok=True)
+        
+        # Execute build pipeline
+        clone_repository(repo_url, commit_sha, repo_dir)
+        execute_build_commands(build_commands, repo_dir)
+        artifact_metadata = package_artifacts(repo_dir, commit_sha, artifact_dir)
+        
+        s3_path = upload_to_s3(
+            artifact_metadata['artifact_path'],
+            artifact_metadata['artifact_name'],
+            artifact_bucket,
+            commit_sha,
+            artifact_metadata['timestamp']
+        )
+        
+        # Output success result
+        output_result(True, {
+            "message": "Build completed successfully",
+            "artifact_s3_path": s3_path,
+            "artifact_size": artifact_metadata['artifact_size'],
+            "commit_sha": commit_sha,
+            "timestamp": artifact_metadata['timestamp']
+        })
+        
+        # Clean up
+        shutil.rmtree(work_dir)
+        
+        sys.exit(0)
+        
+    except Exception as e:
+        logging.error(f"Build failed: {str(e)}", exc_info=True)
+        output_result(False, {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        sys.exit(4)
+
+
+if __name__ == "__main__":
+    main()

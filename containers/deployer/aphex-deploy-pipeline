@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+aphex-deploy-pipeline: Pipeline infrastructure deployment script
+
+This script clones a repository, synthesizes a CDK stack, and deploys it to CloudFormation.
+Used for deploying the pipeline infrastructure itself.
+
+Usage:
+    aphex-deploy-pipeline <repo-url> <commit-sha> <stack-name> <artifact-bucket>
+
+Environment Variables:
+    AWS_REGION: Target AWS region
+    AWS_ACCOUNT: Target AWS account
+    AWS_ROLE_ARN: IAM role ARN for IRSA (required)
+    AWS_WEB_IDENTITY_TOKEN_FILE: Path to IRSA token file (set automatically by Kubernetes)
+"""
+
+import sys
+import json
+import logging
+import subprocess
+import os
+import shutil
+from datetime import datetime
+from typing import Dict, Any, List
+
+# Import common utilities
+sys.path.insert(0, '/usr/local/lib/python3.11/site-packages/aphex_common')
+try:
+    from aphex_common import (
+        setup_logging, output_result, ensure_no_long_lived_credentials
+    )
+except ImportError:
+    # Fallback if common module not available
+    def setup_logging():
+        """Configure logging to output to stdout/stderr for CloudWatch"""
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            stream=sys.stdout
+        )
+
+    def output_result(success: bool, data: Dict[str, Any]):
+        """Output structured JSON result"""
+        result = {
+            "success": success,
+            "data": data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        output = json.dumps(result, indent=2)
+        if success:
+            print(output, file=sys.stdout)
+        else:
+            print(output, file=sys.stderr)
+
+    def ensure_no_long_lived_credentials():
+        """Fallback credential validation"""
+        # Check for long-lived credentials
+        if os.environ.get('AWS_ACCESS_KEY_ID') or os.environ.get('AWS_SECRET_ACCESS_KEY'):
+            return False, "Long-lived AWS credentials detected. Use IRSA instead."
+        
+        # Check for IRSA configuration
+        role_arn = os.environ.get('AWS_ROLE_ARN')
+        token_file = os.environ.get('AWS_WEB_IDENTITY_TOKEN_FILE')
+        
+        if not role_arn:
+            return False, "AWS_ROLE_ARN not set. IRSA configuration required."
+        
+        if not token_file or not os.path.exists(token_file):
+            return False, "AWS_WEB_IDENTITY_TOKEN_FILE not found. IRSA configuration required."
+        
+        return True, None
+
+
+def run_command(command: List[str], cwd: str = None, env: Dict[str, str] = None) -> subprocess.CompletedProcess:
+    """Run a shell command and return the result"""
+    logging.info(f"Running command: {' '.join(command)}")
+    
+    # Merge environment variables
+    cmd_env = os.environ.copy()
+    if env:
+        cmd_env.update(env)
+    
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        env=cmd_env
+    )
+    
+    if result.stdout:
+        logging.info(f"stdout: {result.stdout}")
+    if result.stderr:
+        logging.warning(f"stderr: {result.stderr}")
+    
+    return result
+
+
+def clone_repository(repo_url: str, commit_sha: str, target_dir: str) -> None:
+    """Clone a repository at a specific commit"""
+    logging.info(f"Cloning repository {repo_url} at commit {commit_sha}")
+    
+    # Clone the repository
+    result = run_command(['git', 'clone', repo_url, target_dir])
+    if result.returncode != 0:
+        raise Exception(f"Failed to clone repository: {result.stderr}")
+    
+    # Checkout the specific commit
+    result = run_command(['git', 'checkout', commit_sha], cwd=target_dir)
+    if result.returncode != 0:
+        raise Exception(f"Failed to checkout commit {commit_sha}: {result.stderr}")
+    
+    logging.info(f"Successfully cloned repository at commit {commit_sha}")
+
+
+def install_dependencies(repo_dir: str) -> None:
+    """Install npm dependencies for the CDK project"""
+    logging.info("Installing npm dependencies")
+    
+    result = run_command(['npm', 'install'], cwd=repo_dir)
+    if result.returncode != 0:
+        raise Exception(f"Failed to install dependencies: {result.stderr}")
+    
+    logging.info("Dependencies installed successfully")
+
+
+def synthesize_stack(stack_name: str, repo_dir: str) -> str:
+    """Synthesize the CDK stack"""
+    logging.info(f"Synthesizing CDK stack: {stack_name}")
+    
+    result = run_command(['cdk', 'synth', stack_name], cwd=repo_dir)
+    if result.returncode != 0:
+        raise Exception(f"Failed to synthesize stack: {result.stderr}")
+    
+    logging.info(f"Stack {stack_name} synthesized successfully")
+    return result.stdout
+
+
+def deploy_stack(stack_name: str, repo_dir: str) -> Dict[str, Any]:
+    """Deploy the CDK stack to CloudFormation"""
+    logging.info(f"Deploying CDK stack: {stack_name}")
+    
+    # Deploy with --require-approval never to avoid interactive prompts
+    result = run_command([
+        'cdk', 'deploy', stack_name,
+        '--require-approval', 'never',
+        '--outputs-file', '/tmp/stack-outputs.json'
+    ], cwd=repo_dir)
+    
+    if result.returncode != 0:
+        raise Exception(f"Failed to deploy stack: {result.stderr}")
+    
+    logging.info(f"Stack {stack_name} deployed successfully")
+    
+    # Read stack outputs if available
+    outputs = {}
+    outputs_file = '/tmp/stack-outputs.json'
+    if os.path.exists(outputs_file):
+        with open(outputs_file, 'r') as f:
+            outputs = json.load(f)
+    
+    return {
+        "stack_name": stack_name,
+        "outputs": outputs,
+        "status": "DEPLOYED"
+    }
+
+
+def main():
+    """Main execution function"""
+    setup_logging()
+    
+    # Validate arguments
+    if len(sys.argv) != 5:
+        logging.error("Invalid number of arguments")
+        output_result(False, {
+            "error": "Usage: aphex-deploy-pipeline <repo-url> <commit-sha> <stack-name> <artifact-bucket>"
+        })
+        sys.exit(1)
+    
+    repo_url = sys.argv[1]
+    commit_sha = sys.argv[2]
+    stack_name = sys.argv[3]
+    artifact_bucket = sys.argv[4]
+    
+    # Validate environment variables
+    aws_region = os.environ.get('AWS_REGION')
+    aws_account = os.environ.get('AWS_ACCOUNT')
+    
+    if not aws_region:
+        logging.error("AWS_REGION environment variable not set")
+        output_result(False, {"error": "AWS_REGION environment variable required"})
+        sys.exit(2)
+    
+    if not aws_account:
+        logging.error("AWS_ACCOUNT environment variable not set")
+        output_result(False, {"error": "AWS_ACCOUNT environment variable required"})
+        sys.exit(2)
+    
+    # Validate IRSA credentials (ensure no long-lived credentials)
+    credentials_valid, error_msg = ensure_no_long_lived_credentials()
+    if not credentials_valid:
+        logging.error(f"Credential validation failed: {error_msg}")
+        output_result(False, {"error": error_msg})
+        sys.exit(2)
+    
+    try:
+        # Create temporary directory
+        work_dir = '/tmp/aphex-deploy-pipeline'
+        repo_dir = os.path.join(work_dir, 'repo')
+        
+        # Clean up any existing work directory
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+        
+        os.makedirs(repo_dir, exist_ok=True)
+        
+        # Execute deployment pipeline
+        clone_repository(repo_url, commit_sha, repo_dir)
+        install_dependencies(repo_dir)
+        synthesize_stack(stack_name, repo_dir)
+        deployment_result = deploy_stack(stack_name, repo_dir)
+        
+        # Output success result
+        output_result(True, {
+            "message": "Pipeline deployment completed successfully",
+            "stack_name": stack_name,
+            "commit_sha": commit_sha,
+            "deployment_result": deployment_result
+        })
+        
+        # Clean up
+        shutil.rmtree(work_dir)
+        
+        sys.exit(0)
+        
+    except Exception as e:
+        logging.error(f"Deployment failed: {str(e)}", exc_info=True)
+        output_result(False, {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+        sys.exit(4)
+
+
+if __name__ == "__main__":
+    main()

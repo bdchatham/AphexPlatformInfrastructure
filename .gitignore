@@ -24,3 +24,20 @@ Thumbs.db
 dist/
 build/
 *.pyc
+lib/
+*.js
+*.d.ts
+
+# CDK
+cdk.out/
+.cdk.staging/
+cdk.context.json
+
+# Test coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Python
+*.egg-info/
+.pytest_cache/
