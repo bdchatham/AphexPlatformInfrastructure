@@ -502,7 +502,7 @@ export class AphexCluster extends Construct implements IAphexCluster {
       // Add tags for better visibility
       tags: {
         'Name': `${clusterName}-node`,
-        'kubernetes.io/cluster/${clusterName}': 'owned',
+        'ClusterName': clusterName,
       },
     });
 
