@@ -3,7 +3,7 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as eks from 'aws-cdk-lib/aws-eks';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
-import { KubectlV28Layer } from '@aws-cdk/lambda-layer-kubectl-v28';
+import { KubectlV30Layer } from '@aws-cdk/lambda-layer-kubectl-v30';
 
 /**
  * Properties for the AphexCluster construct
@@ -35,7 +35,7 @@ export interface AphexClusterProps {
   
   /**
    * Kubernetes version
-   * @default 1.28
+   * @default 1.34
    */
   readonly kubernetesVersion?: eks.KubernetesVersion;
   
@@ -454,7 +454,7 @@ export class AphexCluster extends Construct implements IAphexCluster {
     const minNodes = props?.minNodes ?? 2;
     const maxNodes = props?.maxNodes ?? 10;
     const instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM);
-    const kubernetesVersion = props?.kubernetesVersion ?? eks.KubernetesVersion.V1_28;
+    const kubernetesVersion = props?.kubernetesVersion ?? eks.KubernetesVersion.V1_31;
     const argoNamespace = props?.argoNamespace ?? 'argo';
     const enableContainerInsights = props?.enableContainerInsights ?? true;
 
@@ -477,7 +477,7 @@ export class AphexCluster extends Construct implements IAphexCluster {
     });
 
     // Create kubectl layer for cluster management
-    const kubectlLayer = new KubectlV28Layer(this, 'KubectlLayer');
+    const kubectlLayer = new KubectlV30Layer(this, 'KubectlLayer');
 
     // Create EKS cluster
     this.cluster = new eks.Cluster(this, 'Cluster', {
@@ -497,6 +497,13 @@ export class AphexCluster extends Construct implements IAphexCluster {
       desiredSize: minNodes,
       diskSize: 50,
       amiType: eks.NodegroupAmiType.AL2_X86_64,
+      // Ensure nodes can be scheduled in private subnets
+      subnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      // Add tags for better visibility
+      tags: {
+        'Name': `${clusterName}-node`,
+        'kubernetes.io/cluster/${clusterName}': 'owned',
+      },
     });
 
     // Get OIDC provider
