@@ -29,7 +29,7 @@ export interface AphexClusterProps {
   
   /**
    * Instance type for cluster nodes
-   * @default t3.medium
+   * @default m7i-flex.large
    */
   readonly instanceType?: ec2.InstanceType;
   
@@ -453,7 +453,7 @@ export class AphexCluster extends Construct implements IAphexCluster {
     const clusterName = props?.clusterName ?? 'arbiter-pipeline-cluster';
     const minNodes = props?.minNodes ?? 2;
     const maxNodes = props?.maxNodes ?? 10;
-    const instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM);
+    const instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.M7I_FLEX, ec2.InstanceSize.LARGE);
     const kubernetesVersion = props?.kubernetesVersion ?? eks.KubernetesVersion.V1_31;
     const argoNamespace = props?.argoNamespace ?? 'argo';
     const enableContainerInsights = props?.enableContainerInsights ?? true;
