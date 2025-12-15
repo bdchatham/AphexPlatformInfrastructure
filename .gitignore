@@ -24,9 +24,14 @@ Thumbs.db
 dist/
 build/
 *.pyc
-lib/
+# Only ignore compiled JS/TS declaration files in lib/lib (the build output directory)
+lib/lib/
 *.js
 *.d.ts
+# But don't ignore TypeScript source files
+!lib/**/*.ts
+!bin/**/*.ts
+!test/**/*.ts
 
 # CDK
 cdk.out/
