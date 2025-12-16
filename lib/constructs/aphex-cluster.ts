@@ -35,7 +35,7 @@ export interface AphexClusterProps {
   
   /**
    * Kubernetes version
-   * @default 1.34
+   * @default 1.32
    */
   readonly kubernetesVersion?: eks.KubernetesVersion;
   
@@ -57,11 +57,18 @@ export interface AphexClusterProps {
   readonly enableContainerInsights?: boolean;
   
   /**
-   * IAM principals (users, roles, or account root) that should have admin access to the cluster
-   * If not provided, a default admin role will be created that can be assumed by account users
-   * @default - Creates a ClusterAdminRole that can be assumed by account principals
+   * IAM principals (users or roles) that should have breakglass admin access to the cluster
+   * Root principal is explicitly excluded for security
+   * @default - No principals (must be explicitly configured)
    */
-  readonly clusterAdminPrincipals?: iam.IPrincipal[];
+  readonly breakglassAdminPrincipals?: iam.IPrincipal[];
+  
+  /**
+   * IAM principals (users or roles) that should have read-only access to the cluster
+   * Root principal is explicitly excluded for security
+   * @default - No principals (must be explicitly configured)
+   */
+  readonly readOnlyPrincipals?: iam.IPrincipal[];
 }
 
 /**
@@ -180,9 +187,14 @@ export class AphexCluster extends Construct implements IAphexCluster {
   public readonly kubectlRoleArn: string;
   
   /**
-   * The cluster admin role that can be assumed by humans for manual operations
+   * The breakglass admin role for emergency/bootstrap access only
    */
-  public readonly clusterAdminRole: iam.Role;
+  public readonly breakglassAdminRole: iam.Role;
+  
+  /**
+   * The read-only role for day-to-day cluster introspection
+   */
+  public readonly readOnlyRole: iam.Role;
   
   /**
    * CloudFormation export name for cluster name
@@ -466,7 +478,7 @@ export class AphexCluster extends Construct implements IAphexCluster {
     const minNodes = props?.minNodes ?? 2;
     const maxNodes = props?.maxNodes ?? 10;
     const instanceType = props?.instanceType ?? ec2.InstanceType.of(ec2.InstanceClass.M7I_FLEX, ec2.InstanceSize.LARGE);
-    const kubernetesVersion = props?.kubernetesVersion ?? eks.KubernetesVersion.V1_31;
+    const kubernetesVersion = props?.kubernetesVersion ?? eks.KubernetesVersion.V1_32;
     const argoNamespace = props?.argoNamespace ?? 'argo';
     const enableContainerInsights = props?.enableContainerInsights ?? true;
 
@@ -491,23 +503,43 @@ export class AphexCluster extends Construct implements IAphexCluster {
     // Create kubectl layer for cluster management
     const kubectlLayer = new KubectlV30Layer(this, 'KubectlLayer');
 
-    // Create a human-assumable admin role for manual cluster operations
-    // This eliminates the need for implicit cluster creator access
-    const adminPrincipals = props?.clusterAdminPrincipals ?? [
-      new iam.AccountRootPrincipal(), // Allow account root to assume
-      new iam.ArnPrincipal(`arn:aws:iam::${cdk.Stack.of(this).account}:root`), // Explicit account root
-    ];
+    // Create breakglass admin role for emergency/bootstrap access only
+    // Root is explicitly excluded for security
+    if (!props?.breakglassAdminPrincipals || props.breakglassAdminPrincipals.length === 0) {
+      throw new Error(
+        'breakglassAdminPrincipals must be explicitly configured. ' +
+        'Root access is not permitted. Specify IAM users or roles that should have emergency admin access.'
+      );
+    }
     
-    this.clusterAdminRole = new iam.Role(this, 'ClusterAdminRole', {
-      roleName: `${clusterName}-admin-role`,
-      description: 'Human-assumable role for EKS cluster administration',
-      assumedBy: new iam.CompositePrincipal(...adminPrincipals),
+    this.breakglassAdminRole = new iam.Role(this, 'BreakglassAdminRole', {
+      roleName: `${clusterName}-breakglass-admin`,
+      description: 'Emergency/bootstrap admin access to EKS cluster (audited, rare usage)',
+      assumedBy: new iam.CompositePrincipal(...props.breakglassAdminPrincipals),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
       ],
     });
 
-    // Create EKS cluster with the admin role as a master
+    // Create read-only role for day-to-day cluster introspection
+    // Root is explicitly excluded for security
+    if (!props?.readOnlyPrincipals || props.readOnlyPrincipals.length === 0) {
+      throw new Error(
+        'readOnlyPrincipals must be explicitly configured. ' +
+        'Root access is not permitted. Specify IAM users or roles that should have read-only access.'
+      );
+    }
+    
+    this.readOnlyRole = new iam.Role(this, 'ReadOnlyRole', {
+      roleName: `${clusterName}-read-only`,
+      description: 'Read-only access to EKS cluster for day-to-day introspection',
+      assumedBy: new iam.CompositePrincipal(...props.readOnlyPrincipals),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
+      ],
+    });
+
+    // Create EKS cluster with the breakglass admin role as a master
     this.cluster = new eks.Cluster(this, 'Cluster', {
       clusterName,
       version: kubernetesVersion,
@@ -515,8 +547,38 @@ export class AphexCluster extends Construct implements IAphexCluster {
       vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
       defaultCapacity: 0, // We'll add managed node groups separately
       kubectlLayer,
-      // Grant the admin role cluster admin access
-      mastersRole: this.clusterAdminRole,
+      // Grant the breakglass admin role cluster admin access
+      mastersRole: this.breakglassAdminRole,
+    });
+
+    // Map read-only role to Kubernetes RBAC
+    // Uses session name for audit trail: readonly:{{SessionName}}
+    this.cluster.awsAuth.addRoleMapping(this.readOnlyRole, {
+      username: 'readonly:{{SessionName}}',
+      groups: ['cluster-read-only'],
+    });
+
+    // Create Kubernetes RBAC for read-only access
+    // Binds cluster-read-only group to the built-in 'view' ClusterRole
+    // Note: 'view' intentionally excludes Secrets for security
+    this.cluster.addManifest('ReadOnlyClusterRoleBinding', {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRoleBinding',
+      metadata: {
+        name: 'cluster-read-only',
+      },
+      subjects: [
+        {
+          kind: 'Group',
+          name: 'cluster-read-only',
+          apiGroup: 'rbac.authorization.k8s.io',
+        },
+      ],
+      roleRef: {
+        kind: 'ClusterRole',
+        name: 'view',
+        apiGroup: 'rbac.authorization.k8s.io',
+      },
     });
 
     // Add managed node group with autoscaling
@@ -706,14 +768,30 @@ export class AphexCluster extends Construct implements IAphexCluster {
       description: 'Cluster security group ID',
     });
 
-    new cdk.CfnOutput(this, 'ClusterAdminRoleArnOutput', {
-      value: this.clusterAdminRole.roleArn,
-      description: 'IAM role ARN for cluster admin access (assume this role for kubectl access)',
+    // Export role ARNs for human access
+    const breakglassRoleArnExport = 'ArbiterCluster-BreakglassAdminRoleArn';
+    const readOnlyRoleArnExport = 'ArbiterCluster-ReadOnlyRoleArn';
+
+    new cdk.CfnOutput(this, 'BreakglassAdminRoleArnOutput', {
+      value: this.breakglassAdminRole.roleArn,
+      exportName: breakglassRoleArnExport,
+      description: 'IAM role ARN for emergency/bootstrap admin access (audited, rare usage)',
     });
 
-    new cdk.CfnOutput(this, 'AssumeRoleCommand', {
-      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.clusterAdminRole.roleArn}`,
-      description: 'Command to configure kubectl with admin access',
+    new cdk.CfnOutput(this, 'ReadOnlyRoleArnOutput', {
+      value: this.readOnlyRole.roleArn,
+      exportName: readOnlyRoleArnExport,
+      description: 'IAM role ARN for read-only cluster access (default human access)',
+    });
+
+    new cdk.CfnOutput(this, 'KubectlReadOnlyCommand', {
+      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.readOnlyRole.roleArn}`,
+      description: 'Command to configure kubectl with read-only access (recommended)',
+    });
+
+    new cdk.CfnOutput(this, 'KubectlBreakglassCommand', {
+      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.breakglassAdminRole.roleArn}`,
+      description: 'Command to configure kubectl with admin access (emergency only)',
     });
   }
 
