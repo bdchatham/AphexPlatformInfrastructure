@@ -10,32 +10,22 @@ const app = new cdk.App();
 const account = process.env.CDK_DEFAULT_ACCOUNT || app.node.tryGetContext('account');
 const region = process.env.CDK_DEFAULT_REGION || app.node.tryGetContext('region');
 
-// Define IAM principals for cluster access
-// IMPORTANT: Update these ARNs with your actual IAM users/roles
-// You can get your current identity with: aws sts get-caller-identity
+// Define IAM principals for cluster access using AWS SSO (Identity Center)
+// The AWSReservedSSO role is created automatically when you assign a permission set
+// Pattern: arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<PermissionSetName>_<suffix>
+
+// For ArbiterDevs group with ArbiterDevsBase permission set
+// You can find the exact role name with: aws iam list-roles | grep AWSReservedSSO_ArbiterDevsBase
+const ssoRolePattern = `arn:aws:iam::${account}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_ArbiterDevsBase_*`;
+
 const breakglassAdminPrincipals = [
-  // Example: Specific IAM user
-  // new iam.ArnPrincipal('arn:aws:iam::123456789012:user/alice'),
-  
-  // Example: Specific IAM role
-  // new iam.ArnPrincipal('arn:aws:iam::123456789012:role/AdminRole'),
-  
-  // Example: AWS SSO role (replace with your actual SSO role ARN)
-  // new iam.ArnPrincipal('arn:aws:iam::123456789012:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_AdministratorAccess_*'),
-  
-  // Temporary: Allow any IAM principal in the account (remove in production)
-  new iam.AccountPrincipal(account),
+  // AWS SSO role for ArbiterDevs group (emergency admin access)
+  new iam.ArnPrincipal(ssoRolePattern),
 ];
 
 const readOnlyPrincipals = [
-  // Example: Specific IAM user for read-only access
-  // new iam.ArnPrincipal('arn:aws:iam::123456789012:user/bob'),
-  
-  // Example: Developer role
-  // new iam.ArnPrincipal('arn:aws:iam::123456789012:role/DeveloperRole'),
-  
-  // Temporary: Allow any IAM principal in the account (remove in production)
-  new iam.AccountPrincipal(account),
+  // AWS SSO role for ArbiterDevs group (daily read-only access)
+  new iam.ArnPrincipal(ssoRolePattern),
 ];
 
 new ArbiterPipelineInfrastructureStack(app, 'ArbiterPipelineInfrastructureStack', {
