@@ -785,13 +785,18 @@ export class AphexCluster extends Construct implements IAphexCluster {
     });
 
     new cdk.CfnOutput(this, 'KubectlReadOnlyCommand', {
-      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.readOnlyRole.roleArn}`,
-      description: 'Command to configure kubectl with read-only access (recommended)',
+      value: `aws eks update-kubeconfig --name ${clusterName} --region ${cdk.Stack.of(this).region} --role-arn ${this.readOnlyRole.roleArn}`,
+      description: 'Command to configure kubectl with read-only access (recommended for daily use)',
     });
 
     new cdk.CfnOutput(this, 'KubectlBreakglassCommand', {
-      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.breakglassAdminRole.roleArn}`,
-      description: 'Command to configure kubectl with admin access (emergency only)',
+      value: `aws eks update-kubeconfig --name ${clusterName} --region ${cdk.Stack.of(this).region} --role-arn ${this.breakglassAdminRole.roleArn}`,
+      description: 'Command to configure kubectl with admin access (emergency only, audited)',
+    });
+
+    new cdk.CfnOutput(this, 'TestReadOnlyAccess', {
+      value: `kubectl get namespaces && kubectl auth can-i create deployment -n default`,
+      description: 'Test commands to verify read-only access (should see namespaces, cannot create deployments)',
     });
   }
 

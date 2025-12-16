@@ -10,23 +10,15 @@ const app = new cdk.App();
 const account = process.env.CDK_DEFAULT_ACCOUNT || app.node.tryGetContext('account');
 const region = process.env.CDK_DEFAULT_REGION || app.node.tryGetContext('region');
 
-// Define IAM principals for cluster access using AWS SSO (Identity Center)
-// The AWSReservedSSO role is created automatically when you assign a permission set
-// Pattern: arn:aws:iam::<account>:role/aws-reserved/sso.amazonaws.com/<region>/AWSReservedSSO_<PermissionSetName>_<suffix>
+// For the simplified prototype approach, we'll use AccountPrincipal
+// and create the operator user separately after stack creation
+// This avoids circular dependency issues
 
-// For ArbiterDevs group with ArbiterDevsBase permission set
-// You can find the exact role name with: aws iam list-roles | grep AWSReservedSSO_ArbiterDevsBase
-const ssoRolePattern = `arn:aws:iam::${account}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_ArbiterDevsBase_*`;
+const breakglassAdminPrincipals = [new iam.AccountPrincipal(account)];
+const readOnlyPrincipals = [new iam.AccountPrincipal(account)];
 
-const breakglassAdminPrincipals = [
-  // AWS SSO role for ArbiterDevs group (emergency admin access)
-  new iam.ArnPrincipal(ssoRolePattern),
-];
-
-const readOnlyPrincipals = [
-  // AWS SSO role for ArbiterDevs group (daily read-only access)
-  new iam.ArnPrincipal(ssoRolePattern),
-];
+console.log('⚠️  Using account-level access for cluster roles.');
+console.log('   After deployment, create an operator user and configure access keys.');
 
 new ArbiterPipelineInfrastructureStack(app, 'ArbiterPipelineInfrastructureStack', {
   env: {
