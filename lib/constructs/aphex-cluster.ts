@@ -55,6 +55,13 @@ export interface AphexClusterProps {
    * @default true
    */
   readonly enableContainerInsights?: boolean;
+  
+  /**
+   * IAM principals (users, roles, or account root) that should have admin access to the cluster
+   * If not provided, a default admin role will be created that can be assumed by account users
+   * @default - Creates a ClusterAdminRole that can be assumed by account principals
+   */
+  readonly clusterAdminPrincipals?: iam.IPrincipal[];
 }
 
 /**
@@ -171,6 +178,11 @@ export class AphexCluster extends Construct implements IAphexCluster {
    * The kubectl role ARN
    */
   public readonly kubectlRoleArn: string;
+  
+  /**
+   * The cluster admin role that can be assumed by humans for manual operations
+   */
+  public readonly clusterAdminRole: iam.Role;
   
   /**
    * CloudFormation export name for cluster name
@@ -479,7 +491,23 @@ export class AphexCluster extends Construct implements IAphexCluster {
     // Create kubectl layer for cluster management
     const kubectlLayer = new KubectlV30Layer(this, 'KubectlLayer');
 
-    // Create EKS cluster
+    // Create a human-assumable admin role for manual cluster operations
+    // This eliminates the need for implicit cluster creator access
+    const adminPrincipals = props?.clusterAdminPrincipals ?? [
+      new iam.AccountRootPrincipal(), // Allow account root to assume
+      new iam.ArnPrincipal(`arn:aws:iam::${cdk.Stack.of(this).account}:root`), // Explicit account root
+    ];
+    
+    this.clusterAdminRole = new iam.Role(this, 'ClusterAdminRole', {
+      roleName: `${clusterName}-admin-role`,
+      description: 'Human-assumable role for EKS cluster administration',
+      assumedBy: new iam.CompositePrincipal(...adminPrincipals),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonEKSClusterPolicy'),
+      ],
+    });
+
+    // Create EKS cluster with the admin role as a master
     this.cluster = new eks.Cluster(this, 'Cluster', {
       clusterName,
       version: kubernetesVersion,
@@ -487,6 +515,8 @@ export class AphexCluster extends Construct implements IAphexCluster {
       vpcSubnets: [{ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }],
       defaultCapacity: 0, // We'll add managed node groups separately
       kubectlLayer,
+      // Grant the admin role cluster admin access
+      mastersRole: this.clusterAdminRole,
     });
 
     // Add managed node group with autoscaling
@@ -674,6 +704,16 @@ export class AphexCluster extends Construct implements IAphexCluster {
       value: this.cluster.clusterSecurityGroup.securityGroupId,
       exportName: clusterSecurityGroupIdExport,
       description: 'Cluster security group ID',
+    });
+
+    new cdk.CfnOutput(this, 'ClusterAdminRoleArnOutput', {
+      value: this.clusterAdminRole.roleArn,
+      description: 'IAM role ARN for cluster admin access (assume this role for kubectl access)',
+    });
+
+    new cdk.CfnOutput(this, 'AssumeRoleCommand', {
+      value: `aws eks update-kubeconfig --name ${clusterName} --role-arn ${this.clusterAdminRole.roleArn}`,
+      description: 'Command to configure kubectl with admin access',
     });
   }
 
