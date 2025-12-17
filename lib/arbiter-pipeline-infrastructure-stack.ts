@@ -66,6 +66,70 @@ export class ArbiterPipelineInfrastructureStack extends cdk.Stack {
       resources: [this.stackId],
     }));
 
+    // Create PipelineCreatorRole for external pipeline stacks
+    const pipelineCreatorRole = new cdk.aws_iam.Role(this, 'PipelineCreatorRole', {
+      roleName: 'arbiter-pipeline-creator',
+      description: 'Role for pipeline stacks to create pipelines on Arbiter cluster',
+      assumedBy: new cdk.aws_iam.CompositePrincipal(
+        // Allow Lambda functions (for CDK custom resources)
+        new cdk.aws_iam.ServicePrincipal('lambda.amazonaws.com'),
+        // Allow pipeline stacks in the same account
+        new cdk.aws_iam.AccountPrincipal(this.account)
+      ),
+      managedPolicies: [
+        cdk.aws_iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      ],
+    });
+
+    // Grant permissions needed for pipeline creation
+    pipelineCreatorRole.addToPolicy(new cdk.aws_iam.PolicyStatement({
+      effect: cdk.aws_iam.Effect.ALLOW,
+      actions: [
+        // S3 permissions for artifacts
+        's3:CreateBucket',
+        's3:PutBucketPolicy',
+        's3:PutBucketVersioning',
+        's3:PutLifecycleConfiguration',
+        's3:PutEncryptionConfiguration',
+        // IAM permissions for workflow execution roles
+        'iam:CreateRole',
+        'iam:PutRolePolicy',
+        'iam:AttachRolePolicy',
+        'iam:GetRole',
+        'iam:PassRole',
+        'iam:TagRole',
+        // Secrets Manager for GitHub tokens
+        'secretsmanager:GetSecretValue',
+        'secretsmanager:DescribeSecret',
+      ],
+      resources: ['*'],
+    }));
+
+    // Update kubectl role trust policy to trust the pipeline creator role
+    // Note: We do this manually instead of using grantAssumeRole() to avoid circular dependencies
+    const kubectlRole = this.cluster.cluster.kubectlRole!;
+    const kubectlRoleCfn = kubectlRole.node.defaultChild as cdk.aws_iam.CfnRole;
+    const existingPolicy = kubectlRoleCfn.assumeRolePolicyDocument as any;
+    
+    // Get existing statements or initialize empty array
+    const existingStatements = Array.isArray(existingPolicy?.Statement) 
+      ? existingPolicy.Statement 
+      : [];
+    
+    kubectlRoleCfn.assumeRolePolicyDocument = {
+      Version: '2012-10-17',
+      Statement: [
+        ...existingStatements,
+        {
+          Effect: 'Allow',
+          Principal: {
+            AWS: pipelineCreatorRole.roleArn,
+          },
+          Action: 'sts:AssumeRole',
+        },
+      ],
+    };
+
     // Output operator user information
     new cdk.CfnOutput(this, 'OperatorUserArn', {
       value: this.operatorUser.userArn,
@@ -80,6 +144,19 @@ export class ArbiterPipelineInfrastructureStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'CreateAccessKeyCommand', {
       value: `aws iam create-access-key --user-name ${this.operatorUser.userName}`,
       description: 'Command to create access keys for the operator user (run with root/admin credentials)',
+    });
+
+    // Output pipeline creator role information
+    new cdk.CfnOutput(this, 'PipelineCreatorRoleArn', {
+      value: pipelineCreatorRole.roleArn,
+      exportName: 'ArbiterCluster-PipelineCreatorRoleArn',
+      description: 'Role ARN for creating pipelines on Arbiter cluster',
+    });
+
+    new cdk.CfnOutput(this, 'PipelineCreatorRoleName', {
+      value: pipelineCreatorRole.roleName,
+      exportName: 'ArbiterCluster-PipelineCreatorRoleName',
+      description: 'Role name for creating pipelines on Arbiter cluster',
     });
   }
 }
