@@ -183,6 +183,11 @@ COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 for image in "${IMAGES[@]}"; do
     log_info "Pushing ${image}..."
     
+    # Tag images with the ECR repository name format (arbiter-pipeline-builder)
+    docker tag "${ECR_REGISTRY}/arbiter-pipeline/${image}:${COMMIT_SHA}" "${ECR_REGISTRY}/arbiter-pipeline-${image}:${COMMIT_SHA}"
+    docker tag "${ECR_REGISTRY}/arbiter-pipeline/${image}:${VERSION}" "${ECR_REGISTRY}/arbiter-pipeline-${image}:${VERSION}"
+    docker tag "${ECR_REGISTRY}/arbiter-pipeline/${image}:latest" "${ECR_REGISTRY}/arbiter-pipeline-${image}:latest"
+    
     # Push commit SHA tag
     docker push "${ECR_REGISTRY}/arbiter-pipeline-${image}:${COMMIT_SHA}"
     

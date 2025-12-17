@@ -36,8 +36,8 @@ RUN npm install -g \
     jest \
     mocha
 
-# Install Python testing framework
-RUN pip3 install --no-cache-dir pytest
+# Install Python testing framework using apk (avoids PEP 668 issues)
+RUN apk add --no-cache py3-pytest
 
 # Create working directory
 WORKDIR /workspace
