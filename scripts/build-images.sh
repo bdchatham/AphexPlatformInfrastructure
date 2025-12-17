@@ -84,14 +84,16 @@ build_image() {
         return 1
     fi
     
-    log_info "Building ${image_name} image..."
+    log_info "Building ${image_name} image for AMD64 architecture..."
     
-    # Build the image
-    docker build \
+    # Build the image for AMD64 (linux/amd64) to match EKS nodes
+    docker buildx build \
+        --platform linux/amd64 \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VCS_REF="$COMMIT_SHA" \
         --build-arg VERSION="${VERSION:-dev}" \
         -t "${REGISTRY}/${image_name}:${COMMIT_SHA}" \
+        --load \
         -f "$image_dir/Dockerfile" \
         "$image_dir"
     
@@ -100,7 +102,7 @@ build_image() {
         return 1
     fi
     
-    log_info "Successfully built ${image_name} image"
+    log_info "Successfully built ${image_name} image for AMD64"
     return 0
 }
 
@@ -196,6 +198,21 @@ fi
 if ! docker info &> /dev/null; then
     log_error "Docker daemon is not running"
     exit 1
+fi
+
+# Check if Docker buildx is available
+if ! docker buildx version &> /dev/null; then
+    log_error "Docker buildx is not available"
+    log_error "Please enable Docker buildx or update Docker to a newer version"
+    exit 1
+fi
+
+# Create and use a buildx builder if needed
+if ! docker buildx inspect multiarch-builder &> /dev/null; then
+    log_info "Creating buildx builder for multi-architecture builds..."
+    docker buildx create --name multiarch-builder --use
+else
+    docker buildx use multiarch-builder
 fi
 
 # Build all images
