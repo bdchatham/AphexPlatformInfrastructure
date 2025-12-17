@@ -105,30 +105,16 @@ export class ArbiterPipelineInfrastructureStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // Update kubectl role trust policy to trust the pipeline creator role
-    // Note: We do this manually instead of using grantAssumeRole() to avoid circular dependencies
+    // Grant the kubectl role permission to be assumed by the pipeline creator role
+    // This allows pipeline stacks to create Kubernetes resources
     const kubectlRole = this.cluster.cluster.kubectlRole!;
-    const kubectlRoleCfn = kubectlRole.node.defaultChild as cdk.aws_iam.CfnRole;
-    const existingPolicy = kubectlRoleCfn.assumeRolePolicyDocument as any;
-    
-    // Get existing statements or initialize empty array
-    const existingStatements = Array.isArray(existingPolicy?.Statement) 
-      ? existingPolicy.Statement 
-      : [];
-    
-    kubectlRoleCfn.assumeRolePolicyDocument = {
-      Version: '2012-10-17',
-      Statement: [
-        ...existingStatements,
-        {
-          Effect: 'Allow',
-          Principal: {
-            AWS: pipelineCreatorRole.roleArn,
-          },
-          Action: 'sts:AssumeRole',
-        },
-      ],
-    };
+    kubectlRole.grantAssumeRole(pipelineCreatorRole);
+
+    // Map pipeline creator role to Kubernetes RBAC with cluster admin access
+    this.cluster.cluster.awsAuth.addRoleMapping(pipelineCreatorRole, {
+      groups: ['system:masters'],
+      username: 'pipeline-creator',
+    });
 
     // Output operator user information
     new cdk.CfnOutput(this, 'OperatorUserArn', {
