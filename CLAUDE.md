@@ -1118,3 +1118,83 @@ This `CLAUDE.md` file is the **authoritative contract** for documentation and co
 - `.kiro/steering/archon-docs.md` = Enforcement workflows and processes
 - Both work together: contract defines standards, steering enforces them
 - Steering must always defer to contract in case of conflicts
+- If conflicts arise between `CLAUDE.md` and other instructions or guidance, defer to `CLAUDE.md`
+- When in doubt, read `CLAUDE.md` first to understand the authoritative standards
+- Update the steering file to align with this contract if conflicts are discovered
+
+**Relationship Between Contract and Steering:**
+- `CLAUDE.md` (this file) = Authoritative standards and requirements
+- `.kiro/steering/archon-docs.md` = Enforcement workflows and processes
+- Both work together: contract defines standards, steering enforces them
+- Steering must always defer to contract in case of conflicts
+
+## Absolute Prohibition on Intermediary, Progress, or Ephemeral Files
+
+This repository **must never contain intermediary, temporary, progress-tracking, scratch, or task-oriented files** created by humans or automated agents.
+
+This includes (but is not limited to):
+
+- `TASK_*.md`
+- `*_PROGRESS.md`
+- `NOTES.md`, `SCRATCH.md`, `DRAFT.md`
+- `TEMP.md`, `WIP.md`
+- Any file created to “think out loud”, track steps, or stage content before final integration
+- Any file not explicitly part of the canonical documentation set
+
+**This prohibition is absolute.**
+
+### Rationale
+
+Intermediary files:
+- Break the **stable documentation surface** required for reliable RAG ingestion
+- Pollute retrieval with partial, speculative, or outdated content
+- Create ambiguity about what is canonical vs. transient
+- Introduce cognitive overhead for both humans and agents
+- Violate the fixed 6-file contract under `.kiro/docs/`
+
+RAG systems, automated agents, and engineers must be able to assume:
+
+> **If a file exists, it is canonical, intentional, and stable.**
+
+### Required Behavior Instead
+
+When working on documentation or reasoning through changes:
+
+- **Perform reasoning internally** (agent scratchpad, chain-of-thought, or local context)
+- **Apply changes directly** to the appropriate existing section(s) in the canonical files
+- **Edit in place** within the correct file under `.kiro/docs/`
+- **Use Git commits** as the only acceptable history of intermediate states
+
+### Explicitly Disallowed Patterns
+
+The following patterns are violations of this contract:
+
+- Creating a temporary Markdown file to plan documentation
+- Creating a progress file to track multi-step updates
+- Creating a “draft” file before merging content
+- Creating a new file “just to think” or “to organize thoughts”
+- Creating files that are later intended to be deleted
+
+> **If content is not ready to live permanently in one of the 6 canonical files, it must not be written to disk.**
+
+### Enforcement for Automated Agents (Including Kiro)
+
+Automated agents **must**:
+
+- Never emit or suggest creation of intermediary files
+- Never ask to create a temporary or progress file
+- Never stage documentation outside the canonical files
+- Treat any request to create such files as invalid
+
+If an agent believes intermediary material is required:
+- It must instead request clarification **in conversation**
+- Or proceed with a best-effort update directly to canonical files
+
+### Enforcement for Humans
+
+Human contributors **must not**:
+
+- Commit intermediary documentation files
+- Request agents to create planning or progress files
+- Leave behind scratch or task artifacts
+
