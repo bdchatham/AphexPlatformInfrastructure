@@ -2,138 +2,332 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure uses TypeScript interfaces and Python dataclasses to define data structures. There are no persistent databases; all state is managed by Kubernetes (cluster state) and CloudFormation (infrastructure state).
+The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs) and ConfigMaps to define data structures. All state is managed by Kubernetes (cluster state) and the onboarding controller (tenant provisioning state).
 
 Data flows through the system in three main forms:
-1. **CDK Constructs**: TypeScript interfaces for infrastructure configuration
-2. **Kubernetes Resources**: YAML manifests for cluster resources
-3. **Script I/O**: JSON structures for execution script input/output
+1. **RepoBinding Resources**: Custom resources for onboarding requests
+2. **Kubernetes Resources**: YAML manifests for tenant infrastructure
+3. **Configuration Data**: ConfigMaps for allowlist and Lighthouse configuration
 
-## CDK Construct Interfaces
+## RepoBinding Data Model
 
-### AphexClusterProps
-
-Configuration for creating an AphexCluster.
+### RepoBinding Spec
 
 ```typescript
-interface AphexClusterProps {
-  clusterName?: string;           // Default: 'arbiter-pipeline-cluster'
-  minNodes?: number;               // Default: 2
-  maxNodes?: number;               // Default: 10
-  instanceType?: ec2.InstanceType; // Default: t3.medium
-  kubernetesVersion?: eks.KubernetesVersion; // Default: 1.28
-  vpc?: ec2.IVpc;                  // Default: new VPC created
-  argoNamespace?: string;          // Default: 'argo'
-  enableContainerInsights?: boolean; // Default: true
+interface RepoBindingSpec {
+  repoOrg: string;              // GitHub organization (e.g., "your-github-org")
+  repoName: string;             // Repository name (e.g., "archon-agent")
+  tenantName: string;           // Tenant namespace name (e.g., "archon")
+  permissionProfile: "standard" | "elevated";  // Permission level (default: "standard")
 }
 ```
 
 **Validation Rules**:
-- `minNodes` must be ≥ 1
-- `maxNodes` must be ≥ `minNodes`
-- `clusterName` must be valid EKS cluster name (alphanumeric and hyphens)
-- `kubernetesVersion` must be a supported EKS version
+- `repoOrg`: Must match pattern `^[a-z0-9-]+$`, must be in approved organization list
+- `repoName`: Must match pattern `^[a-z0-9-]+$`
+- `tenantName`: Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace
+- `permissionProfile`: Must be "standard" or "elevated"
 
-### ClusterAttributes
+**Example**:
+```yaml
+spec:
+  repoOrg: "your-github-org"
+  repoName: "archon-agent"
+  tenantName: "archon"
+  permissionProfile: "standard"
+```
 
-Attributes for importing an existing cluster.
+### RepoBinding Status
 
 ```typescript
-interface ClusterAttributes {
-  clusterName: string;      // EKS cluster name
-  oidcProviderArn: string;  // OIDC provider ARN
-  kubectlRoleArn: string;   // kubectl IAM role ARN
+interface RepoBindingStatus {
+  phase: "Pending" | "Provisioning" | "Ready" | "Failed";
+  message: string;
+  namespaceCreated: boolean;
+  serviceAccountCreated: boolean;
+  rbacConfigured: boolean;
+  allowlistUpdated: boolean;
+  lastReconcileTime: string;  // ISO 8601 timestamp
 }
 ```
 
-**Validation Rules**:
-- All fields are required
-- ARNs must be valid AWS ARN format
+**Phase Transitions**:
+```
+Pending → Provisioning → Ready
+                      ↓
+                    Failed
+```
 
-### PipelineConfig
+**Example**:
+```yaml
+status:
+  phase: Ready
+  message: "All resources provisioned successfully"
+  namespaceCreated: true
+  serviceAccountCreated: true
+  rbacConfigured: true
+  allowlistUpdated: true
+  lastReconcileTime: "2024-12-31T10:00:00Z"
+```
 
-Configuration for creating an isolated pipeline.
+## Allowlist Data Model
+
+### Allowlist Entry
 
 ```typescript
-interface PipelineConfig {
-  pipelineId: string;                    // Unique identifier
-  namespace?: string;                    // Default: 'pipeline-{pipelineId}'
-  policyStatements: iam.PolicyStatement[]; // IAM permissions
-  labels?: { [key: string]: string };    // Additional labels
+interface AllowlistEntry {
+  org: string;           // GitHub organization
+  name: string;          // Repository name
+  tenant: string;        // Tenant namespace
+  enabled: boolean;      // Whether triggers are active (default: true)
 }
 ```
 
-**Validation Rules**:
-- `pipelineId` must be unique within the cluster
-- `pipelineId` must be valid Kubernetes namespace name (lowercase alphanumeric and hyphens)
-- `namespace` must be valid Kubernetes namespace name
-- `policyStatements` must be non-empty array
+**Example**:
+```yaml
+repos:
+  - org: "your-github-org"
+    name: "archon-agent"
+    tenant: "archon"
+    enabled: true
+  - org: "your-github-org"
+    name: "another-repo"
+    tenant: "another"
+    enabled: true
+```
 
-### PipelineResources
+**Storage**: ConfigMap `repo-allowlist` in `pipeline-system` namespace
 
-Resources created for a pipeline.
+## Pipeline Parameters Data Model
+
+### Pipeline Parameters
 
 ```typescript
-interface PipelineResources {
-  pipelineId: string;                 // Pipeline identifier
-  namespace: string;                  // Kubernetes namespace
-  serviceAccount: eks.ServiceAccount; // Service account with IRSA
-  roleArn: string;                    // IAM role ARN
-  labels: { [key: string]: string };  // Applied labels
+interface PipelineParams {
+  repoUrl: string;       // Git repository URL
+  commitSha: string;     // Git commit SHA to build
+  tenantName: string;    // Tenant namespace for RBAC context
+  branch: string;        // Git branch (for reference)
 }
 ```
 
-## Kubernetes Resource Schemas
-
-### Namespace
-
+**Example**:
 ```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: pipeline-{pipelineId}
-  labels:
-    arbiter.pipeline/id: {pipelineId}
-    arbiter.pipeline/managed-by: aphex-cluster
+params:
+  - name: repo-url
+    value: "https://github.com/your-github-org/archon-agent"
+  - name: commit-sha
+    value: "abc123def456..."
+  - name: tenant-name
+    value: "archon"
+  - name: branch
+    value: "main"
 ```
 
-### Service Account (with IRSA)
+## Terraform Backend Configuration Data Model
 
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: {pipelineId}-sa
-  namespace: pipeline-{pipelineId}
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::{account}:role/{role-name}
+### Terraform Backend Config (Kubernetes Backend)
+
+```typescript
+interface TerraformBackendConfig {
+  backend: "kubernetes";
+  secretSuffix: string;      // Tenant name for state isolation
+  namespace: string;         // Tenant namespace
+  inClusterConfig: boolean;  // Use in-cluster credentials
+}
 ```
 
-### Resource Quota
-
+**Example**:
 ```yaml
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: pipeline-quota
-  namespace: pipeline-{pipelineId}
+terraform {
+  backend "kubernetes" {
+    secret_suffix    = "archon"
+    namespace        = "archon"
+    in_cluster_config = true
+  }
+}
+```
+
+### Terraform Backend Config (MinIO/S3 Backend)
+
+```typescript
+interface TerraformBackendConfigS3 {
+  backend: "s3";
+  bucket: string;        // State bucket name
+  key: string;           // State file key
+  region: string;        // AWS region or equivalent
+  endpoint: string;      // S3-compatible endpoint URL
+  skipCredentialsValidation: boolean;
+  skipMetadataApiCheck: boolean;
+  skipRegionValidation: boolean;
+  forcePathStyle: boolean;
+}
+```
+
+**Example**:
+```yaml
+terraform {
+  backend "s3" {
+    bucket = "terraform-state-archon"
+    key    = "state.tfstate"
+    region = "us-east-1"
+    endpoint = "http://minio.storage-system.svc.cluster.local:9000"
+    skip_credentials_validation = true
+    skip_metadata_api_check = true
+    skip_region_validation = true
+    force_path_style = true
+  }
+}
+```
+
+## Lighthouse Configuration Data Model
+
+### Lighthouse Config
+
+```typescript
+interface LighthouseConfig {
+  github: {
+    appId: string;              // GitHub App ID
+    appInstallationId: string;  // GitHub App Installation ID
+  };
+  allowlist: Array<{
+    org: string;                // GitHub organization
+    repos: string[];            // List of repository names
+  }>;
+}
+```
+
+**Example**:
+```yaml
+github:
+  app_id: "123456"
+  app_installation_id: "78901234"
+allowlist:
+  - org: "your-github-org"
+    repos:
+      - "archon-agent"
+      - "another-repo"
+```
+
+**Storage**: ConfigMap `lighthouse-config` in `pipeline-system` namespace
+
+## Tenant Resource Data Models
+
+### Namespace Labels
+
+```typescript
+interface NamespaceLabels {
+  "platform.arbiter.io/tenant": string;      // Tenant name
+  "platform.arbiter.io/repo": string;        // Repository (org/name)
+  "platform.arbiter.io/managed-by": string;  // "onboarding-controller"
+}
+```
+
+**Example**:
+```yaml
+labels:
+  platform.arbiter.io/tenant: "archon"
+  platform.arbiter.io/repo: "your-github-org/archon-agent"
+  platform.arbiter.io/managed-by: "onboarding-controller"
+```
+
+### Resource Quota Spec
+
+```typescript
+interface ResourceQuotaSpec {
+  hard: {
+    "requests.cpu": string;           // e.g., "4"
+    "requests.memory": string;        // e.g., "8Gi"
+    "limits.cpu": string;             // e.g., "8"
+    "limits.memory": string;          // e.g., "16Gi"
+    "persistentvolumeclaims": string; // e.g., "5"
+    "pods": string;                   // e.g., "20"
+  };
+}
+```
+
+**Example**:
+```yaml
 spec:
   hard:
-    requests.cpu: "10"
-    requests.memory: "20Gi"
-    limits.cpu: "20"
-    limits.memory: "40Gi"
-    persistentvolumeclaims: "10"
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    persistentvolumeclaims: "5"
+    pods: "20"
 ```
 
-### Network Policy
+### LimitRange Spec
 
+```typescript
+interface LimitRangeSpec {
+  limits: Array<{
+    type: "Container";
+    default: {
+      cpu: string;      // e.g., "500m"
+      memory: string;   // e.g., "512Mi"
+    };
+    defaultRequest: {
+      cpu: string;      // e.g., "100m"
+      memory: string;   // e.g., "128Mi"
+    };
+  }>;
+}
+```
+
+**Example**:
 ```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: pipeline-isolation
-  namespace: pipeline-{pipelineId}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+```
+
+### NetworkPolicy Spec
+
+```typescript
+interface NetworkPolicySpec {
+  podSelector: {};  // Empty selector matches all pods
+  policyTypes: ["Ingress", "Egress"];
+  ingress: Array<{
+    from: Array<{
+      podSelector?: {};
+      namespaceSelector?: {
+        matchLabels: { [key: string]: string };
+      };
+    }>;
+    ports?: Array<{
+      protocol: string;
+      port: number;
+    }>;
+  }>;
+  egress: Array<{
+    to: Array<{
+      podSelector?: {};
+      namespaceSelector?: {
+        matchLabels: { [key: string]: string };
+      };
+      ipBlock?: {
+        cidr: string;
+        except?: string[];
+      };
+    }>;
+    ports?: Array<{
+      protocol: string;
+      port: number;
+    }>;
+  }>;
+}
+```
+
+**Example**:
+```yaml
 spec:
   podSelector: {}
   policyTypes:
@@ -141,293 +335,175 @@ spec:
     - Egress
   ingress:
     - from:
-        - podSelector: {}  # Allow from same namespace
+        - podSelector: {}
   egress:
     - to:
-        - podSelector: {}  # Allow to same namespace
-    - to:  # Allow DNS
+        - podSelector: {}
+    - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: kube-system
-          podSelector:
-            matchLabels:
-              k8s-app: kube-dns
       ports:
         - protocol: UDP
           port: 53
-    - to:  # Allow internet (except metadata service)
+    - to:
         - ipBlock:
             cidr: 0.0.0.0/0
-            except:
-              - 169.254.169.254/32
 ```
 
-## Script I/O Structures
+## Permission Profile Data Models
 
-### Script Result (Output)
-
-All execution scripts output this structure:
+### Standard Profile
 
 ```typescript
-interface ScriptResult {
-  success: boolean;           // Operation success status
-  data: {                     // Result data or error information
-    [key: string]: any;
-  };
-  timestamp: string;          // ISO 8601 timestamp
-}
-```
-
-**Example (Success)**:
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Operation completed",
-    "artifact_path": "s3://bucket/artifacts/abc123.tar.gz"
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-**Example (Failure)**:
-```json
-{
-  "success": false,
-  "data": {
-    "error": "Failed to clone repository",
-    "error_type": "ResourceError",
-    "exit_code": 3
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### Build Artifact Metadata
-
-Metadata stored with build artifacts in S3:
-
-```typescript
-interface ArtifactMetadata {
-  commitSha: string;        // Git commit SHA
-  timestamp: string;        // Build timestamp (ISO 8601)
-  s3Bucket: string;         // S3 bucket name
-  s3Key: string;            // S3 object key
-  buildCommands: string[];  // Commands executed
-  artifactSize: number;     // Size in bytes
-}
-```
-
-**S3 Object Naming Convention**:
-```
-s3://{bucket}/artifacts/{commitSha[:8]}-{timestamp}.tar.gz
-```
-
-**Example**:
-```
-s3://my-artifacts/artifacts/abc12345-20240115T103000Z.tar.gz
-```
-
-### Deployment Result
-
-Result from deploying a CDK stack:
-
-```typescript
-interface DeploymentResult {
-  stackName: string;                    // CloudFormation stack name
-  stackId: string;                      // CloudFormation stack ID
-  outputs: { [key: string]: string };   // Stack outputs
-  status: 'CREATE_COMPLETE' | 'UPDATE_COMPLETE'; // Deployment status
-  duration: number;                     // Duration in seconds
-}
-```
-
-**Example**:
-```json
-{
-  "stackName": "MyApplicationStack",
-  "stackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/MyApplicationStack/...",
-  "outputs": {
-    "ApiEndpoint": "https://api.example.com",
-    "BucketName": "my-app-bucket"
-  },
-  "status": "UPDATE_COMPLETE",
-  "duration": 120.5
-}
-```
-
-### Test Result
-
-Result from executing tests:
-
-```typescript
-interface TestResult {
-  status: 'pass' | 'fail';      // Test status
-  exit_code: number;            // Exit code from test command
-  stdout: string;               // Standard output
-  stderr: string;               // Standard error
-  commands_executed: string[];  // Commands that were run
-}
-```
-
-**Example**:
-```json
-{
-  "status": "pass",
-  "exit_code": 0,
-  "stdout": "All tests passed\n",
-  "stderr": "",
-  "commands_executed": ["npm test", "pytest"]
-}
-```
-
-### Validation Result
-
-Result from validating configuration:
-
-```typescript
-interface ValidationResult {
-  schema_validation: {
-    passed: boolean;
-    error: string;
-  };
-  aws_credentials: {
-    passed: boolean;
-    error: string;
-  };
-  cdk_context: {
-    passed: boolean;
-    error: string;
+interface StandardProfile {
+  role: {
+    rules: Array<{
+      apiGroups: string[];
+      resources: string[];
+      verbs: string[];
+    }>;
   };
 }
 ```
 
 **Example**:
-```json
-{
-  "schema_validation": {
-    "passed": true,
-    "error": ""
-  },
-  "aws_credentials": {
-    "passed": true,
-    "error": ""
-  },
-  "cdk_context": {
-    "passed": true,
-    "error": ""
-  }
+```yaml
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns"]
+    verbs: ["get", "list", "create"]
+```
+
+### Elevated Profile
+
+```typescript
+interface ElevatedProfile {
+  role: {
+    rules: Array<{
+      apiGroups: string[];
+      resources: string[];
+      verbs: string[];
+    }>;
+  };
 }
+```
+
+**Example**:
+```yaml
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets", "services", "persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns", "pipelines", "tasks"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "create", "update", "delete"]
 ```
 
 ## Data Flow
 
-### Infrastructure Deployment Flow
+### Onboarding Flow
 
 ```
-User Input (AphexClusterProps)
+User creates RepoBinding
     ↓
-CDK Synthesis
+Onboarding Controller reconciles
     ↓
-CloudFormation Template
+Validate spec (org, namespace, profile)
     ↓
-AWS Resources (EKS, VPC, IAM)
+Create Namespace with labels
     ↓
-CloudFormation Exports
+Create ServiceAccount
     ↓
-Pipeline Stacks (Import Exports)
+Create Role (based on profile)
+    ↓
+Create RoleBinding
+    ↓
+Create ResourceQuota
+    ↓
+Create LimitRange
+    ↓
+Create NetworkPolicy
+    ↓
+Create Terraform backend secret
+    ↓
+Update allowlist ConfigMap
+    ↓
+Update RepoBinding status to Ready
 ```
 
-### Pipeline Creation Flow
+### Pipeline Execution Flow
 
 ```
-User Input (PipelineConfig)
+GitHub webhook event
     ↓
-AphexCluster.createPipeline()
+Lighthouse receives event
     ↓
-Kubernetes Manifests (Namespace, ServiceAccount, etc.)
+Check allowlist ConfigMap
     ↓
-Kubernetes API
+Lookup tenant namespace from allowlist
     ↓
-PipelineResources (returned to user)
+Create PipelineRun in tenant namespace
+    ↓
+PipelineRun executes as tenant ServiceAccount
+    ↓
+Pipeline pods run with RBAC constraints
+    ↓
+Pipeline accesses Terraform state via secret
+    ↓
+Pipeline completes, logs stored
 ```
 
-### Build and Deploy Flow
+### Configuration Update Flow
 
 ```
-GitHub Webhook
+User updates RepoBinding
     ↓
-Argo Events (EventSource)
+Onboarding Controller detects change
     ↓
-Argo Workflows (Workflow)
+Reconcile resources (idempotent)
     ↓
-Builder Container (aphex-build)
-    ↓
-Build Artifacts → S3
-    ↓
-Deployer Container (aphex-deploy-stack)
-    ↓
-CloudFormation Stacks
-    ↓
-Tester Container (aphex-test)
-    ↓
-Test Results → CloudWatch Logs
-```
-
-### Script Execution Flow
-
-```
-Workflow Step
-    ↓
-Container Start (with IRSA)
-    ↓
-Script Execution (aphex-*)
-    ↓
-AWS API Calls (using IRSA credentials)
-    ↓
-Structured JSON Output (stdout/stderr)
-    ↓
-CloudWatch Logs
+Update status
 ```
 
 ## Validation Rules
 
-### CDK Construct Validation
+### RepoBinding Validation
 
-Validation is performed by AWS CDK and CloudFormation:
-- Resource names must follow AWS naming conventions
-- IAM policies must be valid JSON
-- VPC CIDR blocks must not overlap
-- EKS version must be supported
+- `repoOrg`: Must match `^[a-z0-9-]+$`, must be in approved list
+- `repoName`: Must match `^[a-z0-9-]+$`
+- `tenantName`: Must match `^[a-z0-9-]+$`, cannot be privileged namespace
+- `permissionProfile`: Must be "standard" or "elevated"
 
-### Kubernetes Resource Validation
+### Namespace Validation
 
-Validation is performed by Kubernetes API server:
-- Resource names must be valid DNS labels (lowercase alphanumeric and hyphens)
-- Namespaces must be unique
-- Service accounts must be in valid namespaces
-- Resource quotas must have valid units
+- Name must be valid DNS label (lowercase alphanumeric and hyphens)
+- Name cannot be privileged (kube-system, pipeline-system, tekton-pipelines, etc.)
+- Name must be unique in cluster
 
-### Script Input Validation
+### Allowlist Validation
 
-Validation is performed by execution scripts:
-- Repository URLs must be valid Git URLs
-- Commit SHAs must be valid Git commit hashes (40 hex characters)
-- S3 bucket names must follow S3 naming rules
-- Environment variables must be set (AWS_REGION, AWS_ACCOUNT, etc.)
+- Organization must be string
+- Repository name must be string
+- Tenant must be valid namespace name
+- Enabled must be boolean (default: true)
 
-### Script Output Validation
+### Pipeline Parameters Validation
 
-All scripts must output valid JSON:
-- `success` field must be boolean
-- `data` field must be object
-- `timestamp` field must be ISO 8601 format
-- Exit code must match success status (0 for success, non-zero for failure)
+- `repoUrl`: Must be valid Git URL
+- `commitSha`: Must be valid Git commit hash (40 hex characters)
+- `tenantName`: Must be existing namespace
+- `branch`: Must be string
 
 **Source**
-- `lib/constructs/aphex-cluster.ts`
-- `containers/common/aphex_common.py`
-- `containers/deployer/aphex-deploy-pipeline`
-- `containers/deployer/aphex-deploy-stack`
-- `containers/tester/aphex-test`
-- `containers/validator/aphex-validate`
+- `.kiro/specs/jenkinsx-platform/design.md`
+- `.kiro/specs/jenkinsx-platform/requirements.md`
+- `platform/crds/README.md`
+- `platform/onboarding/README.md`
+- `platform/tenancy/README.md`

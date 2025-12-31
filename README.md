@@ -28,7 +28,72 @@ Complete documentation is available in `.kiro/docs/`:
 
 ## Quick Start
 
-Documentation for bootstrap and deployment will be added as the platform is implemented.
+### Prerequisites
+
+- Kubernetes cluster (1.24+) with RBAC enabled
+- `kubectl` configured with cluster access
+- `helm` 3.x installed
+- GitHub organization with admin access
+
+### Bootstrap the Platform
+
+1. **Clone this repository:**
+   ```bash
+   git clone https://github.com/your-org/arbiter-pipeline-infrastructure.git
+   cd arbiter-pipeline-infrastructure
+   ```
+
+2. **Set up GitHub App:**
+   - Create a GitHub App in your organization with webhook permissions
+   - Note the App ID and Installation ID
+   - Download the private key
+
+3. **Configure environment:**
+   ```bash
+   export GITHUB_APP_ID="your-app-id"
+   export GITHUB_APP_INSTALLATION_ID="your-installation-id"
+   ```
+
+4. **Run bootstrap:**
+   ```bash
+   cd platform/bootstrap
+   ./bootstrap.sh
+   ```
+
+5. **Verify installation:**
+   ```bash
+   kubectl get pods -n pipeline-system
+   kubectl get pods -n tekton-pipelines
+   ```
+
+### Onboard a Repository
+
+1. **Create a RepoBinding:**
+   ```yaml
+   apiVersion: platform.arbiter.io/v1alpha1
+   kind: RepoBinding
+   metadata:
+     name: my-repo-binding
+     namespace: pipeline-system
+   spec:
+     repoOrg: "your-github-org"
+     repoName: "your-repo"
+     tenantName: "my-tenant"
+     permissionProfile: "standard"
+   ```
+
+2. **Apply the RepoBinding:**
+   ```bash
+   kubectl apply -f repobinding.yaml
+   ```
+
+3. **Verify onboarding:**
+   ```bash
+   kubectl get repobinding my-repo-binding -n pipeline-system
+   kubectl get namespace my-tenant
+   ```
+
+For detailed instructions, see [Operations Guide](.kiro/docs/operations.md).
 
 ## Archon Integration
 

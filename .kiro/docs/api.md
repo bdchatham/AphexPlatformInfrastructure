@@ -2,435 +2,512 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure provides two types of APIs:
+The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure.
 
-1. **CDK Construct API**: TypeScript interfaces for creating and managing the infrastructure
-2. **Execution Script API**: Command-line interfaces for the container execution scripts
+## RepoBinding API
 
-## CDK Construct API
+### RepoBinding Custom Resource
 
-### AphexCluster
+The primary API for onboarding repositories to the platform.
 
-The main construct for creating an EKS cluster with Argo Workflows and Argo Events.
+**API Group**: `platform.arbiter.io`  
+**API Version**: `v1alpha1`  
+**Kind**: `RepoBinding`  
+**Scope**: Namespaced (must be created in `pipeline-system` namespace)
 
-#### Constructor
+### RepoBinding Spec
 
-```typescript
-new AphexCluster(scope: Construct, id: string, props?: AphexClusterProps)
+```yaml
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: <binding-name>
+  namespace: pipeline-system
+spec:
+  repoOrg: <string>              # Required: GitHub organization
+  repoName: <string>             # Required: Repository name
+  tenantName: <string>           # Required: Tenant namespace name
+  permissionProfile: <string>    # Optional: "standard" or "elevated" (default: "standard")
 ```
 
-#### Properties (AphexClusterProps)
+**Field Descriptions**:
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `clusterName` | `string` | `'arbiter-pipeline-cluster'` | Name of the EKS cluster |
-| `minNodes` | `number` | `2` | Minimum number of nodes |
-| `maxNodes` | `number` | `10` | Maximum number of nodes |
-| `instanceType` | `ec2.InstanceType` | `t3.medium` | Instance type for nodes |
-| `kubernetesVersion` | `eks.KubernetesVersion` | `1.28` | Kubernetes version |
-| `vpc` | `ec2.IVpc` | (new VPC) | VPC to use for the cluster |
-| `argoNamespace` | `string` | `'argo'` | Namespace for Argo components |
-| `enableContainerInsights` | `boolean` | `true` | Enable CloudWatch Container Insights |
+| Field | Type | Required | Description | Validation |
+|-------|------|----------|-------------|------------|
+| `repoOrg` | string | Yes | GitHub organization name | Must match pattern `^[a-z0-9-]+$` |
+| `repoName` | string | Yes | Repository name | Must match pattern `^[a-z0-9-]+$` |
+| `tenantName` | string | Yes | Tenant namespace name | Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace |
+| `permissionProfile` | string | No | Permission level | Must be "standard" or "elevated" (default: "standard") |
 
-#### Public Properties
+**Validation Rules**:
+- `repoOrg` must be in the approved organization list
+- `tenantName` cannot be a privileged namespace (kube-system, pipeline-system, etc.)
+- `permissionProfile` must be one of the predefined profiles
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `cluster` | `eks.Cluster` | The EKS cluster |
-| `oidcProvider` | `iam.IOpenIdConnectProvider` | OIDC provider for IRSA |
-| `kubectlRoleArn` | `string` | kubectl IAM role ARN |
-| `clusterNameExport` | `string` | CloudFormation export name for cluster name |
-| `oidcProviderArnExport` | `string` | CloudFormation export name for OIDC provider ARN |
+### RepoBinding Status
 
-#### Methods
+The onboarding controller updates the status to reflect provisioning progress.
 
-##### createServiceAccountWithRole()
-
-Create a Kubernetes service account with an IAM role (IRSA).
-
-```typescript
-createServiceAccountWithRole(
-  id: string,
-  namespace: string,
-  serviceAccountName: string,
-  policyStatements: iam.PolicyStatement[]
-): eks.ServiceAccount
+```yaml
+status:
+  phase: <string>                    # "Pending" | "Provisioning" | "Ready" | "Failed"
+  message: <string>                  # Human-readable status message
+  namespaceCreated: <boolean>        # Whether tenant namespace was created
+  serviceAccountCreated: <boolean>   # Whether service account was created
+  rbacConfigured: <boolean>          # Whether RBAC was configured
+  allowlistUpdated: <boolean>        # Whether allowlist was updated
+  lastReconcileTime: <string>        # ISO 8601 timestamp of last reconciliation
 ```
 
-**Parameters**:
-- `id`: Construct ID
-- `namespace`: Kubernetes namespace
-- `serviceAccountName`: Name of the service account
-- `policyStatements`: IAM policy statements to attach
+**Phase Values**:
+- `Pending`: RepoBinding created, waiting for reconciliation
+- `Provisioning`: Onboarding controller is provisioning resources
+- `Ready`: All resources provisioned successfully
+- `Failed`: Provisioning failed (see message for details)
 
-**Returns**: The created service account
+### Usage Examples
 
-##### createPipeline()
+**Example 1: Standard Onboarding**
 
-Create an isolated pipeline with its own namespace and service account.
-
-```typescript
-createPipeline(config: PipelineConfig): PipelineResources
+```yaml
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: archon-binding
+  namespace: pipeline-system
+spec:
+  repoOrg: "your-github-org"
+  repoName: "archon-agent"
+  tenantName: "archon"
+  permissionProfile: "standard"
 ```
 
-**Parameters** (PipelineConfig):
-- `pipelineId`: Unique identifier for the pipeline
-- `namespace`: (optional) Kubernetes namespace (defaults to `pipeline-{pipelineId}`)
-- `policyStatements`: IAM policy statements for the pipeline's service account
-- `labels`: (optional) Additional labels for pipeline resources
+**Example 2: Elevated Permissions**
 
-**Returns** (PipelineResources):
-- `pipelineId`: The pipeline's unique identifier
-- `namespace`: The pipeline's namespace
-- `serviceAccount`: The pipeline's service account with IRSA
-- `roleArn`: The IAM role ARN for the service account
-- `labels`: Labels applied to pipeline resources
-
-**Creates**:
-- Kubernetes namespace with labels
-- Service account with IRSA
-- Resource quota to prevent resource exhaustion
-- Network policy for namespace isolation
-- Role binding for workflow execution
-
-##### deletePipeline()
-
-Delete a pipeline and its resources without affecting other pipelines.
-
-```typescript
-deletePipeline(pipelineId: string): void
+```yaml
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: infrastructure-binding
+  namespace: pipeline-system
+spec:
+  repoOrg: "your-github-org"
+  repoName: "infrastructure-repo"
+  tenantName: "infrastructure"
+  permissionProfile: "elevated"
 ```
 
-**Parameters**:
-- `pipelineId`: The pipeline ID to delete
+**Example 3: Check Status**
 
-**Note**: In CDK, this removes the pipeline from tracking. Actual deletion would be done via `kubectl delete namespace <namespace>`.
+```bash
+# Get RepoBinding status
+kubectl get repobinding archon-binding -n pipeline-system
 
-##### fromClusterAttributes() (static)
+# Get detailed status
+kubectl describe repobinding archon-binding -n pipeline-system
 
-Import an existing cluster by its attributes.
-
-```typescript
-static fromClusterAttributes(
-  scope: Construct,
-  id: string,
-  attrs: ClusterAttributes
-): IAphexCluster
+# Get status as YAML
+kubectl get repobinding archon-binding -n pipeline-system -o yaml
 ```
 
-**Parameters** (ClusterAttributes):
-- `clusterName`: EKS cluster name
-- `oidcProviderArn`: OIDC provider ARN
-- `kubectlRoleArn`: kubectl IAM role ARN
+**Example Status Output**:
 
-**Returns**: An imported cluster reference
-
-#### Usage Example
-
-```typescript
-import { AphexCluster } from 'arbiter-pipeline-infrastructure';
-import * as iam from 'aws-cdk-lib/aws-iam';
-
-// Create the cluster
-const cluster = new AphexCluster(this, 'MyCluster', {
-  clusterName: 'my-pipeline-cluster',
-  minNodes: 3,
-  maxNodes: 20,
-});
-
-// Create an isolated pipeline
-const pipeline = cluster.createPipeline({
-  pipelineId: 'archon-prod',
-  policyStatements: [
-    new iam.PolicyStatement({
-      actions: ['s3:GetObject', 's3:PutObject'],
-      resources: ['arn:aws:s3:::my-artifact-bucket/*'],
-    }),
-    new iam.PolicyStatement({
-      actions: ['cloudformation:*'],
-      resources: ['*'],
-    }),
-  ],
-});
-
-console.log(`Pipeline created in namespace: ${pipeline.namespace}`);
-console.log(`Service account role ARN: ${pipeline.roleArn}`);
+```yaml
+status:
+  phase: Ready
+  message: "All resources provisioned successfully"
+  namespaceCreated: true
+  serviceAccountCreated: true
+  rbacConfigured: true
+  allowlistUpdated: true
+  lastReconcileTime: "2024-12-31T10:00:00Z"
 ```
 
-## Execution Script APIs
+## Repository Allowlist API
 
-All execution scripts follow a common pattern:
-- Accept command-line arguments
-- Read environment variables for configuration
-- Output structured JSON to stdout (success) or stderr (failure)
-- Exit with standard exit codes
+The allowlist is managed through a ConfigMap in the `pipeline-system` namespace.
 
-### Exit Codes
+### Allowlist ConfigMap
 
-| Code | Name | Description |
-|------|------|-------------|
-| 0 | SUCCESS | Operation completed successfully |
-| 1 | INPUT_ERROR | Invalid parameters or missing arguments |
-| 2 | AUTH_ERROR | AWS credential failures or IRSA issues |
-| 3 | RESOURCE_ERROR | S3 access failures, repository clone failures |
-| 4 | EXECUTION_ERROR | Build failures, deployment failures, test failures |
-| 5 | TIMEOUT_ERROR | Operations exceeding time limits |
-
-### Output Format
-
-All scripts output structured JSON:
-
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Operation completed",
-    ...
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: repo-allowlist
+  namespace: pipeline-system
+data:
+  allowlist.yaml: |
+    repos:
+      - org: "your-github-org"
+        name: "archon-agent"
+        tenant: "archon"
+        enabled: true
+      - org: "your-github-org"
+        name: "another-repo"
+        tenant: "another"
+        enabled: true
 ```
 
-### aphex-build
+**Field Descriptions**:
 
-Clone a repository, run build commands, and upload artifacts to S3.
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `org` | string | Yes | GitHub organization |
+| `name` | string | Yes | Repository name |
+| `tenant` | string | Yes | Tenant namespace |
+| `enabled` | boolean | No | Whether triggers are active (default: true) |
 
 **Usage**:
+
 ```bash
-aphex-build <repo-url> <commit-sha> <build-commands> <artifact-bucket>
+# View allowlist
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml
+
+# Edit allowlist (manual - not recommended)
+kubectl edit configmap repo-allowlist -n pipeline-system
+
+# Lighthouse automatically reloads on ConfigMap changes
 ```
 
-**Arguments**:
-- `repo-url`: Git repository URL
-- `commit-sha`: Git commit SHA to build
-- `build-commands`: Build commands to execute (semicolon-separated)
-- `artifact-bucket`: S3 bucket for artifact upload
+**Note**: The onboarding controller automatically updates the allowlist when RepoBinding resources are created. Manual editing is not recommended.
 
-**Environment Variables**:
-- `AWS_REGION`: AWS region for S3 operations (required)
-- `AWS_ROLE_ARN`: IAM role ARN for IRSA (required)
+## Lighthouse Configuration API
 
-**Output** (success):
+Lighthouse configuration is managed through a ConfigMap.
+
+### Lighthouse ConfigMap
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lighthouse-config
+  namespace: pipeline-system
+data:
+  config.yaml: |
+    github:
+      app_id: "${GITHUB_APP_ID}"
+      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
+    allowlist:
+      - org: "your-github-org"
+        repos:
+          - "archon-agent"
+          - "another-repo"
+```
+
+**Configuration Fields**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `github.app_id` | string | GitHub App ID |
+| `github.app_installation_id` | string | GitHub App Installation ID |
+| `allowlist` | array | List of allowed organizations and repositories |
+
+## Tenant Resources API
+
+When a RepoBinding is created, the onboarding controller provisions these Kubernetes resources:
+
+### Namespace
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${TENANT_NAME}
+  labels:
+    platform.arbiter.io/tenant: "${TENANT_NAME}"
+    platform.arbiter.io/repo: "${REPO_ORG}/${REPO_NAME}"
+    platform.arbiter.io/managed-by: "onboarding-controller"
+```
+
+### Service Account
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pipeline-runner
+  namespace: ${TENANT_NAME}
+```
+
+### Role (Standard Profile)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-runner
+  namespace: ${TENANT_NAME}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns"]
+    verbs: ["get", "list", "create"]
+```
+
+### Role (Elevated Profile)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-runner
+  namespace: ${TENANT_NAME}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "configmaps", "secrets", "services", "persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns", "pipelines", "tasks"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+```
+
+### RoleBinding
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-runner
+  namespace: ${TENANT_NAME}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: pipeline-runner
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runner
+    namespace: ${TENANT_NAME}
+```
+
+### ResourceQuota
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: ${TENANT_NAME}
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    persistentvolumeclaims: "5"
+    pods: "20"
+```
+
+### LimitRange
+
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tenant-limits
+  namespace: ${TENANT_NAME}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+```
+
+### NetworkPolicy
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tenant-isolation
+  namespace: ${TENANT_NAME}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+```
+
+## Pipeline Catalog API
+
+Tenants reference shared Tekton Tasks and Pipelines from the `pipeline-catalog` namespace.
+
+### Referencing Catalog Tasks
+
+```yaml
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: my-deployment
+  namespace: my-tenant
+spec:
+  pipelineRef:
+    name: cdktf-deploy-pipeline
+    namespace: pipeline-catalog
+  params:
+    - name: repo-url
+      value: "https://github.com/org/repo"
+    - name: commit-sha
+      value: "abc123..."
+    - name: tenant-name
+      value: "my-tenant"
+```
+
+### Available Catalog Tasks
+
+| Task Name | Description | Parameters |
+|-----------|-------------|------------|
+| `git-clone` | Clone repository at commit SHA | `url`, `revision` |
+| `cdktf-synth` | Run cdktf synth | None |
+| `cdktf-deploy` | Run cdktf deploy with remote state | `tenant-name` |
+| `upload-artifacts` | Upload logs/outputs to external storage | `bucket`, `key` |
+
+### Available Catalog Pipelines
+
+| Pipeline Name | Description | Parameters |
+|---------------|-------------|------------|
+| `cdktf-deploy-pipeline` | Complete CDKTF deployment workflow | `repo-url`, `commit-sha`, `tenant-name` |
+
+## Error Responses
+
+### RepoBinding Validation Errors
+
+**Invalid Organization**:
+```yaml
+status:
+  phase: Failed
+  message: "Repository organization not in approved list"
+  namespaceCreated: false
+  serviceAccountCreated: false
+  rbacConfigured: false
+  allowlistUpdated: false
+```
+
+**Invalid Namespace Pattern**:
+```yaml
+status:
+  phase: Failed
+  message: "Namespace name must match pattern ^[a-z0-9-]+$"
+  namespaceCreated: false
+  serviceAccountCreated: false
+  rbacConfigured: false
+  allowlistUpdated: false
+```
+
+**Privileged Namespace**:
+```yaml
+status:
+  phase: Failed
+  message: "Cannot create namespace with privileged name"
+  namespaceCreated: false
+  serviceAccountCreated: false
+  rbacConfigured: false
+  allowlistUpdated: false
+```
+
+### Lighthouse Event Rejections
+
+**Repository Not in Allowlist**:
 ```json
 {
-  "success": true,
-  "data": {
-    "message": "Build completed successfully",
-    "artifact_path": "s3://bucket/artifacts/abc123-20240115.tar.gz",
-    "commit_sha": "abc123...",
-    "artifact_size": 1234567
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
+  "level": "warn",
+  "msg": "Repository not in allowlist",
+  "repo": "org/unauthorized-repo",
+  "event": "push",
+  "timestamp": "2024-12-31T10:00:00Z"
 }
 ```
 
-### aphex-deploy-pipeline
+**Invalid Webhook Signature**:
+```json
+{
+  "level": "error",
+  "msg": "Invalid webhook signature",
+  "repo": "org/repo",
+  "event": "push",
+  "timestamp": "2024-12-31T10:00:00Z"
+}
+```
 
-Deploy pipeline infrastructure (the cluster itself).
+## Authentication
 
-**Usage**:
+### OIDC Authentication
+
+Users authenticate via OIDC to create RepoBinding resources.
+
+**kubectl Configuration**:
+
 ```bash
-aphex-deploy-pipeline <repo-url> <commit-sha> <stack-name> <artifact-bucket>
+# Configure kubectl with OIDC
+kubectl config set-credentials oidc \
+  --exec-api-version=client.authentication.k8s.io/v1beta1 \
+  --exec-command=kubectl \
+  --exec-arg=oidc-login \
+  --exec-arg=get-token \
+  --exec-arg=--oidc-issuer-url=https://dex.homelab.local \
+  --exec-arg=--oidc-client-id=kubernetes \
+  --exec-arg=--oidc-client-secret=kubernetes-client-secret
+
+# Use OIDC credentials
+kubectl config set-context --current --user=oidc
 ```
 
-**Arguments**:
-- `repo-url`: Git repository URL
-- `commit-sha`: Git commit SHA to deploy
-- `stack-name`: CDK stack name to deploy
-- `artifact-bucket`: S3 bucket for artifacts (not used but required for consistency)
+**RBAC for Onboarding**:
 
-**Environment Variables**:
-- `AWS_REGION`: Target AWS region (required)
-- `AWS_ACCOUNT`: Target AWS account (required)
-- `AWS_ROLE_ARN`: IAM role ARN for IRSA (required)
+Users in the `engineering` OIDC group can create RepoBinding resources:
 
-**Output** (success):
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Pipeline deployment completed successfully",
-    "stack_name": "ArbiterPipelineInfrastructureStack",
-    "commit_sha": "abc123...",
-    "deployment_result": {
-      "stack_name": "ArbiterPipelineInfrastructureStack",
-      "outputs": {...},
-      "status": "DEPLOYED"
-    }
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### aphex-deploy-stack
-
-Deploy application stacks from build artifacts.
-
-**Usage**:
-```bash
-aphex-deploy-stack <repo-url> <commit-sha> <environment> <stack-list> <artifact-bucket>
-```
-
-**Arguments**:
-- `repo-url`: Git repository URL
-- `commit-sha`: Git commit SHA to deploy
-- `environment`: Target environment (e.g., dev, staging, prod)
-- `stack-list`: Comma-separated list of stack names
-- `artifact-bucket`: S3 bucket containing build artifacts
-
-**Environment Variables**:
-- `AWS_REGION`: Target AWS region (required)
-- `AWS_ACCOUNT`: Target AWS account (required)
-- `AWS_ROLE_ARN`: IAM role ARN for IRSA (required)
-
-**Output** (success):
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Stack deployment completed successfully",
-    "environment": "prod",
-    "commit_sha": "abc123...",
-    "stacks_deployed": 3,
-    "deployment_results": [
-      {
-        "stack_name": "MyStack1",
-        "outputs": {...},
-        "status": "DEPLOYED",
-        "duration": 120.5
-      },
-      ...
-    ]
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### aphex-test
-
-Execute test commands and report results.
-
-**Usage**:
-```bash
-aphex-test <test-commands>
-```
-
-**Arguments**:
-- `test-commands`: Test commands to execute (semicolon-separated)
-
-**Environment Variables**:
-- `AWS_REGION`: AWS region (optional, for tests that interact with AWS)
-- `AWS_ROLE_ARN`: IAM role ARN for IRSA (optional)
-
-**Output** (success):
-```json
-{
-  "success": true,
-  "data": {
-    "message": "Tests passed",
-    "test_results": {
-      "status": "pass",
-      "exit_code": 0,
-      "stdout": "...",
-      "stderr": "...",
-      "commands_executed": ["npm test", "pytest"]
-    }
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-### aphex-validate
-
-Validate configuration files and prerequisites.
-
-**Usage**:
-```bash
-aphex-validate <config-path>
-```
-
-**Arguments**:
-- `config-path`: Path to configuration file (JSON or YAML)
-
-**Environment Variables**:
-- `AWS_REGION`: AWS region (optional)
-- `AWS_ROLE_ARN`: IAM role ARN for IRSA (optional)
-
-**Output** (success):
-```json
-{
-  "success": true,
-  "data": {
-    "message": "All validations passed",
-    "validation_results": {
-      "schema_validation": {"passed": true, "error": ""},
-      "aws_credentials": {"passed": true, "error": ""},
-      "cdk_context": {"passed": true, "error": ""}
-    }
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
-```
-
-## CloudFormation Exports
-
-Pipeline stacks can import cluster attributes using CloudFormation exports:
-
-```typescript
-import * as cdk from 'aws-cdk-lib';
-
-// Import cluster name
-const clusterName = cdk.Fn.importValue('ArbiterCluster-ClusterName');
-
-// Import OIDC provider ARN
-const oidcProviderArn = cdk.Fn.importValue('ArbiterCluster-OIDCProviderArn');
-
-// Import kubectl role ARN
-const kubectlRoleArn = cdk.Fn.importValue('ArbiterCluster-KubectlRoleArn');
-
-// Import cluster security group ID
-const securityGroupId = cdk.Fn.importValue('ArbiterCluster-ClusterSecurityGroupId');
-```
-
-## Error Handling
-
-### CDK Construct Errors
-
-The AphexCluster construct throws standard TypeScript errors:
-
-```typescript
-try {
-  const pipeline = cluster.createPipeline({
-    pipelineId: 'my-pipeline',
-    policyStatements: [...],
-  });
-} catch (error) {
-  if (error.message.includes('already exists')) {
-    // Handle duplicate pipeline
-  }
-}
-```
-
-### Execution Script Errors
-
-Scripts output structured error information to stderr:
-
-```json
-{
-  "success": false,
-  "data": {
-    "error": "Failed to clone repository: Permission denied",
-    "error_type": "ResourceError",
-    "exit_code": 3
-  },
-  "timestamp": "2024-01-15T10:30:00.000Z"
-}
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: repo-onboarder
+rules:
+  - apiGroups: ["platform.arbiter.io"]
+    resources: ["repobindings"]
+    verbs: ["create", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: engineering-onboarders
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: repo-onboarder
+subjects:
+  - kind: Group
+    name: "system:authenticated:engineering"
+    apiGroup: rbac.authorization.k8s.io
 ```
 
 **Source**
-- `lib/constructs/aphex-cluster.ts`
-- `containers/deployer/aphex-deploy-pipeline`
-- `containers/deployer/aphex-deploy-stack`
-- `containers/tester/aphex-test`
-- `containers/validator/aphex-validate`
-- `containers/common/aphex_common.py`
+- `.kiro/specs/jenkinsx-platform/design.md`
+- `.kiro/specs/jenkinsx-platform/requirements.md`
+- `platform/crds/README.md`
+- `platform/onboarding/README.md`
+- `platform/lighthouse/README.md`

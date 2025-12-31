@@ -4,290 +4,418 @@
 
 ### What is this repository for?
 
-The Arbiter Pipeline Infrastructure provides a shared execution environment for deploying CDK applications across the Arbiter agent suite. It creates an EKS cluster with Argo Workflows and Argo Events, provides pre-built container images with execution scripts, and exports cluster references for pipeline packages to consume.
+The Arbiter Pipeline Infrastructure provides a shared CI/CD platform cluster for multiple product teams using Jenkins X, Lighthouse, and Tekton. It enables self-service repository onboarding with strong tenant isolation through Kubernetes namespaces, RBAC, and network policies.
 
 ### How does this fit into the larger system?
 
-This infrastructure package is the foundation for all Arbiter agent deployment pipelines. Archon (the first Arbiter agent) and future agents will use this infrastructure to deploy their CDK applications. The infrastructure is shared across multiple agents while maintaining isolation through Kubernetes namespaces and IRSA.
+This platform provides shared CI/CD infrastructure for the Arbiter agent suite and product teams. Teams can onboard their repositories, which automatically provisions isolated tenant resources and enables automated CDKTF deployments on merge to main.
 
-### What is the difference between AphexCluster and Arbiter Pipeline Infrastructure?
+### What is the difference between Jenkins X and this platform?
 
-AphexCluster is the CDK construct that creates the EKS cluster. Arbiter Pipeline Infrastructure is the complete package that includes the construct, container images, execution scripts, and documentation. Think of AphexCluster as the core component, and Arbiter Pipeline Infrastructure as the full solution.
+Jenkins X is the underlying CI/CD framework. This platform is a complete solution built on Jenkins X that adds:
+- Self-service onboarding via RepoBinding CRD
+- Automated tenant provisioning
+- OIDC authentication
+- Repository allowlist security
+- Golden pipeline catalog
+- Terraform state management
 
-### Can I use this infrastructure for non-Arbiter projects?
+### Can I use this platform for non-CDKTF projects?
 
-Yes! The infrastructure is generic and can be used for any CDK deployment pipeline. The container images and execution scripts work with any CDK project. However, it's designed with Arbiter's specific needs in mind (multi-agent isolation, IRSA, etc.).
+Yes! While the platform includes a CDKTF pipeline in the catalog, you can define custom pipelines in your repository for any build/deploy workflow. The platform provides the infrastructure and isolation; you define the pipeline steps.
 
-### What is IRSA and why is it important?
+### What is a tenant?
 
-IRSA (IAM Roles for Service Accounts) allows Kubernetes pods to assume AWS IAM roles without long-lived credentials. This is critical for security because:
-1. No AWS access keys stored in containers or environment variables
-2. Credentials are automatically rotated by Kubernetes
-3. Each pipeline can have isolated AWS permissions
-4. Follows AWS security best practices
+A tenant is a product team with an isolated namespace and dedicated pipeline resources. Each tenant gets:
+- Dedicated Kubernetes namespace
+- Service account with least-privilege RBAC
+- Resource quotas to prevent exhaustion
+- Network policies for isolation
+- Terraform backend configuration
 
 ## Development Questions
 
-### How do I set up my development environment?
+### How do I onboard my repository?
+
+Create a RepoBinding resource:
 
 ```bash
-# Quick setup (recommended)
-make setup
-
-# Or step by step:
-make install                    # Install dependencies
-make install-integration-tools  # Install kind, kubectl, helm
-make build                      # Build TypeScript
+kubectl apply -f - <<EOF
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: my-repo-binding
+  namespace: pipeline-system
+spec:
+  repoOrg: "your-github-org"
+  repoName: "your-repo"
+  tenantName: "my-tenant"
+  permissionProfile: "standard"
+EOF
 ```
 
-See `README.md` for detailed setup instructions.
-
-### How do I run tests?
+Then verify onboarding:
 
 ```bash
-# Unit tests (TypeScript)
-npm run test:unit
-
-# Property-based tests (Python)
-pytest test/
-
-# Property-based tests (TypeScript)
-npm test -- test/constructs/aphex-cluster.property.test.ts
-
-# Integration tests (requires Docker)
-npm run test:integration:full
-
-# All tests
-make test
+kubectl get repobinding my-repo-binding -n pipeline-system
+kubectl get namespace my-tenant
 ```
 
-### How do I build container images locally?
+### How do I define a pipeline in my repository?
+
+Create a `.lighthouse/jenkins-x/` directory in your repository with pipeline definitions:
+
+```yaml
+# .lighthouse/jenkins-x/triggers.yaml
+apiVersion: config.lighthouse.jenkins-x.io/v1alpha1
+kind: TriggerConfig
+spec:
+  presubmits:
+    - name: pr-build
+      context: pr-build
+      always_run: true
+      pipeline_run_spec:
+        pipelineRef:
+          name: cdktf-deploy-pipeline
+          namespace: pipeline-catalog
+        params:
+          - name: repo-url
+            value: $(body.repository.clone_url)
+          - name: commit-sha
+            value: $(body.pull_request.head.sha)
+          - name: tenant-name
+            value: my-tenant
+  postsubmits:
+    - name: deploy
+      context: deploy
+      branches:
+        - main
+      pipeline_run_spec:
+        pipelineRef:
+          name: cdktf-deploy-pipeline
+          namespace: pipeline-catalog
+        params:
+          - name: repo-url
+            value: $(body.repository.clone_url)
+          - name: commit-sha
+            value: $(body.after)
+          - name: tenant-name
+            value: my-tenant
+```
+
+### How do I test my pipeline locally?
+
+You can create a PipelineRun manually:
 
 ```bash
-# Build all images
-npm run build:images
-
-# Build with version tag
-./scripts/build-images.sh --version v1.0.0
-
-# Build and push to registry
-./scripts/build-images.sh --version v1.0.0 --push --registry <registry-url>
+kubectl create -f - <<EOF
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: test-run
+  namespace: my-tenant
+spec:
+  pipelineRef:
+    name: cdktf-deploy-pipeline
+    namespace: pipeline-catalog
+  params:
+    - name: repo-url
+      value: "https://github.com/your-github-org/your-repo"
+    - name: commit-sha
+      value: "abc123..."
+    - name: tenant-name
+      value: "my-tenant"
+  serviceAccountName: pipeline-runner
+EOF
 ```
 
-### How do I test changes to execution scripts?
+### How do I view pipeline logs?
 
 ```bash
-# Build the container image
-docker build -t test-builder containers/builder/
+# List PipelineRuns
+kubectl get pipelineruns -n my-tenant
 
-# Run the script in the container
-docker run --rm \
-  -e AWS_REGION=us-east-1 \
-  -e AWS_ROLE_ARN=arn:aws:iam::123456789012:role/test-role \
-  test-builder \
-  aphex-build <repo-url> <commit-sha> "npm install && npm run build" <bucket>
+# Get PipelineRun details
+kubectl describe pipelinerun <name> -n my-tenant
+
+# View logs
+kubectl logs <pod-name> -n my-tenant
+
+# Stream logs
+kubectl logs -f <pod-name> -n my-tenant
 ```
 
-### How do I add a new execution script?
+### How do I add custom Tekton Tasks?
 
-1. Create the script in the appropriate container directory (e.g., `containers/builder/my-script`)
-2. Make it executable: `chmod +x containers/builder/my-script`
-3. Add it to the Dockerfile: `COPY my-script /usr/local/bin/`
-4. Write unit tests in `test/scripts/`
-5. Write property-based tests if applicable
-6. Document the script interface in `.kiro/docs/api.md`
+You can define custom Tasks in your repository and reference them in your pipeline:
+
+```yaml
+# my-repo/.lighthouse/jenkins-x/tasks/my-custom-task.yaml
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: my-custom-task
+spec:
+  steps:
+    - name: custom-step
+      image: alpine:latest
+      script: |
+        #!/bin/sh
+        echo "Running custom task"
+```
+
+Then reference it in your pipeline definition.
 
 ## Operational Questions
 
-### How do I deploy changes?
+### How do I check if my repository is allowlisted?
 
 ```bash
-# Deploy infrastructure changes
-cdk deploy
+# View allowlist
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml | grep "your-repo"
 
-# Deploy container image changes
-./scripts/build-images.sh --version v1.1.0 --push
-# Then update WorkflowTemplates to use new version
+# Or check RepoBinding status
+kubectl get repobinding <name> -n pipeline-system
 ```
 
-### What should I do if pods are stuck in Pending state?
+### What should I do if my repository isn't triggering pipelines?
 
-Check the pod description for details:
-```bash
-kubectl describe pod <pod-name> -n <namespace>
-```
-
-Common causes:
-- Insufficient cluster capacity (increase `maxNodes`)
-- Resource quota exceeded (adjust quota or reduce requests)
-- No nodes available (check autoscaling configuration)
-
-See the "Common Issues" section in `.kiro/docs/operations.md` for detailed troubleshooting.
-
-### What should I do if workflows fail with permission errors?
-
-Verify IRSA is configured correctly:
-```bash
-# Check service account has role annotation
-kubectl get serviceaccount <sa-name> -n <namespace> -o yaml
-
-# Check IAM role exists and has correct trust policy
-aws iam get-role --role-name <role-name>
-
-# Test credentials in pod
-kubectl exec <pod-name> -n <namespace> -- aws sts get-caller-identity
-```
-
-### How do I create a new pipeline?
-
-```typescript
-import { AphexCluster } from 'arbiter-pipeline-infrastructure';
-import * as iam from 'aws-cdk-lib/aws-iam';
-
-const cluster = AphexCluster.fromClusterAttributes(this, 'Cluster', {
-  clusterName: 'arbiter-pipeline-cluster',
-  oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/...',
-  kubectlRoleArn: 'arn:aws:iam::123456789012:role/...',
-});
-
-const pipeline = cluster.createPipeline({
-  pipelineId: 'my-pipeline',
-  policyStatements: [
-    new iam.PolicyStatement({
-      actions: ['s3:*'],
-      resources: ['arn:aws:s3:::my-bucket/*'],
-    }),
-  ],
-});
-```
-
-### How do I delete a pipeline?
+**Diagnosis**:
 
 ```bash
-# Delete the namespace (cascades to all resources)
-kubectl delete namespace pipeline-<pipeline-id>
+# Check if repository is in allowlist
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml | grep "your-repo"
 
-# Or use the CDK method (removes from tracking)
-cluster.deletePipeline('my-pipeline');
+# Check Lighthouse logs for webhook events
+kubectl logs -n pipeline-system -l app=lighthouse | grep "your-repo"
+
+# Check if tenant namespace exists
+kubectl get namespace <tenant-name>
+
+# Check RepoBinding status
+kubectl describe repobinding <name> -n pipeline-system
 ```
 
-### How do I monitor workflow execution?
+**Common Issues**:
+1. Repository not in allowlist (check RepoBinding status)
+2. GitHub App not delivering webhooks (check GitHub App settings)
+3. Tenant namespace not created (check onboarding controller logs)
+4. Invalid pipeline definition (check Lighthouse logs)
+
+### What should I do if my pipeline fails?
+
+**Diagnosis**:
 
 ```bash
-# Port-forward to Argo Workflows UI
-kubectl port-forward -n argo svc/argo-workflows-server 2746:2746
+# Get PipelineRun status
+kubectl get pipelinerun <name> -n <tenant-namespace>
 
-# Open browser to http://localhost:2746
+# Get detailed status
+kubectl describe pipelinerun <name> -n <tenant-namespace>
 
-# Or use kubectl
-kubectl get workflows -n <namespace>
-kubectl describe workflow <workflow-name> -n <namespace>
-kubectl logs <workflow-pod-name> -n <namespace>
+# Get pod logs
+kubectl logs <pod-name> -n <tenant-namespace>
+
+# Check pod events
+kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
 ```
 
-### How do I view logs from execution scripts?
+**Common Issues**:
+1. Git clone failure: Check repository access
+2. CDKTF synth failure: Check Node.js dependencies and syntax
+3. CDKTF deploy failure: Check Terraform state and permissions
+4. RBAC denial: Check service account permissions
+
+### How do I update my tenant's resource quota?
+
+Resource quotas are managed by the onboarding controller. To update, you need to modify the tenant resource templates in `platform/tenancy/templates/resourcequota.yaml` and redeploy the controller.
+
+For immediate changes, you can manually edit:
 
 ```bash
-# View logs from a specific pod
-kubectl logs <pod-name> -n <namespace>
+kubectl edit resourcequota tenant-quota -n <tenant-namespace>
+```
 
-# Stream logs in real-time
-kubectl logs -f <pod-name> -n <namespace>
+### How do I grant my tenant elevated permissions?
 
-# View logs in CloudWatch
-aws logs tail /aws/containerinsights/<cluster-name>/application --follow
+Update your RepoBinding to use the elevated profile:
+
+```bash
+kubectl patch repobinding <name> -n pipeline-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
+```
+
+The onboarding controller will reconcile and update the Role.
+
+### How do I delete a tenant?
+
+Delete the RepoBinding (this will trigger cleanup):
+
+```bash
+kubectl delete repobinding <name> -n pipeline-system
+```
+
+Or manually delete the namespace:
+
+```bash
+kubectl delete namespace <tenant-namespace>
 ```
 
 ## Architecture Questions
 
-### Why use Argo Workflows instead of AWS Step Functions?
+### Why use Jenkins X instead of GitHub Actions?
 
-Argo Workflows provides several advantages:
-1. Runs on Kubernetes (same environment as execution)
-2. Better integration with container-based workflows
-3. More flexible workflow definitions
-4. Open source and self-hosted (no AWS service costs)
-5. Better support for parallel execution and DAGs
+Jenkins X provides several advantages for homelab deployment:
+1. Self-hosted (no GitHub Actions minutes costs)
+2. Runs on Kubernetes (same environment as deployment target)
+3. Better integration with Kubernetes resources
+4. More flexible pipeline definitions
+5. Supports multiple Git providers
 
-### Why separate container images for each stage?
+### Why use Tekton instead of Argo Workflows?
 
-Separation provides:
-1. Smaller image sizes (only install needed tools)
-2. Clearer separation of concerns
-3. Easier to update individual stages
-4. Better security (each stage has minimal tools)
-5. Reusability (can use builder without deployer, etc.)
+Tekton is the standard pipeline engine for Jenkins X and provides:
+1. Native Kubernetes integration
+2. Reusable Tasks and Pipelines
+3. Strong community support
+4. Cloud-native design
+5. Better integration with Lighthouse
 
-### How does multi-pipeline isolation work?
+### How does tenant isolation work?
 
 Isolation is achieved through multiple layers:
-1. **Kubernetes Namespaces**: Each pipeline gets its own namespace
-2. **Network Policies**: Restrict inter-namespace communication
-3. **Resource Quotas**: Prevent resource exhaustion
-4. **RBAC**: Separate service accounts and roles
-5. **IRSA**: Isolated AWS permissions per pipeline
+1. **Kubernetes Namespaces**: Each tenant gets dedicated namespace
+2. **RBAC**: Service accounts scoped to tenant namespace only
+3. **Network Policies**: Restrict inter-namespace communication
+4. **Resource Quotas**: Prevent resource exhaustion
+5. **Terraform State**: Isolated per tenant
 
-### Why use CloudFormation exports instead of SSM parameters?
+### Why use OIDC authentication?
 
-CloudFormation exports provide:
-1. Native CDK integration (Fn.importValue)
-2. Automatic dependency tracking
-3. Prevents deletion of exported stacks while in use
-4. No additional AWS service costs
-5. Simpler for CDK-to-CDK communication
+OIDC provides:
+1. No long-lived credentials
+2. Integration with existing identity providers
+3. Group-based authorization
+4. Standard protocol
+5. Self-service onboarding without cluster admin access
 
 ### Can multiple clusters be deployed?
 
-Yes! You can deploy multiple clusters for different environments:
-```typescript
-// Development cluster
-const devCluster = new AphexCluster(this, 'DevCluster', {
-  clusterName: 'arbiter-dev-cluster',
-  minNodes: 1,
-  maxNodes: 5,
-});
+Yes! You can deploy separate clusters for different environments:
+- Development cluster (smaller, fewer resources)
+- Staging cluster (production-like)
+- Production cluster (larger, more resources)
 
-// Production cluster
-const prodCluster = new AphexCluster(this, 'ProdCluster', {
-  clusterName: 'arbiter-prod-cluster',
-  minNodes: 3,
-  maxNodes: 20,
-});
+Each cluster is independent with its own tenants and allowlist.
+
+### How does the allowlist work?
+
+The allowlist is a ConfigMap that defines which repositories can trigger pipelines. When Lighthouse receives a webhook:
+1. Check if repository is in allowlist
+2. If yes, lookup tenant namespace from allowlist
+3. Create PipelineRun in tenant namespace
+4. If no, reject event and log rejection
+
+The onboarding controller automatically updates the allowlist when RepoBinding resources are created.
+
+## Security Questions
+
+### How are GitHub App credentials stored?
+
+GitHub App private key is stored in a Kubernetes Secret in the `pipeline-system` namespace. Lighthouse reads the secret to authenticate with GitHub.
+
+### How are Terraform credentials managed?
+
+Terraform backend credentials are stored in per-tenant Secrets. For Kubernetes backend, no external credentials are needed. For MinIO/S3 backend, credentials are stored in tenant namespace secrets.
+
+### Can tenants access other tenants' resources?
+
+No. RBAC ensures service accounts can only access resources in their own namespace. Network policies prevent cross-namespace network access.
+
+### Can tenants access platform namespaces?
+
+No. RBAC denies access to platform namespaces (pipeline-system, tekton-pipelines, etc.). Only the onboarding controller has permissions to create resources in platform namespaces.
+
+### How do I rotate GitHub App credentials?
+
+```bash
+# Generate new private key in GitHub App settings
+
+# Update secret
+kubectl create secret generic github-app-secret \
+  --from-file=private-key=path/to/new-private-key.pem \
+  -n pipeline-system \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Restart Lighthouse
+kubectl rollout restart deployment lighthouse -n pipeline-system
+```
+
+### How do I audit tenant activity?
+
+```bash
+# View PipelineRuns for a tenant
+kubectl get pipelineruns -n <tenant-namespace>
+
+# View events for a tenant
+kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
+
+# View Lighthouse logs for a repository
+kubectl logs -n pipeline-system -l app=lighthouse | grep "repo-name"
 ```
 
 ## Testing Questions
 
-### What is property-based testing?
+### How do I test the onboarding process?
 
-Property-based testing verifies that properties (rules) hold across many randomly generated inputs, rather than testing specific examples. For example, instead of testing "adding task 'foo' increases list length by 1", we test "adding any valid task increases list length by 1" with 100+ random tasks.
-
-### Why use both unit tests and property-based tests?
-
-They complement each other:
-- **Unit tests**: Verify specific examples and edge cases
-- **Property tests**: Verify general correctness across many inputs
-
-Together they provide comprehensive coverage: unit tests catch concrete bugs, property tests verify general correctness.
-
-### How do I run integration tests locally?
+Create a test RepoBinding and verify resources are created:
 
 ```bash
-# Full integration test (setup, test, cleanup)
-npm run test:integration:full
+# Create test RepoBinding
+kubectl apply -f test-repobinding.yaml
 
-# Or step by step:
-npm run test:integration:setup    # Create kind cluster
-npm run test:integration          # Run tests
-npm run test:integration:cleanup  # Delete cluster
+# Verify namespace
+kubectl get namespace test-tenant
+
+# Verify service account
+kubectl get serviceaccount pipeline-runner -n test-tenant
+
+# Verify RBAC
+kubectl get role,rolebinding -n test-tenant
+
+# Verify resource limits
+kubectl get resourcequota,limitrange -n test-tenant
+
+# Verify network policy
+kubectl get networkpolicy -n test-tenant
+
+# Clean up
+kubectl delete repobinding test-binding -n pipeline-system
+kubectl delete namespace test-tenant
 ```
 
-Integration tests require Docker to be running.
+### How do I test pipeline execution?
 
-### What testing frameworks are used?
+Create a test PipelineRun manually:
 
-- **TypeScript**: Jest (unit tests), fast-check (property tests)
-- **Python**: Pytest (unit tests), Hypothesis (property tests)
-- **Integration**: Jest with kind (local Kubernetes cluster)
+```bash
+kubectl create -f test-pipelinerun.yaml
+
+# Watch status
+kubectl get pipelinerun test-run -n test-tenant -w
+
+# View logs
+kubectl logs <pod-name> -n test-tenant
+```
+
+### How do I test network isolation?
+
+```bash
+# Try to access another tenant's service
+kubectl run -it --rm debug --image=busybox --restart=Never -n tenant1 -- \
+  wget -O- http://service.tenant2.svc.cluster.local
+
+# Should fail with connection timeout or refused
+```
 
 ## Archon-Specific Questions
 
@@ -297,7 +425,7 @@ Archon reads all Markdown files under `.kiro/docs/` from this public GitHub repo
 
 ### How do I update documentation?
 
-Update the relevant files under `.kiro/docs/` and ensure changes are grounded in code. Include "Source" references to relevant files.
+Update the relevant files under `.kiro/docs/` and ensure changes are grounded in code. Include "Source" references to relevant files. Follow the 6-file structure (overview, architecture, operations, api, data-models, faq).
 
 ### What documentation standards should I follow?
 
@@ -305,13 +433,15 @@ Follow the Archon documentation contract in `CLAUDE.md`:
 1. Keep sections small and focused (400-800 tokens)
 2. Use clear, direct language
 3. Maintain provenance (reference source files)
-4. No hallucinations (only document what exists in code)
+4. No hallucinations (only document what exists)
 5. Avoid duplication (link instead of repeating)
+6. Use descriptive, specific headings
 
 **Source**
 - `CLAUDE.md`
 - `.kiro/steering/archon-docs.md`
 - `README.md`
-- `lib/constructs/aphex-cluster.ts`
+- `.kiro/specs/jenkinsx-platform/design.md`
+- `.kiro/specs/jenkinsx-platform/requirements.md`
 - `.kiro/docs/operations.md`
 - `.kiro/docs/api.md`

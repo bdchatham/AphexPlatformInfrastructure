@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lighthouse-config
+  namespace: pipeline-system
+  labels:
+    app: lighthouse
+    component: config
+data:
+  config.yaml: |
+    # Lighthouse configuration for Jenkins X platform
+    
+    # GitHub App configuration
+    # These values reference the lighthouse-github-app secret
+    github:
+      # GitHub App ID (from secret)
+      app_id: "${GITHUB_APP_ID}"
+      
+      # GitHub App Installation ID (from secret)
+      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
+      
+      # Webhook secret for signature validation (from secret)
+      webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
+    
+    # Trigger configuration
+    triggers:
+      # Enable automatic triggering on push events
+      - repos:
+          - "*/*"  # Will be filtered by allowlist
+        events:
+          - push
+        branches:
+          - main
+          - master
+        pipeline: cdktf-deploy-pipeline
+    
+    # Plank configuration (PipelineRun creation)
+    plank:
+      # Maximum number of concurrent PipelineRuns per tenant
+      max_concurrency: 5
+      
+      # PipelineRun timeout
+      default_timeout: 3600  # 1 hour
+      
+      # Pod template for pipeline execution
+      pod_template:
+        # Use tenant service account
+        serviceAccountName: pipeline-runner
+        
+        # Resource limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+    
+    # Logging configuration
+    log_level: info
+    
+    # Metrics configuration
+    metrics:
+      enabled: true
+      port: 9090

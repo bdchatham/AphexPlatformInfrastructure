@@ -4,497 +4,544 @@
 
 ### Prerequisites
 
-Before deploying the Arbiter Pipeline Infrastructure, ensure you have:
+Before deploying the Jenkins X platform, ensure you have:
 
-1. **AWS Account**: An AWS account with appropriate permissions
-2. **AWS CLI**: Configured with credentials (`aws configure`)
-3. **AWS CDK CLI**: Installed globally (`npm install -g aws-cdk`)
-4. **Node.js**: Version 20.x or later
-5. **Python**: Version 3.11 or later
-6. **Docker**: For building container images (optional)
+1. **Kubernetes Cluster**: Version 1.24+ with RBAC enabled
+2. **kubectl**: Configured with cluster access
+3. **helm**: Version 3.x installed
+4. **GitHub Organization**: With admin access for creating GitHub App
+5. **Cluster Features**: RBAC and NetworkPolicy support
 
-### Initial Setup
+### Bootstrap Process
+
+The bootstrap process installs all platform components in the correct order.
+
+**Step 1: Verify Prerequisites**
 
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd arbiter-pipeline-infrastructure
-
-# Install dependencies
-make install
-
-# Build the project
-make build
+# Run prerequisites check
+cd platform/bootstrap
+./prerequisites.sh
 ```
 
-### Bootstrap CDK (First Time Only)
+**Step 2: Create Platform Namespaces**
 
 ```bash
-# Bootstrap CDK in your AWS account and region
-cdk bootstrap aws://<account-id>/<region>
+# Create pipeline-system namespace
+kubectl create namespace pipeline-system --dry-run=client -o yaml | kubectl apply -f -
 
-# Example:
-cdk bootstrap aws://123456789012/us-east-1
+# Create pipeline-catalog namespace
+kubectl create namespace pipeline-catalog --dry-run=client -o yaml | kubectl apply -f -
+
+# Create auth-system namespace (for Dex)
+kubectl create namespace auth-system --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### Deploy the Infrastructure
+**Step 3: Deploy OIDC Provider (Dex)**
 
 ```bash
-# Deploy with default configuration
-cdk deploy
+# Apply Dex configuration
+kubectl apply -f platform/auth/dex-config.yaml
+kubectl apply -f platform/auth/dex-deployment.yaml
 
-# Deploy with custom cluster name
-cdk deploy --context clusterName=my-cluster
+# Wait for Dex to be ready
+kubectl wait --for=condition=ready pod -l app=dex -n auth-system --timeout=300s
 
-# Deploy with custom node configuration
-cdk deploy \
-  --context minNodes=3 \
-  --context maxNodes=20 \
-  --context instanceType=t3.large
+# Configure Kubernetes API server for OIDC
+# For k3s: Edit /etc/rancher/k3s/config.yaml
+# For kubeadm: Edit /etc/kubernetes/manifests/kube-apiserver.yaml
+# Add OIDC flags and restart API server
 ```
 
-### Verify Deployment
+**Step 4: Install Tekton Pipelines**
 
 ```bash
-# Get cluster name from CloudFormation exports
-aws cloudformation list-exports \
-  --query "Exports[?Name=='ArbiterCluster-ClusterName'].Value" \
-  --output text
+# Install Tekton
+kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
 
-# Update kubeconfig
-aws eks update-kubeconfig \
-  --name <cluster-name> \
-  --region <region>
-
-# Verify cluster is accessible
-kubectl get nodes
-
-# Verify Argo Workflows is running
-kubectl get pods -n argo
-
-# Verify Argo Events is running
-kubectl get pods -n argo | grep events
+# Wait for Tekton controllers
+kubectl wait --for=condition=ready pod -l app=tekton-pipelines-controller -n tekton-pipelines --timeout=300s
 ```
 
-### Build and Publish Container Images
+**Step 5: Install Jenkins X and Lighthouse**
 
 ```bash
-# Build all container images locally
-npm run build:images
+# Add Jenkins X Helm repository
+helm repo add jx3 https://jenkins-x-charts.github.io/repo
+helm repo update
 
-# Build with version tag
-./scripts/build-images.sh --version v1.0.0
+# Install jx-build-controller
+helm install jx jx3/jx-build-controller -n pipeline-system
 
-# Build and push to registry (requires registry credentials)
-./scripts/build-images.sh --version v1.0.0 --push --registry <registry-url>
+# Create GitHub App (manual step - see GitHub App Setup section)
+
+# Create Lighthouse configuration
+kubectl apply -f platform/lighthouse/config.yaml
+
+# Install Lighthouse
+helm install lighthouse jx3/lighthouse -n pipeline-system \
+  --set github.appId="${GITHUB_APP_ID}" \
+  --set github.appInstallationId="${GITHUB_APP_INSTALLATION_ID}"
+
+# Wait for Lighthouse
+kubectl wait --for=condition=ready pod -l app=lighthouse -n pipeline-system --timeout=300s
+```
+
+**Step 6: Install RepoBinding CRD**
+
+```bash
+# Apply CRD
+kubectl apply -f platform/crds/repobinding.yaml
+
+# Verify CRD is registered
+kubectl get crd repobindings.platform.arbiter.io
+```
+
+**Step 7: Deploy Onboarding Controller**
+
+```bash
+# Build controller (if not using pre-built image)
+cd platform/onboarding
+go build -o controller ./cmd/controller
+
+# Build and push Docker image
+docker build -t your-registry/onboarding-controller:latest .
+docker push your-registry/onboarding-controller:latest
+
+# Deploy controller
+kubectl apply -f platform/onboarding/controller-rbac.yaml
+kubectl apply -f platform/onboarding/controller-deployment.yaml
+
+# Wait for controller
+kubectl wait --for=condition=ready pod -l app=onboarding-controller -n pipeline-system --timeout=300s
+```
+
+**Step 8: Install Pipeline Catalog**
+
+```bash
+# Apply catalog resources
+kubectl apply -f platform/catalog/tasks/
+kubectl apply -f platform/catalog/pipelines/
+
+# Verify catalog installation
+kubectl get tasks -n pipeline-catalog
+kubectl get pipelines -n pipeline-catalog
+```
+
+**Step 9: Build and Push Runner Image**
+
+```bash
+# Build runner image
+cd platform/catalog/images/runner
+docker build -t your-registry/pipeline-runner:latest .
+docker push your-registry/pipeline-runner:latest
+```
+
+**Step 10: Verify Bootstrap**
+
+```bash
+# Check all platform components
+kubectl get pods -n pipeline-system
+kubectl get pods -n tekton-pipelines
+kubectl get pods -n auth-system
+
+# Verify CRD
+kubectl get crd repobindings.platform.arbiter.io
+
+# Verify catalog
+kubectl get tasks,pipelines -n pipeline-catalog
+```
+
+### GitHub App Setup
+
+**Create GitHub App**:
+
+1. Go to GitHub Organization Settings → Developer settings → GitHub Apps
+2. Click "New GitHub App"
+3. Configure:
+   - **Name**: Jenkins X Platform
+   - **Homepage URL**: https://your-platform.example.com
+   - **Webhook URL**: https://lighthouse.your-platform.example.com/hook
+   - **Webhook secret**: Generate a secure secret
+4. Set permissions:
+   - Repository: Read access to code
+   - Repository: Read and write access to pull requests
+   - Repository: Read and write access to checks
+   - Organization: Read access to members
+5. Subscribe to events:
+   - Push
+   - Pull request
+   - Check run
+   - Check suite
+6. Click "Create GitHub App"
+7. Note the **App ID**
+8. Generate and download **private key**
+9. Install app at organization level
+
+**Configure Lighthouse with GitHub App**:
+
+```bash
+# Create secret with GitHub App private key
+kubectl create secret generic github-app-secret \
+  --from-file=private-key=path/to/private-key.pem \
+  -n pipeline-system
+
+# Update Lighthouse configuration
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lighthouse-config
+  namespace: pipeline-system
+data:
+  config.yaml: |
+    github:
+      app_id: "${GITHUB_APP_ID}"
+      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
+    allowlist:
+      - org: "your-github-org"
+        repos: []
+EOF
+```
+
+## Onboarding Repositories
+
+### Create RepoBinding
+
+```bash
+# Create RepoBinding for a repository
+kubectl apply -f - <<EOF
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: archon-binding
+  namespace: pipeline-system
+spec:
+  repoOrg: "your-github-org"
+  repoName: "archon-agent"
+  tenantName: "archon"
+  permissionProfile: "standard"
+EOF
+```
+
+### Verify Onboarding
+
+```bash
+# Check RepoBinding status
+kubectl get repobinding archon-binding -n pipeline-system
+kubectl describe repobinding archon-binding -n pipeline-system
+
+# Verify tenant namespace
+kubectl get namespace archon
+
+# Verify service account
+kubectl get serviceaccount pipeline-runner -n archon
+
+# Verify RBAC
+kubectl get role,rolebinding -n archon
+
+# Verify resource limits
+kubectl get resourcequota,limitrange -n archon
+
+# Verify network policy
+kubectl get networkpolicy -n archon
+
+# Verify allowlist update
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml
 ```
 
 ## Monitoring
 
-### CloudWatch Metrics
-
-The cluster automatically sends metrics to CloudWatch:
-
-**EKS Cluster Metrics**:
-- Cluster status
-- Node count
-- Pod count
-- API server request latency
-
-**Container Insights Metrics** (if enabled):
-- CPU utilization (cluster, node, pod)
-- Memory utilization (cluster, node, pod)
-- Network throughput
-- Disk I/O
-
-**Custom Metrics** (from execution scripts):
-- Workflow execution count
-- Workflow success/failure rate
-- Workflow duration
-- Build artifact size
-
-### CloudWatch Logs
-
-All execution script output is captured in CloudWatch Logs:
-
-**Log Groups**:
-- `/aws/eks/<cluster-name>/cluster`: EKS control plane logs
-- `/aws/containerinsights/<cluster-name>/application`: Application logs
-- `/aws/containerinsights/<cluster-name>/host`: Node logs
-- `/aws/containerinsights/<cluster-name>/dataplane`: Data plane logs
-
-**Viewing Logs**:
-```bash
-# View recent logs from a specific pod
-kubectl logs <pod-name> -n <namespace>
-
-# Stream logs in real-time
-kubectl logs -f <pod-name> -n <namespace>
-
-# View logs in CloudWatch
-aws logs tail /aws/eks/<cluster-name>/cluster --follow
-```
-
-### Argo Workflows UI
-
-Access the Argo Workflows UI to monitor workflow execution:
+### Platform Health Checks
 
 ```bash
-# Port-forward to Argo Workflows server
-kubectl port-forward -n argo svc/argo-workflows-server 2746:2746
+# Check Tekton controllers
+kubectl get pods -n tekton-pipelines
 
-# Open browser to http://localhost:2746
+# Check Lighthouse
+kubectl get pods -n pipeline-system -l app=lighthouse
+
+# Check onboarding controller
+kubectl get pods -n pipeline-system -l app=onboarding-controller
+
+# Check Dex
+kubectl get pods -n auth-system -l app=dex
 ```
 
-### Kubernetes Dashboard (Optional)
+### Pipeline Execution Monitoring
 
 ```bash
-# Install Kubernetes Dashboard
-kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+# List all PipelineRuns
+kubectl get pipelineruns --all-namespaces
 
-# Create admin service account
-kubectl create serviceaccount dashboard-admin -n kubernetes-dashboard
-kubectl create clusterrolebinding dashboard-admin \
-  --clusterrole=cluster-admin \
-  --serviceaccount=kubernetes-dashboard:dashboard-admin
+# Get PipelineRun details
+kubectl describe pipelinerun <name> -n <tenant-namespace>
 
-# Get access token
-kubectl -n kubernetes-dashboard create token dashboard-admin
+# View PipelineRun logs
+kubectl logs <pod-name> -n <tenant-namespace>
 
-# Port-forward to dashboard
-kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443
-
-# Open browser to https://localhost:8443
+# Watch PipelineRun status
+kubectl get pipelinerun <name> -n <tenant-namespace> -w
 ```
 
-## Alerting
-
-### CloudWatch Alarms
-
-Create CloudWatch alarms for critical metrics:
+### Lighthouse Event Logs
 
 ```bash
-# High workflow failure rate
-aws cloudwatch put-metric-alarm \
-  --alarm-name arbiter-high-workflow-failure-rate \
-  --alarm-description "Alert when workflow failure rate exceeds 10%" \
-  --metric-name WorkflowFailureRate \
-  --namespace Arbiter/Pipelines \
-  --statistic Average \
-  --period 300 \
-  --evaluation-periods 2 \
-  --threshold 10 \
-  --comparison-operator GreaterThanThreshold
+# View Lighthouse logs
+kubectl logs -n pipeline-system -l app=lighthouse --tail=100
 
-# Cluster at maximum capacity
-aws cloudwatch put-metric-alarm \
-  --alarm-name arbiter-cluster-at-max-capacity \
-  --alarm-description "Alert when cluster reaches maximum node count" \
-  --metric-name NodeCount \
-  --namespace AWS/EKS \
-  --statistic Maximum \
-  --period 60 \
-  --evaluation-periods 1 \
-  --threshold <max-nodes> \
-  --comparison-operator GreaterThanOrEqualToThreshold
+# Stream Lighthouse logs
+kubectl logs -n pipeline-system -l app=lighthouse -f
 
-# Pod crash loop detected
-aws cloudwatch put-metric-alarm \
-  --alarm-name arbiter-pod-crash-loop \
-  --alarm-description "Alert when pods are crash looping" \
-  --metric-name PodRestartCount \
-  --namespace ContainerInsights \
-  --statistic Sum \
-  --period 300 \
-  --evaluation-periods 2 \
-  --threshold 5 \
-  --comparison-operator GreaterThanThreshold
+# Search for specific repository events
+kubectl logs -n pipeline-system -l app=lighthouse | grep "repo-name"
 ```
 
-### SNS Notifications
-
-Configure SNS topics for alarm notifications:
+### Onboarding Controller Logs
 
 ```bash
-# Create SNS topic
-aws sns create-topic --name arbiter-pipeline-alerts
+# View controller logs
+kubectl logs -n pipeline-system -l app=onboarding-controller --tail=100
 
-# Subscribe email to topic
-aws sns subscribe \
-  --topic-arn arn:aws:sns:<region>:<account>:arbiter-pipeline-alerts \
-  --protocol email \
-  --notification-endpoint your-email@example.com
+# Stream controller logs
+kubectl logs -n pipeline-system -l app=onboarding-controller -f
 
-# Update alarms to send to SNS
-aws cloudwatch put-metric-alarm \
-  --alarm-name arbiter-high-workflow-failure-rate \
-  --alarm-actions arn:aws:sns:<region>:<account>:arbiter-pipeline-alerts \
-  ...
+# Search for specific RepoBinding
+kubectl logs -n pipeline-system -l app=onboarding-controller | grep "repobinding-name"
 ```
 
-## Runbooks
+## Troubleshooting
 
-### Common Issues
-
-#### Issue: Pods stuck in Pending state
-
-**Symptoms**: Pods remain in Pending state and never start
+### Repository Not Triggering Pipelines
 
 **Diagnosis**:
+
 ```bash
-# Check pod status
-kubectl describe pod <pod-name> -n <namespace>
+# Check if repository is in allowlist
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml | grep "repo-name"
 
-# Check node capacity
-kubectl describe nodes
+# Check Lighthouse logs for webhook events
+kubectl logs -n pipeline-system -l app=lighthouse | grep "repo-name"
 
-# Check resource quotas
-kubectl describe resourcequota -n <namespace>
+# Check if tenant namespace exists
+kubectl get namespace <tenant-name>
+
+# Check if service account exists
+kubectl get serviceaccount pipeline-runner -n <tenant-name>
 ```
 
 **Resolution**:
-1. If nodes are at capacity, increase `maxNodes` in cluster configuration
-2. If resource quota is exceeded, adjust quota or reduce pod resource requests
-3. If no nodes available, check autoscaling configuration
+1. Verify repository is in allowlist ConfigMap
+2. Verify GitHub App is installed and delivering webhooks
+3. Verify tenant namespace was created by onboarding
+4. Check Lighthouse logs for error messages
 
-#### Issue: Workflow fails with "permission denied"
-
-**Symptoms**: Workflow fails with AWS permission errors
+### PipelineRun Failures
 
 **Diagnosis**:
+
+```bash
+# Get PipelineRun status
+kubectl get pipelinerun <name> -n <tenant-namespace>
+
+# Get detailed status
+kubectl describe pipelinerun <name> -n <tenant-namespace>
+
+# Get pod logs
+kubectl logs <pod-name> -n <tenant-namespace>
+
+# Check pod events
+kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
+```
+
+**Common Issues**:
+
+1. **Git clone failure**: Check repository access and credentials
+2. **CDKTF synth failure**: Check Node.js dependencies and syntax errors
+3. **CDKTF deploy failure**: Check Terraform state and AWS permissions
+4. **RBAC denial**: Check service account permissions
+
+### Onboarding Failures
+
+**Diagnosis**:
+
+```bash
+# Check RepoBinding status
+kubectl get repobinding <name> -n pipeline-system
+kubectl describe repobinding <name> -n pipeline-system
+
+# Check controller logs
+kubectl logs -n pipeline-system -l app=onboarding-controller | grep "<name>"
+```
+
+**Common Issues**:
+
+1. **Invalid organization**: Repository org not in approved list
+2. **Invalid namespace pattern**: Namespace name doesn't match pattern
+3. **Privileged namespace**: Attempting to create privileged namespace
+4. **RBAC failure**: Controller lacks permissions to create resources
+
+### RBAC Permission Errors
+
+**Diagnosis**:
+
 ```bash
 # Check service account
-kubectl get serviceaccount <sa-name> -n <namespace> -o yaml
+kubectl get serviceaccount pipeline-runner -n <tenant-namespace> -o yaml
 
-# Check IAM role
-aws iam get-role --role-name <role-name>
+# Check role
+kubectl get role pipeline-runner -n <tenant-namespace> -o yaml
 
-# Check role policy
-aws iam list-attached-role-policies --role-name <role-name>
+# Check rolebinding
+kubectl get rolebinding pipeline-runner -n <tenant-namespace> -o yaml
+
+# Test permissions
+kubectl auth can-i create pods --as=system:serviceaccount:<tenant-namespace>:pipeline-runner -n <tenant-namespace>
 ```
 
 **Resolution**:
-1. Verify IRSA is configured correctly (service account has `eks.amazonaws.com/role-arn` annotation)
-2. Verify IAM role trust policy allows the service account to assume it
-3. Verify IAM role has necessary permissions
-4. Check that `AWS_ROLE_ARN` environment variable is set in pod
-
-#### Issue: Container image pull failures
-
-**Symptoms**: Pods fail with "ImagePullBackOff" or "ErrImagePull"
-
-**Diagnosis**:
-```bash
-# Check pod events
-kubectl describe pod <pod-name> -n <namespace>
-
-# Check image exists
-docker pull <image-name>:<tag>
-```
-
-**Resolution**:
-1. Verify image name and tag are correct
-2. Verify image exists in registry
-3. If using private registry, verify image pull secrets are configured
-4. Check node IAM role has ECR permissions (if using ECR)
-
-#### Issue: Cluster autoscaling not working
-
-**Symptoms**: Pods remain pending but cluster doesn't scale up
-
-**Diagnosis**:
-```bash
-# Check cluster autoscaler logs
-kubectl logs -n kube-system deployment/cluster-autoscaler
-
-# Check node group configuration
-aws eks describe-nodegroup \
-  --cluster-name <cluster-name> \
-  --nodegroup-name <nodegroup-name>
-```
-
-**Resolution**:
-1. Verify node group has autoscaling enabled
-2. Verify min/max node counts are correct
-3. Check cluster autoscaler has necessary IAM permissions
-4. Verify pods have resource requests set (required for autoscaling)
-
-### Troubleshooting
-
-#### Debug a failing workflow
-
-```bash
-# Get workflow status
-kubectl get workflow <workflow-name> -n <namespace>
-
-# Get workflow details
-kubectl describe workflow <workflow-name> -n <namespace>
-
-# Get workflow logs
-kubectl logs <workflow-pod-name> -n <namespace>
-
-# Get workflow as YAML
-kubectl get workflow <workflow-name> -n <namespace> -o yaml
-```
-
-#### Debug IRSA issues
-
-```bash
-# Check service account annotations
-kubectl get serviceaccount <sa-name> -n <namespace> -o jsonpath='{.metadata.annotations}'
-
-# Check pod environment variables
-kubectl exec <pod-name> -n <namespace> -- env | grep AWS
-
-# Check token file exists
-kubectl exec <pod-name> -n <namespace> -- ls -la /var/run/secrets/eks.amazonaws.com/serviceaccount/
-
-# Test AWS credentials
-kubectl exec <pod-name> -n <namespace> -- aws sts get-caller-identity
-```
-
-#### Debug network connectivity
-
-```bash
-# Test DNS resolution
-kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup kubernetes.default
-
-# Test external connectivity
-kubectl run -it --rm debug --image=busybox --restart=Never -- wget -O- https://www.google.com
-
-# Test pod-to-pod connectivity
-kubectl run -it --rm debug --image=busybox --restart=Never -- wget -O- http://<service-name>.<namespace>.svc.cluster.local
-```
+1. Verify Role has necessary permissions
+2. Verify RoleBinding associates service account with Role
+3. Verify service account is used by PipelineRun
 
 ## Maintenance
 
-### Regular Maintenance Tasks
+### Update Platform Components
 
-#### Update Kubernetes Version
-
-```bash
-# Check current version
-kubectl version --short
-
-# Update cluster version (via CDK)
-# Edit lib/constructs/aphex-cluster.ts:
-# kubernetesVersion: eks.KubernetesVersion.V1_29
-
-# Deploy update
-cdk deploy
-
-# Update node group AMI
-aws eks update-nodegroup-version \
-  --cluster-name <cluster-name> \
-  --nodegroup-name <nodegroup-name>
-```
-
-#### Update Argo Workflows
+**Update Tekton**:
 
 ```bash
 # Check current version
-helm list -n argo
+kubectl get deployment tekton-pipelines-controller -n tekton-pipelines -o jsonpath='{.spec.template.spec.containers[0].image}'
 
-# Update Helm chart (via CDK)
-# The Helm chart version is managed by CDK
-# To update, modify the chart version in lib/constructs/aphex-cluster.ts
-
-# Deploy update
-cdk deploy
+# Update to latest
+kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
 ```
 
-#### Rotate IRSA Credentials
-
-IRSA credentials are automatically rotated by Kubernetes. No manual rotation required.
-
-#### Clean Up Old Artifacts
+**Update Lighthouse**:
 
 ```bash
-# List artifacts in S3
-aws s3 ls s3://<artifact-bucket>/artifacts/
+# Check current version
+helm list -n pipeline-system
 
-# Delete artifacts older than 30 days
-aws s3 ls s3://<artifact-bucket>/artifacts/ --recursive | \
-  awk '{if ($1 < "'$(date -d '30 days ago' +%Y-%m-%d)'") print $4}' | \
-  xargs -I {} aws s3 rm s3://<artifact-bucket>/{}
+# Update Helm chart
+helm upgrade lighthouse jx3/lighthouse -n pipeline-system
 ```
 
-#### Update Container Images
+**Update Onboarding Controller**:
 
 ```bash
-# Build new images with updated version
-./scripts/build-images.sh --version v1.1.0 --push
+# Build new version
+cd platform/onboarding
+docker build -t your-registry/onboarding-controller:v1.1.0 .
+docker push your-registry/onboarding-controller:v1.1.0
 
-# Update WorkflowTemplates to use new version
-kubectl edit workflowtemplate <template-name> -n <namespace>
-# Change image tag from v1.0.0 to v1.1.0
+# Update deployment
+kubectl set image deployment/onboarding-controller \
+  controller=your-registry/onboarding-controller:v1.1.0 \
+  -n pipeline-system
+```
+
+### Update Pipeline Catalog
+
+```bash
+# Update catalog resources
+kubectl apply -f platform/catalog/tasks/
+kubectl apply -f platform/catalog/pipelines/
+
+# Verify updates
+kubectl get tasks,pipelines -n pipeline-catalog
+```
+
+### Clean Up Old PipelineRuns
+
+```bash
+# List old PipelineRuns
+kubectl get pipelineruns --all-namespaces --sort-by=.metadata.creationTimestamp
+
+# Delete PipelineRuns older than 30 days
+kubectl get pipelineruns --all-namespaces -o json | \
+  jq -r '.items[] | select(.metadata.creationTimestamp < "'$(date -d '30 days ago' -Iseconds)'") | "\(.metadata.namespace) \(.metadata.name)"' | \
+  xargs -n2 kubectl delete pipelinerun -n
 ```
 
 ### Backup and Recovery
 
-#### Backup Cluster Configuration
+**Backup Platform Configuration**:
 
 ```bash
-# Export cluster configuration
-kubectl get all --all-namespaces -o yaml > cluster-backup.yaml
+# Backup RepoBindings
+kubectl get repobindings -n pipeline-system -o yaml > repobindings-backup.yaml
 
-# Export Argo Workflows templates
-kubectl get workflowtemplate -n argo -o yaml > workflow-templates-backup.yaml
+# Backup allowlist
+kubectl get configmap repo-allowlist -n pipeline-system -o yaml > allowlist-backup.yaml
 
-# Export Argo Events resources
-kubectl get eventsource,sensor -n argo -o yaml > argo-events-backup.yaml
+# Backup catalog
+kubectl get tasks,pipelines -n pipeline-catalog -o yaml > catalog-backup.yaml
 ```
 
-#### Disaster Recovery
-
-If the cluster is lost, redeploy using CDK:
+**Restore Platform**:
 
 ```bash
-# Deploy new cluster
-cdk deploy
+# Re-run bootstrap
+cd platform/bootstrap
+./bootstrap.sh
 
-# Restore Argo Workflows templates
-kubectl apply -f workflow-templates-backup.yaml
+# Restore RepoBindings
+kubectl apply -f repobindings-backup.yaml
 
-# Restore Argo Events resources
-kubectl apply -f argo-events-backup.yaml
+# Restore allowlist
+kubectl apply -f allowlist-backup.yaml
 
-# Recreate pipelines
-# Use the createPipeline() method for each pipeline
+# Restore catalog
+kubectl apply -f catalog-backup.yaml
 ```
 
-### Cost Optimization
+## Security
 
-#### Monitor Costs
+### Rotate GitHub App Credentials
 
 ```bash
-# View EKS cluster costs
-aws ce get-cost-and-usage \
-  --time-period Start=2024-01-01,End=2024-01-31 \
-  --granularity MONTHLY \
-  --metrics BlendedCost \
-  --filter file://eks-filter.json
+# Generate new private key in GitHub App settings
 
-# eks-filter.json:
-{
-  "Tags": {
-    "Key": "aws:eks:cluster-name",
-    "Values": ["<cluster-name>"]
-  }
-}
+# Update secret
+kubectl create secret generic github-app-secret \
+  --from-file=private-key=path/to/new-private-key.pem \
+  -n pipeline-system \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Restart Lighthouse
+kubectl rollout restart deployment lighthouse -n pipeline-system
 ```
 
-#### Reduce Costs
+### Audit RBAC Permissions
 
-1. **Use Spot Instances**: Add spot instance node groups for non-critical workloads
-2. **Right-size Nodes**: Use smaller instance types if workloads allow
-3. **Reduce Min Nodes**: Lower `minNodes` during off-peak hours
-4. **Enable Cluster Autoscaler**: Ensure autoscaling is working to scale down unused nodes
-5. **Clean Up Unused Resources**: Delete unused pipelines and namespaces
+```bash
+# List all Roles in tenant namespaces
+kubectl get roles --all-namespaces | grep -v "kube-"
+
+# Review specific Role
+kubectl get role pipeline-runner -n <tenant-namespace> -o yaml
+
+# Check what a service account can do
+kubectl auth can-i --list --as=system:serviceaccount:<tenant-namespace>:pipeline-runner -n <tenant-namespace>
+```
+
+### Review Network Policies
+
+```bash
+# List all NetworkPolicies
+kubectl get networkpolicies --all-namespaces
+
+# Review specific NetworkPolicy
+kubectl get networkpolicy tenant-isolation -n <tenant-namespace> -o yaml
+
+# Test network connectivity
+kubectl run -it --rm debug --image=busybox --restart=Never -n <tenant-namespace> -- wget -O- http://<service>.<other-namespace>.svc.cluster.local
+```
 
 **Source**
-- `lib/constructs/aphex-cluster.ts`
-- `lib/arbiter-pipeline-infrastructure-stack.ts`
-- `scripts/build-images.sh`
+- `.kiro/specs/jenkinsx-platform/design.md`
+- `.kiro/specs/jenkinsx-platform/requirements.md`
+- `platform/bootstrap/README.md`
 - `README.md`
-- `.kiro/specs/arbiter-pipeline-infrastructure/design.md`

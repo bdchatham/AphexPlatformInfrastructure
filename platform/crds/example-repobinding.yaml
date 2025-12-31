@@ -1,0 +1,36 @@
+# Example RepoBinding resource for onboarding a repository
+# This example onboards the "archon-agent" repository from "your-github-org"
+# and creates a tenant namespace called "archon"
+
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: archon-binding
+  namespace: pipeline-system
+spec:
+  # GitHub organization name
+  repoOrg: "your-github-org"
+  
+  # GitHub repository name
+  repoName: "archon-agent"
+  
+  # Tenant namespace name (will be created)
+  tenantName: "archon"
+  
+  # Permission profile: "standard" or "elevated"
+  # standard: namespace-scoped permissions for typical pipelines
+  # elevated: additional permissions for advanced use cases
+  permissionProfile: "standard"
+
+---
+# Example with elevated permissions
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: infrastructure-binding
+  namespace: pipeline-system
+spec:
+  repoOrg: "your-github-org"
+  repoName: "infrastructure-repo"
+  tenantName: "infrastructure"
+  permissionProfile: "elevated"

@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: repo-allowlist
+  namespace: pipeline-system
+  labels:
+    app: lighthouse
+    component: allowlist
+data:
+  allowlist.yaml: |
+    # Repository allowlist for Lighthouse
+    # Only repositories listed here can trigger pipelines
+    # This allowlist is managed by the onboarding controller
+    
+    # Format:
+    # repos:
+    #   - org: "github-org-name"
+    #     name: "repository-name"
+    #     tenant: "tenant-namespace-name"
+    #     enabled: true
+    
+    # Example:
+    # repos:
+    #   - org: "your-github-org"
+    #     name: "archon-agent"
+    #     tenant: "archon"
+    #     enabled: true
+    
+    # Initial empty allowlist
+    # Repositories will be added by the onboarding controller when RepoBindings are created
+    repos: []
