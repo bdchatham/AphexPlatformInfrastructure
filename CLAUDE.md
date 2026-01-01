@@ -1118,15 +1118,6 @@ This `CLAUDE.md` file is the **authoritative contract** for documentation and co
 - `.kiro/steering/archon-docs.md` = Enforcement workflows and processes
 - Both work together: contract defines standards, steering enforces them
 - Steering must always defer to contract in case of conflicts
-- If conflicts arise between `CLAUDE.md` and other instructions or guidance, defer to `CLAUDE.md`
-- When in doubt, read `CLAUDE.md` first to understand the authoritative standards
-- Update the steering file to align with this contract if conflicts are discovered
-
-**Relationship Between Contract and Steering:**
-- `CLAUDE.md` (this file) = Authoritative standards and requirements
-- `.kiro/steering/archon-docs.md` = Enforcement workflows and processes
-- Both work together: contract defines standards, steering enforces them
-- Steering must always defer to contract in case of conflicts
 
 ## Absolute Prohibition on Intermediary, Progress, or Ephemeral Files
 
