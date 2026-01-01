@@ -15,6 +15,9 @@ data:
     web:
       http: 0.0.0.0:5556
     
+    # Enable password database for static passwords
+    enablePasswordDB: true
+    
     # Static clients for Kubernetes API server
     staticClients:
       - id: kubernetes
