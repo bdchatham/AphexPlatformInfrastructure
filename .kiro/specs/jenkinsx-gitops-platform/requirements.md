@@ -14,7 +14,7 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 - **Tenant**: Isolated namespace with dedicated resources for a repository
 - **RepoBinding**: Custom resource that declares repository-to-tenant mapping
 - **Onboarding_Controller**: Kubernetes controller that provisions tenant resources based on RepoBindings
-- **Pipeline_Catalog**: Shared Tekton Tasks and Pipelines for CDKTF deployments
+- **Platform_Assets**: Shared Tekton Tasks and Pipelines for CDKTF deployments
 - **Lighthouse**: GitHub webhook handler and pipeline trigger
 
 ## Requirements

@@ -203,8 +203,8 @@ spec:
 **Managed By**: ArgoCD Application using Kustomize
 
 **Resources**:
-- `pipeline-system`: Platform services namespace
-- `pipeline-catalog`: Shared pipeline catalog namespace
+- `platform-services`: Platform services namespace
+- `platform-assets`: Shared pipeline assets namespace
 - `auth-system`: Authentication services namespace (Dex)
 
 **Configuration**:
@@ -213,8 +213,8 @@ spec:
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - namespace-pipeline-system.yaml
-  - namespace-pipeline-catalog.yaml
+  - namespace-platform-services.yaml
+  - namespace-platform-assets.yaml
   - namespace-auth-system.yaml
 ```
 
@@ -381,7 +381,7 @@ spec:
             tag: v0.56.0
   destination:
     server: https://kubernetes.default.svc
-    namespace: tekton-pipelines
+    namespace: platform-services
   syncPolicy:
     automated:
       prune: true
@@ -424,7 +424,7 @@ spec:
           allowlist: "repo-allowlist"
   destination:
     server: https://kubernetes.default.svc
-    namespace: pipeline-system
+    namespace: platform-services
   syncPolicy:
     automated:
       prune: true
@@ -435,7 +435,7 @@ spec:
 **Secrets**: GitHub App credentials must be created manually before syncing:
 ```bash
 kubectl create secret generic lighthouse-github-app \
-  -n pipeline-system \
+  -n platform-services \
   --from-literal=app-id=<APP_ID> \
   --from-literal=installation-id=<INSTALLATION_ID> \
   --from-file=private-key=<PATH_TO_KEY>
@@ -458,7 +458,7 @@ kubectl create secret generic lighthouse-github-app \
 # platform/onboarding/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: pipeline-system
+namespace: platform-services
 resources:
   - deployment.yaml
   - service-account.yaml
@@ -499,7 +499,7 @@ images:
 # platform/catalog/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: pipeline-catalog
+namespace: platform-assets
 resources:
   - tasks/git-clone.yaml
   - tasks/cdktf-synth.yaml
@@ -626,7 +626,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: repo-allowlist
-  namespace: pipeline-system
+  namespace: platform-services
 data:
   allowlist.yaml: |
     repositories:
@@ -652,8 +652,8 @@ ArbiterPipelineInfrastructure/
 │   ├── infrastructure/
 │   │   ├── namespaces/
 │   │   │   ├── kustomization.yaml
-│   │   │   ├── namespace-pipeline-system.yaml
-│   │   │   ├── namespace-pipeline-catalog.yaml
+│   │   │   ├── namespace-platform-services.yaml
+│   │   │   ├── namespace-platform-assets.yaml
 │   │   │   └── namespace-auth-system.yaml
 │   │   ├── crds/
 │   │   │   ├── kustomization.yaml
