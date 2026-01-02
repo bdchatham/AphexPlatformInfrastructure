@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tenant-limits
+  namespace: ${TENANT_NAME}
+spec:
+  limits:
+    - type: Container
+      # Default limits applied to containers without explicit limits
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      
+      # Default requests applied to containers without explicit requests
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      
+      # Maximum limits a container can request
+      max:
+        cpu: "2"
+        memory: "4Gi"
+      
+      # Minimum limits a container must request
+      min:
+        cpu: "50m"
+        memory: "64Mi"

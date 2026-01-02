@@ -1,0 +1,212 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cdktf-deploy
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Infrastructure
+    tekton.dev/tags: cdktf, terraform, infrastructure-as-code, deployment
+    tekton.dev/displayName: "cdktf deploy"
+    tekton.dev/platforms: "linux/amd64,linux/arm64"
+spec:
+  description: >-
+    This Task runs cdktf deploy to apply Terraform configuration with remote state.
+    It is designed for use in the Arbiter Pipeline Infrastructure to deploy
+    infrastructure-as-code with proper state management and tenant isolation.
+
+  params:
+    - name: workingDir
+      description: Working directory containing CDKTF code
+      type: string
+      default: "."
+    - name: tenantName
+      description: Tenant namespace name for backend configuration
+      type: string
+    - name: runnerImage
+      description: Container image with node, cdktf, and terraform
+      type: string
+      default: "ghcr.io/bdchatham/pipeline-runner:latest"
+    - name: autoApprove
+      description: Automatically approve terraform apply
+      type: string
+      default: "true"
+    - name: verbose
+      description: Enable verbose output
+      type: string
+      default: "false"
+    - name: stackName
+      description: CDKTF stack name to deploy (empty means all stacks)
+      type: string
+      default: ""
+
+  workspaces:
+    - name: source
+      description: Workspace containing the CDKTF code
+    - name: terraform-backend
+      description: Workspace containing Terraform backend configuration
+      optional: true
+
+  results:
+    - name: deploy-status
+      description: Status of the cdktf deploy operation (success or failure)
+    - name: outputs
+      description: Terraform outputs from the deployment
+
+  steps:
+    - name: configure-backend
+      image: "$(params.runnerImage)"
+      workingDir: "$(workspaces.source.path)/$(params.workingDir)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Configuring Terraform backend for tenant: $(params.tenantName)"
+
+        # Check if backend workspace is provided
+        if [ "$(workspaces.terraform-backend.bound)" = "true" ]; then
+          echo "Using backend configuration from workspace"
+          
+          # Copy backend configuration if it exists
+          if [ -f "$(workspaces.terraform-backend.path)/backend.tf" ]; then
+            cp "$(workspaces.terraform-backend.path)/backend.tf" .
+            echo "Backend configuration copied"
+          fi
+          
+          # Copy credentials if they exist
+          if [ -f "$(workspaces.terraform-backend.path)/credentials" ]; then
+            mkdir -p ~/.aws
+            cp "$(workspaces.terraform-backend.path)/credentials" ~/.aws/credentials
+            chmod 600 ~/.aws/credentials
+            echo "Backend credentials configured"
+          fi
+        else
+          echo "No backend workspace provided, using default Kubernetes backend"
+          
+          # Create Kubernetes backend configuration
+          cat > backend.tf <<EOF
+        terraform {
+          backend "kubernetes" {
+            secret_suffix    = "$(params.tenantName)"
+            namespace        = "$(params.tenantName)"
+            in_cluster_config = true
+          }
+        }
+        EOF
+          echo "Kubernetes backend configuration created"
+        fi
+
+    - name: deploy
+      image: "$(params.runnerImage)"
+      workingDir: "$(workspaces.source.path)/$(params.workingDir)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Running cdktf deploy..."
+        
+        # Build cdktf deploy command
+        DEPLOY_CMD="cdktf deploy"
+        
+        if [ "$(params.autoApprove)" = "true" ]; then
+          DEPLOY_CMD="$DEPLOY_CMD --auto-approve"
+        fi
+        
+        if [ -n "$(params.stackName)" ]; then
+          DEPLOY_CMD="$DEPLOY_CMD $(params.stackName)"
+        fi
+        
+        echo "Executing: $DEPLOY_CMD"
+        
+        # Run deployment
+        if [ "$(params.verbose)" = "true" ]; then
+          $DEPLOY_CMD
+        else
+          $DEPLOY_CMD 2>&1 | grep -v "^\[" || true
+        fi
+        
+        # Check deployment status
+        if [ $? -eq 0 ]; then
+          echo "CDKTF deploy completed successfully"
+          echo "success" > "$(results.deploy-status.path)"
+        else
+          echo "ERROR: cdktf deploy failed"
+          echo "failure" > "$(results.deploy-status.path)"
+          exit 1
+        fi
+
+    - name: capture-outputs
+      image: "$(params.runnerImage)"
+      workingDir: "$(workspaces.source.path)/$(params.workingDir)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Capturing Terraform outputs..."
+        
+        # Initialize outputs file
+        echo "{}" > "$(results.outputs.path)"
+        
+        # Find all stack directories
+        for stack_dir in cdktf.out/stacks/*; do
+          if [ -d "$stack_dir" ]; then
+            stack_name=$(basename "$stack_dir")
+            echo "Capturing outputs for stack: $stack_name"
+            
+            cd "$stack_dir"
+            
+            # Get terraform outputs if they exist
+            if terraform output -json > /dev/null 2>&1; then
+              terraform output -json > "/tmp/${stack_name}_outputs.json"
+              echo "Outputs captured for $stack_name"
+            else
+              echo "No outputs found for $stack_name"
+            fi
+            
+            cd - > /dev/null
+          fi
+        done
+        
+        # Merge all outputs into single result
+        if ls /tmp/*_outputs.json 1> /dev/null 2>&1; then
+          jq -s 'add' /tmp/*_outputs.json > "$(results.outputs.path)"
+          echo "All outputs captured successfully"
+        else
+          echo "No outputs to capture"
+        fi
+
+    - name: verify-deployment
+      image: "$(params.runnerImage)"
+      workingDir: "$(workspaces.source.path)/$(params.workingDir)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Verifying deployment state..."
+        
+        # Verify state exists for each stack
+        for stack_dir in cdktf.out/stacks/*; do
+          if [ -d "$stack_dir" ]; then
+            stack_name=$(basename "$stack_dir")
+            echo "Verifying state for stack: $stack_name"
+            
+            cd "$stack_dir"
+            
+            # Check if state exists
+            if terraform show > /dev/null 2>&1; then
+              echo "State verified for $stack_name"
+              
+              # Show resource count
+              resource_count=$(terraform state list | wc -l)
+              echo "Stack $stack_name has $resource_count resources"
+            else
+              echo "WARNING: Could not verify state for $stack_name"
+            fi
+            
+            cd - > /dev/null
+          fi
+        done
+        
+        echo "Deployment verification complete"

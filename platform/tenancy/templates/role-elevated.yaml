@@ -1,0 +1,40 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pipeline-runner
+  namespace: ${TENANT_NAME}
+rules:
+  # Allow managing pods for pipeline execution
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "create", "update", "delete", "watch"]
+  
+  # Allow managing ConfigMaps and Secrets for pipeline configuration
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  
+  # Allow managing Tekton resources
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns"]
+    verbs: ["get", "list", "create", "watch"]
+  
+  # Allow managing PersistentVolumeClaims for workspace management
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  
+  # Elevated: Allow managing Services for testing
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  
+  # Elevated: Allow managing Deployments for testing
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  
+  # Elevated: Allow reading Events for debugging
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]

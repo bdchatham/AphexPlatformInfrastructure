@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tenant-isolation
+  namespace: ${TENANT_NAME}
+spec:
+  # Apply to all pods in the namespace
+  podSelector: {}
+  
+  # Define both ingress and egress policies
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  # Ingress rules: allow traffic from same namespace only
+  ingress:
+    - from:
+        - podSelector: {}  # Allow from same namespace
+  
+  # Egress rules: allow same namespace, DNS, and internet
+  egress:
+    # Allow to same namespace
+    - to:
+        - podSelector: {}
+    
+    # Allow DNS queries to kube-system
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    
+    # Allow internet egress (for git clone, terraform providers, etc.)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              # Block access to private IP ranges (cross-namespace traffic)
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16

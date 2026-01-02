@@ -1,0 +1,13 @@
+{
+  "language": "typescript",
+  "app": "npx ts-node main.ts",
+  "projectId": "test-pipeline-execution",
+  "terraformProviders": [
+    "hashicorp/kubernetes@~> 2.24"
+  ],
+  "terraformModules": [],
+  "context": {
+    "excludeStackIdFromLogicalIds": "true",
+    "allowSepCharsInLogicalIds": "true"
+  }
+}

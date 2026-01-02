@@ -1,0 +1,244 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: onboarding-controller
+  labels:
+    app: onboarding-controller
+    platform.arbiter.io/component: onboarding
+rules:
+  # RepoBinding CRD permissions
+  - apiGroups:
+      - arbiter.io
+    resources:
+      - repobindings
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - arbiter.io
+    resources:
+      - repobindings/status
+    verbs:
+      - get
+      - update
+      - patch
+  - apiGroups:
+      - arbiter.io
+    resources:
+      - repobindings/finalizers
+    verbs:
+      - update
+  
+  # Namespace permissions
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # ServiceAccount permissions
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # ConfigMap permissions (for allowlist)
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - update
+      - patch
+  
+  # Secret permissions (for Terraform backend config)
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # RBAC permissions
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - roles
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - escalate
+      - bind
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # Permissions that the controller needs to grant to tenant service accounts
+  # (Required to avoid RBAC escalation prevention)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+  - apiGroups:
+      - tekton.dev
+    resources:
+      - pipelineruns
+      - taskruns
+    verbs:
+      - get
+      - list
+      - create
+      - watch
+  
+  # ResourceQuota permissions
+  - apiGroups:
+      - ""
+    resources:
+      - resourcequotas
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # LimitRange permissions
+  - apiGroups:
+      - ""
+    resources:
+      - limitranges
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # NetworkPolicy permissions
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # Leader election permissions
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+  
+  # Event permissions (for logging)
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: onboarding-controller
+  labels:
+    app: onboarding-controller
+    platform.arbiter.io/component: onboarding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: onboarding-controller
+subjects:
+  - kind: ServiceAccount
+    name: onboarding-controller
+    namespace: pipeline-system

@@ -1,0 +1,13 @@
+apiVersion: platform.arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: test-tenant-binding
+  namespace: pipeline-system
+  labels:
+    test: "true"
+    purpose: "pipeline-execution-test"
+spec:
+  repoOrg: "your-github-org"  # Replace with your GitHub organization
+  repoName: "test-pipeline-execution"  # Replace with your test repository name
+  tenantName: "test-tenant"
+  permissionProfile: "standard"

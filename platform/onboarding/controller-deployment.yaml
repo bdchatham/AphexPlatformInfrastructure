@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onboarding-controller
+  namespace: pipeline-system
+  labels:
+    app: onboarding-controller
+    platform.arbiter.io/component: onboarding
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: onboarding-controller
+  template:
+    metadata:
+      labels:
+        app: onboarding-controller
+        platform.arbiter.io/component: onboarding
+    spec:
+      serviceAccountName: onboarding-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: manager
+          image: ghcr.io/bdchatham/onboarding-controller:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /manager
+          args:
+            - --leader-elect
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+      terminationGracePeriodSeconds: 10

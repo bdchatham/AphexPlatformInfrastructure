@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: auth-system
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      serviceAccountName: dex
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.37.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/dex
+            - serve
+            - /etc/dex/config.yaml
+          ports:
+            - name: http
+              containerPort: 5556
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5556
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5556
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: dex-config

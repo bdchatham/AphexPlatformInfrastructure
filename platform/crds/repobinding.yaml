@@ -74,21 +74,18 @@ spec:
                 rbacConfigured:
                   type: boolean
                   description: Whether RBAC (Role + RoleBinding) was configured
-                allowlistUpdated:
+                resourceLimitsCreated:
                   type: boolean
-                  description: Whether repository was added to allowlist
-                resourceQuotaCreated:
-                  type: boolean
-                  description: Whether ResourceQuota was created
-                limitRangeCreated:
-                  type: boolean
-                  description: Whether LimitRange was created
+                  description: Whether ResourceQuota and LimitRange were created
                 networkPolicyCreated:
                   type: boolean
                   description: Whether NetworkPolicy was created
-                backendSecretCreated:
+                terraformBackendSecretCreated:
                   type: boolean
                   description: Whether Terraform backend secret was created
+                allowlistUpdated:
+                  type: boolean
+                  description: Whether repository was added to allowlist
                 lastReconcileTime:
                   type: string
                   format: date-time

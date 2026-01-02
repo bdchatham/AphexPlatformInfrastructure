@@ -1,0 +1,109 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: repobindings.arbiter.io
+spec:
+  group: arbiter.io
+  names:
+    kind: RepoBinding
+    plural: repobindings
+    singular: repobinding
+    shortNames:
+      - rb
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - repoOrg
+                - repoName
+                - tenantName
+              properties:
+                repoOrg:
+                  type: string
+                  pattern: '^[a-zA-Z0-9-]+$'
+                  description: GitHub organization name
+                repoName:
+                  type: string
+                  pattern: '^[a-zA-Z0-9_-]+$'
+                  description: GitHub repository name
+                tenantName:
+                  type: string
+                  pattern: '^tenant-[a-z0-9-]+$'
+                  description: Tenant namespace name (must start with 'tenant-')
+                permissionProfile:
+                  type: string
+                  enum:
+                    - standard
+                    - elevated
+                  default: standard
+                  description: RBAC permission profile for the tenant
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Provisioning
+                    - Ready
+                    - Failed
+                  description: Current provisioning phase
+                message:
+                  type: string
+                  description: Human-readable status message
+                webhookSecret:
+                  type: string
+                  description: Generated webhook secret for GitHub webhook configuration
+                webhookURL:
+                  type: string
+                  description: Lighthouse webhook URL
+                namespaceCreated:
+                  type: boolean
+                  description: Whether tenant namespace has been created
+                serviceAccountCreated:
+                  type: boolean
+                  description: Whether service account has been created
+                rbacCreated:
+                  type: boolean
+                  description: Whether RBAC resources have been created
+                quotasCreated:
+                  type: boolean
+                  description: Whether resource quotas have been created
+                networkPolicyCreated:
+                  type: boolean
+                  description: Whether network policy has been created
+                terraformSecretCreated:
+                  type: boolean
+                  description: Whether Terraform backend secret has been created
+                webhookSecretCreated:
+                  type: boolean
+                  description: Whether webhook secret has been created
+                allowlistUpdated:
+                  type: boolean
+                  description: Whether Lighthouse allowlist has been updated
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Org
+          type: string
+          jsonPath: .spec.repoOrg
+        - name: Repo
+          type: string
+          jsonPath: .spec.repoName
+        - name: Tenant
+          type: string
+          jsonPath: .spec.tenantName
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

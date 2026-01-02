@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: ${TENANT_NAME}
+spec:
+  hard:
+    # CPU limits
+    requests.cpu: "4"
+    limits.cpu: "8"
+    
+    # Memory limits
+    requests.memory: "8Gi"
+    limits.memory: "16Gi"
+    
+    # Storage limits
+    persistentvolumeclaims: "5"
+    
+    # Pod limits
+    pods: "20"

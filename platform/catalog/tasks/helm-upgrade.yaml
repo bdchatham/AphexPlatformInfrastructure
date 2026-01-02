@@ -1,0 +1,93 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: helm-upgrade
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: helm
+    tekton.dev/displayName: "helm upgrade"
+    tekton.dev/platforms: "linux/amd64,linux/arm64"
+spec:
+  description: >-
+    This Task upgrades a Helm release using helm upgrade --install.
+    It supports values files and inline values for configuration.
+    Designed for platform upgrade workflows where Helm-managed components
+    need to be upgraded to new versions.
+
+  params:
+    - name: chart
+      description: Helm chart to install (e.g., jx3/lighthouse or stable/nginx)
+      type: string
+    - name: release-name
+      description: Name of the Helm release
+      type: string
+    - name: namespace
+      description: Namespace to install the release into
+      type: string
+    - name: values-file
+      description: Path to values file (relative to workspace root, optional)
+      type: string
+      default: ""
+    - name: values
+      description: Inline values in YAML format (optional)
+      type: string
+      default: ""
+    - name: version
+      description: Chart version to install (optional, defaults to latest)
+      type: string
+      default: ""
+    - name: create-namespace
+      description: Create namespace if it doesn't exist
+      type: string
+      default: "true"
+    - name: helm-image
+      description: The image providing helm binary
+      type: string
+      default: "alpine/helm:3.13.0"
+
+  workspaces:
+    - name: source
+      description: Workspace containing values files (if using values-file param)
+
+  steps:
+    - name: upgrade
+      image: "$(params.helm-image)"
+      script: |
+        #!/bin/sh
+        set -e
+
+        echo "Upgrading Helm release $(params.release-name) in namespace $(params.namespace)"
+        
+        HELM_ARGS="--install --wait"
+        
+        if [ "$(params.create-namespace)" = "true" ]; then
+          HELM_ARGS="${HELM_ARGS} --create-namespace"
+        fi
+        
+        if [ -n "$(params.version)" ]; then
+          HELM_ARGS="${HELM_ARGS} --version $(params.version)"
+        fi
+        
+        if [ -n "$(params.values-file)" ]; then
+          VALUES_PATH="$(workspaces.source.path)/$(params.values-file)"
+          if [ ! -f "${VALUES_PATH}" ]; then
+            echo "Error: Values file ${VALUES_PATH} does not exist"
+            exit 1
+          fi
+          HELM_ARGS="${HELM_ARGS} -f ${VALUES_PATH}"
+        fi
+        
+        if [ -n "$(params.values)" ]; then
+          echo "$(params.values)" > /tmp/inline-values.yaml
+          HELM_ARGS="${HELM_ARGS} -f /tmp/inline-values.yaml"
+        fi
+
+        helm upgrade $(params.release-name) $(params.chart) \
+          --namespace $(params.namespace) \
+          ${HELM_ARGS}
+        
+        echo "Successfully upgraded release $(params.release-name)"

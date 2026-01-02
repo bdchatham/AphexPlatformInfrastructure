@@ -1,0 +1,39 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: release
+  labels:
+    app: pipeline-test
+    branch: main
+spec:
+  pipelineRef:
+    name: cdktf-deploy-pipeline
+    namespace: pipeline-catalog
+  
+  params:
+    - name: repo-url
+      value: $(params.REPO_URL)
+    - name: commit-sha
+      value: $(params.PULL_BASE_SHA)
+    - name: tenant-name
+      value: test-tenant
+    - name: branch
+      value: $(params.PULL_BASE_REF)
+  
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+    
+    - name: terraform-state
+      secret:
+        secretName: terraform-backend-config
+  
+  serviceAccountName: pipeline-runner
+  
+  timeout: 1h

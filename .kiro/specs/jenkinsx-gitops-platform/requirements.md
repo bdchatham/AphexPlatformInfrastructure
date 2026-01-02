@@ -1,85 +1,83 @@
-# Requirements Document: Jenkins X GitOps Platform
+# Requirements Document: Jenkins X Platform with Self-Service CI/CD
 
 ## Introduction
 
-This document defines requirements for a GitOps-based Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository registration with automated tenant provisioning and CDKTF deployment pipelines, managed entirely through GitOps principles using ArgoCD.
+This document defines requirements for a Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository registration with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through its own CI/CD pipeline.
 
 ## Glossary
 
-- **GitOps**: Declarative infrastructure and application management using Git as the single source of truth
-- **ArgoCD**: Kubernetes-native GitOps continuous delivery tool
-- **Bootstrap**: One-time initialization process that creates cluster and installs ArgoCD
-- **Application**: ArgoCD resource that defines what to deploy and where
-- **Sync**: Process of reconciling cluster state with Git repository state
+- **Bootstrap**: One-time initialization script that creates cluster, installs Tekton, JenkinsX, and Lighthouse
 - **Tenant**: Isolated namespace with dedicated resources for a repository
 - **RepoBinding**: Custom resource that declares repository-to-tenant mapping
-- **Registration_Controller**: Kubernetes controller that provisions tenant resources based on RepoBindings
-- **Platform_Assets**: Shared Tekton Tasks and Pipelines for CDKTF deployments
-- **Lighthouse**: GitHub webhook handler and pipeline trigger
+- **Onboarding_Controller**: Kubernetes controller that provisions tenant resources based on RepoBindings
+- **Platform_Catalog**: Shared Tekton Tasks and Pipelines for CDKTF deployments
+- **Lighthouse**: GitHub webhook handler and pipeline trigger from Jenkins X
+- **Platform_Pipeline**: Self-upgrade pipeline that manages platform component updates
+- **Webhook_Secret**: Cryptographically secure secret for GitHub webhook validation
 
 ## Requirements
 
-### Requirement 1: GitOps-Based Platform Management
+### Requirement 1: Platform Self-Upgrade via CI/CD
 
-**User Story:** As a platform engineer, I want all platform components managed via GitOps, so that infrastructure changes are version-controlled, auditable, and automatically applied.
+**User Story:** As a platform engineer, I want the platform to upgrade itself via CI/CD pipeline, so that platform changes are automatically deployed when I commit to the infrastructure repository.
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL use ArgoCD as the GitOps operator
-2. WHEN platform manifests are committed to Git, THEN ArgoCD SHALL automatically sync changes to the cluster
-3. THE Platform SHALL maintain all component definitions in Git (no manual kubectl apply)
-4. WHEN cluster state drifts from Git, THEN ArgoCD SHALL detect and report the drift
-5. THE Platform SHALL support rollback via Git revert operations
+1. THE Platform SHALL have a dedicated pipeline for self-upgrade
+2. WHEN changes are committed to the platform repository, THEN Lighthouse SHALL trigger the platform upgrade pipeline
+3. THE Platform_Pipeline SHALL apply Kubernetes manifests for platform components
+4. THE Platform_Pipeline SHALL upgrade Helm releases for Tekton, Lighthouse, and other components
+5. THE Platform SHALL maintain all component definitions in Git (version-controlled)
 
-### Requirement 2: Minimal Bootstrap Process
+### Requirement 2: Single-Command Bootstrap
 
-**User Story:** As a platform engineer, I want a minimal bootstrap process, so that I can quickly initialize new clusters without complex scripts.
+**User Story:** As a platform engineer, I want a single bootstrap command, so that I can quickly initialize new clusters without running multiple scripts.
 
 #### Acceptance Criteria
 
 1. THE Bootstrap_Script SHALL create a Kubernetes cluster (Kind for local, configurable for other providers)
-2. THE Bootstrap_Script SHALL install ArgoCD
-3. THE Bootstrap_Script SHALL configure ArgoCD to watch the platform repository
-4. THE Bootstrap_Script SHALL NOT install platform components directly (ArgoCD handles this)
-5. WHEN bootstrap completes, THEN ArgoCD SHALL automatically deploy all platform components
+2. THE Bootstrap_Script SHALL install Tekton Pipelines
+3. THE Bootstrap_Script SHALL install Jenkins X and Lighthouse
+4. THE Bootstrap_Script SHALL generate a webhook secret for the platform repository
+5. WHEN bootstrap completes, THEN the script SHALL display the webhook secret and GitHub configuration instructions
 
-### Requirement 3: ArgoCD Application Structure
+### Requirement 3: Platform Repository Registration
 
-**User Story:** As a platform engineer, I want a clear ArgoCD Application structure, so that I can understand and manage component dependencies.
-
-#### Acceptance Criteria
-
-1. THE Platform SHALL define an "app-of-apps" pattern with a root Application
-2. THE Root_Application SHALL manage child Applications for each platform component
-3. WHEN a child Application is added to Git, THEN ArgoCD SHALL automatically create and sync it
-4. THE Platform SHALL organize Applications by concern (infrastructure, platform, tenants)
-5. THE Platform SHALL define sync waves to control deployment order
-
-### Requirement 4: Declarative Component Management
-
-**User Story:** As a platform engineer, I want all components defined declaratively, so that I can manage them through Git without custom scripts.
+**User Story:** As a platform engineer, I want the platform repository automatically registered during bootstrap, so that platform upgrades work immediately after installation.
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL use ArgoCD Applications for Helm-based components (Tekton, Lighthouse)
-2. THE Platform SHALL use Kustomize for custom components (CRDs, controllers, Dex)
-3. THE Platform SHALL NOT require custom installation scripts for components
-4. WHEN component configuration changes in Git, THEN ArgoCD SHALL apply the changes automatically
-5. THE Platform SHALL use HelmRelease or Application resources instead of helm CLI commands
+1. THE Bootstrap_Script SHALL create a RepoBinding for the platform repository
+2. THE RepoBinding SHALL provision a platform-infra tenant namespace
+3. THE Platform SHALL deploy the platform upgrade pipeline to the platform-infra namespace
+4. THE Platform SHALL configure Lighthouse to accept webhooks for the platform repository
+5. THE Bootstrap_Script SHALL display webhook configuration instructions with the generated secret
+
+### Requirement 4: Platform Upgrade Pipeline
+
+**User Story:** As a platform engineer, I want a pipeline that upgrades platform components, so that I can deploy platform changes by committing to Git.
+
+#### Acceptance Criteria
+
+1. THE Platform_Pipeline SHALL apply CRDs and namespace manifests
+2. THE Platform_Pipeline SHALL upgrade Tekton Pipelines via kubectl apply
+3. THE Platform_Pipeline SHALL upgrade Lighthouse via Helm
+4. THE Platform_Pipeline SHALL apply onboarding controller manifests
+5. THE Platform_Pipeline SHALL apply pipeline catalog Tasks and Pipelines
 
 ### Requirement 5: Self-Service Repository Registration
 
-**User Story:** As a developer, I want to register my repository by providing all required information, so that I get a fully configured tenant with webhook integration.
+**User Story:** As a developer, I want to register my repository by creating a RepoBinding, so that I get a fully configured tenant with webhook integration.
 
 #### Acceptance Criteria
 
-1. WHEN a developer creates a RepoBinding resource with GitHub App credentials, THEN the Registration_Controller SHALL provision a tenant namespace
-2. THE Registration_Controller SHALL create a Lighthouse secret with the provided GitHub App credentials
-3. THE Registration_Controller SHALL create a service account with appropriate RBAC
-4. THE Registration_Controller SHALL create ResourceQuota and LimitRange for the tenant
-5. THE Registration_Controller SHALL create NetworkPolicy for tenant isolation
-6. THE Registration_Controller SHALL update the Lighthouse allowlist to enable webhooks
-7. THE RepoBinding SHALL include GitHub App ID, Installation ID, and private key reference
+1. WHEN a developer creates a RepoBinding resource, THEN the Onboarding_Controller SHALL provision a tenant namespace
+2. THE Onboarding_Controller SHALL generate a webhook secret for the repository
+3. THE Onboarding_Controller SHALL create a service account with appropriate RBAC
+4. THE Onboarding_Controller SHALL create ResourceQuota and LimitRange for the tenant
+5. THE Onboarding_Controller SHALL create NetworkPolicy for tenant isolation
+6. THE Onboarding_Controller SHALL update the Lighthouse allowlist to enable webhooks
+7. THE Onboarding_Controller SHALL update RepoBinding status with webhook secret and configuration instructions
 
 ### Requirement 6: Tenant Isolation
 
@@ -105,17 +103,17 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 4. THE Pipeline SHALL run cdktf deploy to apply infrastructure changes
 5. THE Pipeline SHALL use Terraform state stored in Kubernetes backend
 
-### Requirement 8: GitHub Webhook Integration
+### Requirement 8: Webhook Secret Management
 
-**User Story:** As a developer, I want GitHub webhooks to trigger pipelines, so that deployments happen automatically on merge.
+**User Story:** As a platform engineer, I want secure webhook secret generation, so that GitHub webhooks are properly authenticated.
 
 #### Acceptance Criteria
 
-1. WHEN a repository is registered, THEN the Registration_Controller SHALL create a webhook on that repository via GitHub API
-2. WHEN a GitHub webhook is received, THEN Lighthouse SHALL validate the webhook signature
-3. WHEN a webhook is for an allowed repository, THEN Lighthouse SHALL create a PipelineRun
-4. WHEN a webhook is for a disallowed repository, THEN Lighthouse SHALL reject it
-5. THE Platform SHALL store webhook secrets securely per tenant
+1. WHEN a repository is registered, THEN the Onboarding_Controller SHALL generate a cryptographically secure webhook secret
+2. THE Onboarding_Controller SHALL store the webhook secret in a Kubernetes Secret
+3. THE Onboarding_Controller SHALL update RepoBinding status with the webhook secret
+4. WHEN a GitHub webhook is received, THEN Lighthouse SHALL validate the webhook signature
+5. WHEN a webhook is for a disallowed repository, THEN Lighthouse SHALL reject it
 
 ### Requirement 9: Observability and Monitoring
 
@@ -123,11 +121,11 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL expose ArgoCD UI for GitOps status
-2. THE Platform SHALL log all sync operations and errors
-3. WHEN an Application fails to sync, THEN ArgoCD SHALL report the error
-4. THE Platform SHALL expose Tekton Dashboard for pipeline visibility
-5. THE Platform SHALL use Kubernetes events for component status
+1. THE Platform SHALL expose Tekton Dashboard for pipeline visibility
+2. THE Platform SHALL log all pipeline executions and errors
+3. WHEN a PipelineRun fails, THEN Tekton SHALL report the error in the PipelineRun status
+4. THE Platform SHALL use Kubernetes events for component status
+5. THE Platform SHALL provide kubectl commands for troubleshooting in documentation
 
 ### Requirement 10: Secrets Management
 
@@ -136,10 +134,10 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 #### Acceptance Criteria
 
 1. THE Platform SHALL NOT store secrets in Git repository
-2. THE Platform SHALL create tenant-specific Lighthouse secrets during registration
-3. THE Registration_Controller SHALL create secrets from RepoBinding spec data
-4. WHEN a RepoBinding includes GitHub App credentials, THEN the controller SHALL create a Lighthouse secret in the tenant namespace
-5. THE Platform SHALL support referencing existing secrets for shared credentials
+2. THE Platform SHALL create tenant-specific webhook secrets during registration
+3. THE Onboarding_Controller SHALL generate webhook secrets using cryptographic randomness
+4. THE Platform SHALL store GitHub App credentials in Kubernetes Secrets
+5. THE Platform SHALL isolate tenant secrets to their respective namespaces
 
 ### Requirement 11: Disaster Recovery
 
@@ -148,10 +146,10 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 #### Acceptance Criteria
 
 1. WHEN a cluster is lost, THEN running bootstrap on a new cluster SHALL restore all platform components
-2. THE Platform SHALL store all configuration in Git (no cluster-specific state)
-3. THE Platform SHALL document backup procedures for secrets
-4. WHEN ArgoCD syncs after bootstrap, THEN all Applications SHALL reach healthy state
-5. THE Platform SHALL support exporting and importing RepoBinding resources
+2. THE Platform SHALL store all configuration in Git (no cluster-specific state except secrets)
+3. THE Platform SHALL document backup procedures for GitHub App credentials
+4. WHEN bootstrap completes, THEN all platform components SHALL be ready
+5. THE Platform SHALL support re-registering repositories by reapplying RepoBinding resources
 
 ### Requirement 12: Development Workflow
 
@@ -159,11 +157,11 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL support multiple ArgoCD Applications for different environments
-2. WHEN testing changes, THEN engineers SHALL use Git branches and ArgoCD app-of-apps
-3. THE Platform SHALL support local Kind clusters for development
-4. THE Platform SHALL document the change testing workflow
-5. THE Platform SHALL use ArgoCD sync policies (manual vs automatic) appropriately
+1. THE Platform SHALL support local Kind clusters for development
+2. WHEN testing changes, THEN engineers SHALL use Git branches and test clusters
+3. THE Platform SHALL document the change testing workflow
+4. THE Platform SHALL support running the platform upgrade pipeline manually for testing
+5. THE Platform SHALL provide verification scripts for testing platform components
 
 ### Requirement 13: Documentation and Runbooks
 
@@ -172,9 +170,9 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 #### Acceptance Criteria
 
 1. THE Platform SHALL document the bootstrap process
-2. THE Platform SHALL document the GitOps workflow for making changes
+2. THE Platform SHALL document the platform self-upgrade workflow
 3. THE Platform SHALL document common troubleshooting scenarios
-4. THE Platform SHALL document the ArgoCD Application structure
+4. THE Platform SHALL document the repository registration process
 5. THE Platform SHALL maintain documentation in `.kiro/docs/`
 
 ### Requirement 14: Upgrade and Maintenance
@@ -183,11 +181,11 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 #### Acceptance Criteria
 
-1. WHEN upgrading a component, THEN the engineer SHALL update the version in Git
-2. WHEN ArgoCD syncs the change, THEN the component SHALL upgrade gracefully
-3. THE Platform SHALL use Helm chart versions for third-party components
-4. THE Platform SHALL use image tags for custom components
-5. THE Platform SHALL support rollback via Git revert and ArgoCD rollback
+1. WHEN upgrading a component, THEN the engineer SHALL update the version in Git and commit
+2. WHEN the platform upgrade pipeline runs, THEN components SHALL upgrade gracefully
+3. THE Platform SHALL use versioned Tekton release manifests
+4. THE Platform SHALL use Helm chart versions for Lighthouse
+5. THE Platform SHALL support rollback via Git revert and pipeline re-run
 
 ### Requirement 15: Minimal Custom Code
 
@@ -195,8 +193,8 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL eliminate custom installation scripts (except bootstrap)
-2. THE Platform SHALL use standard Kubernetes and ArgoCD patterns
-3. THE Platform SHALL leverage existing tools (Helm, Kustomize) instead of custom scripts
-4. THE Platform SHALL minimize the registration controller code to core logic only
+1. THE Platform SHALL use a single bootstrap script for initialization
+2. THE Platform SHALL use standard Kubernetes and Tekton patterns
+3. THE Platform SHALL leverage existing tools (Helm, kubectl, Tekton) instead of custom scripts
+4. THE Platform SHALL minimize the onboarding controller code to core logic only
 5. THE Platform SHALL document any custom code with clear rationale

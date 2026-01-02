@@ -1,0 +1,230 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: upload-artifacts
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Storage
+    tekton.dev/tags: artifacts, storage, s3
+    tekton.dev/displayName: "upload artifacts"
+    tekton.dev/platforms: "linux/amd64,linux/arm64"
+spec:
+  description: >-
+    This Task uploads pipeline artifacts (logs, outputs, terraform plans) to external storage.
+    It is designed for use in the Arbiter Pipeline Infrastructure to preserve
+    deployment artifacts for inspection and auditing.
+
+  params:
+    - name: artifactsDir
+      description: Directory containing artifacts to upload
+      type: string
+      default: "."
+    - name: tenantName
+      description: Tenant namespace name for artifact organization
+      type: string
+    - name: pipelineRunName
+      description: PipelineRun name for artifact identification
+      type: string
+    - name: storageEndpoint
+      description: S3-compatible storage endpoint
+      type: string
+      default: "http://minio.storage-system.svc.cluster.local:9000"
+    - name: storageBucket
+      description: S3 bucket name for artifacts
+      type: string
+      default: "pipeline-artifacts"
+    - name: runnerImage
+      description: Container image with aws-cli or s3cmd
+      type: string
+      default: "ghcr.io/bdchatham/pipeline-runner:latest"
+    - name: includePatterns
+      description: Comma-separated list of file patterns to include
+      type: string
+      default: "*.log,*.json,*.txt,cdktf.out/**"
+    - name: verbose
+      description: Enable verbose output
+      type: string
+      default: "false"
+
+  workspaces:
+    - name: source
+      description: Workspace containing artifacts to upload
+    - name: storage-credentials
+      description: Workspace containing S3 credentials
+      optional: true
+
+  results:
+    - name: upload-status
+      description: Status of the upload operation (success or failure)
+    - name: artifact-url
+      description: URL to access uploaded artifacts
+
+  steps:
+    - name: prepare-artifacts
+      image: "$(params.runnerImage)"
+      workingDir: "$(workspaces.source.path)/$(params.artifactsDir)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Preparing artifacts for upload..."
+        
+        # Create artifacts directory structure
+        ARTIFACT_PATH="$(params.tenantName)/$(params.pipelineRunName)"
+        mkdir -p "/tmp/artifacts/${ARTIFACT_PATH}"
+        
+        # Copy artifacts based on include patterns
+        IFS=',' read -ra PATTERNS <<< "$(params.includePatterns)"
+        for pattern in "${PATTERNS[@]}"; do
+          echo "Collecting files matching: $pattern"
+          find . -name "$pattern" -type f -exec cp --parents {} "/tmp/artifacts/${ARTIFACT_PATH}/" \; || true
+        done
+        
+        # Create manifest file
+        cat > "/tmp/artifacts/${ARTIFACT_PATH}/manifest.json" <<EOF
+        {
+          "tenant": "$(params.tenantName)",
+          "pipelineRun": "$(params.pipelineRunName)",
+          "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "files": []
+        }
+        EOF
+        
+        # List collected artifacts
+        echo "Artifacts prepared:"
+        find "/tmp/artifacts/${ARTIFACT_PATH}" -type f
+        
+        # Count artifacts
+        artifact_count=$(find "/tmp/artifacts/${ARTIFACT_PATH}" -type f | wc -l)
+        echo "Total artifacts: $artifact_count"
+
+    - name: configure-storage
+      image: "$(params.runnerImage)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Configuring storage credentials..."
+        
+        # Check if storage credentials workspace is provided
+        if [ "$(workspaces.storage-credentials.bound)" = "true" ]; then
+          echo "Using credentials from workspace"
+          
+          # Copy AWS credentials if they exist
+          if [ -f "$(workspaces.storage-credentials.path)/credentials" ]; then
+            mkdir -p ~/.aws
+            cp "$(workspaces.storage-credentials.path)/credentials" ~/.aws/credentials
+            chmod 600 ~/.aws/credentials
+            echo "Storage credentials configured"
+          fi
+          
+          # Copy AWS config if it exists
+          if [ -f "$(workspaces.storage-credentials.path)/config" ]; then
+            cp "$(workspaces.storage-credentials.path)/config" ~/.aws/config
+            chmod 600 ~/.aws/config
+            echo "Storage config configured"
+          fi
+        else
+          echo "WARNING: No storage credentials provided"
+          echo "Upload may fail if storage requires authentication"
+        fi
+
+    - name: upload
+      image: "$(params.runnerImage)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Uploading artifacts to storage..."
+        
+        ARTIFACT_PATH="$(params.tenantName)/$(params.pipelineRunName)"
+        
+        # Check if aws-cli is available
+        if command -v aws &> /dev/null; then
+          echo "Using AWS CLI for upload"
+          
+          # Configure endpoint
+          export AWS_ENDPOINT_URL="$(params.storageEndpoint)"
+          
+          # Upload artifacts
+          if [ "$(params.verbose)" = "true" ]; then
+            aws s3 sync "/tmp/artifacts/${ARTIFACT_PATH}" \
+              "s3://$(params.storageBucket)/${ARTIFACT_PATH}" \
+              --endpoint-url "$(params.storageEndpoint)"
+          else
+            aws s3 sync "/tmp/artifacts/${ARTIFACT_PATH}" \
+              "s3://$(params.storageBucket)/${ARTIFACT_PATH}" \
+              --endpoint-url "$(params.storageEndpoint)" \
+              --quiet
+          fi
+          
+          echo "Upload completed successfully"
+          echo "success" > "$(results.upload-status.path)"
+          
+          # Generate artifact URL
+          ARTIFACT_URL="$(params.storageEndpoint)/$(params.storageBucket)/${ARTIFACT_PATH}"
+          echo "$ARTIFACT_URL" > "$(results.artifact-url.path)"
+          echo "Artifacts available at: $ARTIFACT_URL"
+          
+        elif command -v s3cmd &> /dev/null; then
+          echo "Using s3cmd for upload"
+          
+          # Upload using s3cmd
+          s3cmd sync "/tmp/artifacts/${ARTIFACT_PATH}/" \
+            "s3://$(params.storageBucket)/${ARTIFACT_PATH}/" \
+            --host="$(params.storageEndpoint)" \
+            --host-bucket="$(params.storageEndpoint)/$(params.storageBucket)"
+          
+          echo "Upload completed successfully"
+          echo "success" > "$(results.upload-status.path)"
+          
+          # Generate artifact URL
+          ARTIFACT_URL="$(params.storageEndpoint)/$(params.storageBucket)/${ARTIFACT_PATH}"
+          echo "$ARTIFACT_URL" > "$(results.artifact-url.path)"
+          echo "Artifacts available at: $ARTIFACT_URL"
+          
+        else
+          echo "ERROR: No S3 client available (aws-cli or s3cmd)"
+          echo "failure" > "$(results.upload-status.path)"
+          echo "unavailable" > "$(results.artifact-url.path)"
+          exit 1
+        fi
+
+    - name: verify-upload
+      image: "$(params.runnerImage)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "Verifying artifact upload..."
+        
+        ARTIFACT_PATH="$(params.tenantName)/$(params.pipelineRunName)"
+        
+        # Check if aws-cli is available
+        if command -v aws &> /dev/null; then
+          export AWS_ENDPOINT_URL="$(params.storageEndpoint)"
+          
+          # List uploaded files
+          echo "Uploaded artifacts:"
+          aws s3 ls "s3://$(params.storageBucket)/${ARTIFACT_PATH}/" \
+            --endpoint-url "$(params.storageEndpoint)" \
+            --recursive
+          
+          # Count uploaded files
+          uploaded_count=$(aws s3 ls "s3://$(params.storageBucket)/${ARTIFACT_PATH}/" \
+            --endpoint-url "$(params.storageEndpoint)" \
+            --recursive | wc -l)
+          
+          echo "Total uploaded files: $uploaded_count"
+          
+          if [ "$uploaded_count" -gt 0 ]; then
+            echo "Upload verification successful"
+          else
+            echo "WARNING: No files found in storage"
+          fi
+        else
+          echo "Skipping verification (no S3 client available)"
+        fi

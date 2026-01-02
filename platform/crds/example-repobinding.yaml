@@ -2,7 +2,7 @@
 # This example onboards the "archon-agent" repository from "your-github-org"
 # and creates a tenant namespace called "archon"
 
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding
@@ -24,7 +24,7 @@ spec:
 
 ---
 # Example with elevated permissions
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
