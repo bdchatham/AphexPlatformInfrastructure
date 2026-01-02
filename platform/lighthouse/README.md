@@ -123,3 +123,4 @@ Lighthouse will automatically reload the allowlist when it changes.
 
 - [Lighthouse Documentation](https://github.com/jenkins-x/lighthouse)
 - [GitHub App Setup Guide](../bootstrap/github-app-setup.md)
+# Test commit to trigger webhook - Fri Jan  2 09:52:46 PST 2026
