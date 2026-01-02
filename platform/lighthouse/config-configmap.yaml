@@ -21,36 +21,9 @@ data:
     # Pod namespace  
     pod_namespace: pipeline-system
     
-    # Postsubmit jobs - static configuration
-    postsubmits:
-      bdchatham/ArbiterPipelineInfrastructure:
-        - name: platform-upgrade
-          agent: tekton
-          context: platform-upgrade
-          always_run: true
-          skip_report: false
-          branches:
-            - ^main$
-            - ^mainline$
-          pipeline_run_spec:
-            pipelineRef:
-              name: platform-upgrade-pipeline
-            workspaces:
-              - name: source
-                volumeClaimTemplate:
-                  spec:
-                    accessModes:
-                      - ReadWriteOnce
-                    resources:
-                      requests:
-                        storage: 1Gi
-            params:
-              - name: repo-url
-                value: $(params.REPO_URL)
-              - name: revision
-                value: $(params.PULL_BASE_SHA)
-          pipeline_run_params:
-            - name: REPO_URL
-              value: https://github.com/bdchatham/ArbiterPipelineInfrastructure
-            - name: PULL_BASE_SHA
-              value_template: "{{.BaseRef}}"
+    # Enable in-repo configuration
+    # Lighthouse will fetch pipeline configurations from .lighthouse/jenkins-x/ in repositories
+    in_repo_config:
+      enabled: true
+      allowed_clusters:
+        "*": ["*"]
