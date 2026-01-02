@@ -1,0 +1,24 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: platform-upgrade-pr
+  labels:
+    lighthouse.jenkins-x.io/refs.org: bdchatham
+    lighthouse.jenkins-x.io/refs.repo: ArbiterPipelineInfrastructure
+spec:
+  pipelineRef:
+    name: platform-upgrade-pipeline
+  workspaces:
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+  params:
+    - name: repo-url
+      value: $(params.REPO_URL)
+    - name: revision
+      value: $(params.PULL_PULL_SHA)
