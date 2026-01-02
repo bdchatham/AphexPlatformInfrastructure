@@ -6,4 +6,6 @@ spec:
       context: platform-upgrade
       source: "release.yaml"
       branches:
+        - ^main$
         - ^mainline$
+

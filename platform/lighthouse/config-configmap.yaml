@@ -10,13 +10,6 @@ data:
   config.yaml: |
     # Lighthouse configuration
     
-    # In-repo configuration
-    in_repo_config:
-      enabled:
-        "*": true
-      allowed_clusters:
-        "*": ["*"]
-    
     # Plank configuration (PipelineRun creation)
     plank:
       job_url_template: 'http://tekton-dashboard.pipeline-system/pipelineruns/{{.Namespace}}/{{.PipelineRun}}'
@@ -25,28 +18,39 @@ data:
     # Prowjob namespace
     prowjob_namespace: pipeline-system
     
-    # Pod namespace
+    # Pod namespace  
     pod_namespace: pipeline-system
     
-    # Postsubmit jobs for platform repository
+    # Postsubmit jobs - static configuration
     postsubmits:
       bdchatham/ArbiterPipelineInfrastructure:
         - name: platform-upgrade
+          agent: tekton
           context: platform-upgrade
           always_run: true
           skip_report: false
           branches:
             - ^main$
             - ^mainline$
-          spec:
-            containers:
-              - image: gcr.io/tekton-releases/github.com/tektoncd/pipeline/cmd/entrypoint:v0.56.0
-                command:
-                  - /ko-app/entrypoint
-                args:
-                  - --namespace=tenant-platform-infra
-                  - --pipelinerun=platform-upgrade-$(PROW_JOB_ID)
-                  - --pipeline=platform-upgrade-pipeline
-                  - --param=repo-url=$(REPO_URL)
-                  - --param=revision=$(PULL_BASE_SHA)
-                  - --workspace=name=source,volumeClaimTemplate=accessModes=ReadWriteOnce;resources=requests=storage=1Gi
+          pipeline_run_spec:
+            pipelineRef:
+              name: platform-upgrade-pipeline
+            workspaces:
+              - name: source
+                volumeClaimTemplate:
+                  spec:
+                    accessModes:
+                      - ReadWriteOnce
+                    resources:
+                      requests:
+                        storage: 1Gi
+            params:
+              - name: repo-url
+                value: $(params.REPO_URL)
+              - name: revision
+                value: $(params.PULL_BASE_SHA)
+          pipeline_run_params:
+            - name: REPO_URL
+              value: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+            - name: PULL_BASE_SHA
+              value_template: "{{.BaseRef}}"

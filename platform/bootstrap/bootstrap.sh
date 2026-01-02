@@ -473,14 +473,24 @@ else
     echo "    Installation ID: ${GITHUB_APP_INSTALLATION_ID}"
 fi
 
+# Add username to lighthouse-github-app secret for keeper
+echo -e "${BLUE}▸${NC} Updating GitHub App secret with username..."
+kubectl patch secret lighthouse-github-app -n pipeline-system --type=json -p='[
+  {
+    "op": "add",
+    "path": "/data/username",
+    "value": "'$(echo -n "jenkins-x[bot]" | base64)'"
+  }
+]' > /dev/null 2>&1
+echo -e "${GREEN}  ✓${NC} GitHub App secret updated"
+
 # Install Lighthouse
 echo -e "${BLUE}▸${NC} Installing Lighthouse..."
 if helm list -n pipeline-system | grep -q "lighthouse"; then
     if helm upgrade lighthouse jx3/lighthouse -n pipeline-system \
         --set git.kind=github \
         --set githubApp.enabled=true \
-        --set githubApp.username="jenkins-x[bot]" \
-        --set keeper.replicaCount=0 > /dev/null 2>&1; then
+        --set githubApp.username="jenkins-x[bot]" > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse upgraded successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to upgrade Lighthouse"
@@ -490,14 +500,77 @@ else
     if helm install lighthouse jx3/lighthouse -n pipeline-system \
         --set git.kind=github \
         --set githubApp.enabled=true \
-        --set githubApp.username="jenkins-x[bot]" \
-        --set keeper.replicaCount=0 > /dev/null 2>&1; then
+        --set githubApp.username="jenkins-x[bot]" > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse installed successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to install Lighthouse"
         exit 1
     fi
 fi
+
+# Configure keeper with GitHub App credentials
+echo -e "${BLUE}▸${NC} Configuring Lighthouse keeper with GitHub App credentials..."
+
+# Wait for keeper deployment to exist
+timeout=60
+elapsed=0
+while ! kubectl get deployment lighthouse-keeper -n pipeline-system &> /dev/null; do
+    if [ $elapsed -ge $timeout ]; then
+        echo -e "${RED}  ✗${NC} Timeout waiting for keeper deployment"
+        exit 1
+    fi
+    sleep 2
+    elapsed=$((elapsed + 2))
+done
+
+# Patch keeper deployment to add GitHub App environment variables
+kubectl patch deployment lighthouse-keeper -n pipeline-system --type=json -p='[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/env/-",
+    "value": {
+      "name": "GITHUB_APP_ID",
+      "valueFrom": {
+        "secretKeyRef": {
+          "name": "lighthouse-github-app",
+          "key": "app-id"
+        }
+      }
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/env/-",
+    "value": {
+      "name": "GITHUB_APP_INSTALLATION_ID",
+      "valueFrom": {
+        "secretKeyRef": {
+          "name": "lighthouse-github-app",
+          "key": "installation-id"
+        }
+      }
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/env/-",
+    "value": {
+      "name": "GIT_TOKEN_PATH",
+      "value": "/secrets/githubapp/tokens/private-key"
+    }
+  }
+]' > /dev/null 2>&1
+
+# Update keeper volume to use lighthouse-github-app secret
+kubectl patch deployment lighthouse-keeper -n pipeline-system --type=json -p='[
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/volumes/0/secret/secretName",
+    "value": "lighthouse-github-app"
+  }
+]' > /dev/null 2>&1
+
+echo -e "${GREEN}  ✓${NC} Keeper configured with GitHub App credentials"
 
 echo -e "${BLUE}▸${NC} Waiting for Lighthouse webhooks deployment..."
 timeout=120
@@ -531,6 +604,18 @@ else
     echo -e "${RED}  ✗${NC} Lighthouse foghorn failed to become ready"
     kubectl get deployment lighthouse-foghorn -n pipeline-system
     kubectl get pods -n pipeline-system -l app=lighthouse-foghorn
+    exit 1
+fi
+
+echo -e "${BLUE}▸${NC} Waiting for Lighthouse keeper deployment..."
+if kubectl wait --for=condition=available deployment/lighthouse-keeper \
+    -n pipeline-system \
+    --timeout=300s > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓${NC} Lighthouse keeper is ready"
+else
+    echo -e "${RED}  ✗${NC} Lighthouse keeper failed to become ready"
+    kubectl get deployment lighthouse-keeper -n pipeline-system
+    kubectl get pods -n pipeline-system -l app=lighthouse-keeper
     exit 1
 fi
 

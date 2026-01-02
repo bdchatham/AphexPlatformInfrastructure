@@ -382,7 +382,7 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
     - Add clear success/failure messages
     - _Requirements: 2.5_
 
-- [-] 15. Fix Lighthouse configAgent for pipeline triggering
+- [x] 15. Fix Lighthouse configAgent for pipeline triggering
   - [x] 15.1 Investigate Lighthouse configAgent configuration
     - Research how Lighthouse reads .lighthouse/jenkins-x/ trigger configs from repositories
     - Determine what configAgent settings are needed
@@ -403,7 +403,40 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
     - Check Lighthouse logs for successful trigger processing
     - _Requirements: 1.2, 1.3_
   
-  - [ ] 15.4 Verify platform upgrade pipeline execution
+  - [x] 15.4 Verify platform upgrade pipeline execution
+    - Confirm PipelineRun executes all tasks (git-clone, apply-crds, upgrade-tekton, etc.)
+    - Verify platform components are updated based on commit changes
+    - Check that changes from Git are applied to the cluster
+    - _Requirements: 1.3, 1.4, 1.5, 4.1, 4.2, 4.3, 4.4, 4.5_
+
+- [-] 16. Fix Lighthouse keeper GitHub App authentication
+  - [x] 16.1 Investigate keeper GitHub App credential mounting
+    - Check Helm chart values for GitHub App credential configuration
+    - Verify how githubApp.enabled=true should mount credentials
+    - Review keeper deployment to see what secrets/volumes are mounted
+    - _Context: Keeper is failing with "no token available for git kind github"_
+    - _Context: Webhooks are received (200) but no PipelineRuns created_
+    - _Context: Keeper needs GitHub API access to fetch .lighthouse/ configs from repos_
+  
+  - [x] 16.2 Configure keeper with GitHub App credentials
+    - Update Helm values or deployment to properly mount GitHub App secret
+    - Ensure keeper has access to GitHub App private key, app ID, and installation ID
+    - Configure environment variables for GitHub App authentication
+    - _Requirements: 1.2, 1.3_
+  
+  - [x] 16.3 Verify keeper can fetch in-repo configurations
+    - Check keeper logs for successful GitHub API connections
+    - Verify keeper can read .lighthouse/jenkins-x/ directories from repositories
+    - Confirm no "no token available" errors in keeper logs
+    - _Requirements: 1.2, 1.3_
+  
+  - [x] 16.4 Test webhook to PipelineRun flow with keeper
+    - Push a test commit to trigger webhook
+    - Verify Lighthouse creates PipelineRun in tenant-platform-infra namespace
+    - Check that PipelineRun uses configuration from .lighthouse/jenkins-x/
+    - _Requirements: 1.2, 1.3_
+  
+  - [ ] 16.5 Verify platform upgrade pipeline execution
     - Confirm PipelineRun executes all tasks (git-clone, apply-crds, upgrade-tekton, etc.)
     - Verify platform components are updated based on commit changes
     - Check that changes from Git are applied to the cluster
@@ -417,4 +450,5 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
 - Testing validates both bootstrap and self-upgrade workflows
 - Documentation ensures platform is maintainable and understandable
 - Cleanup removes all ArgoCD references from previous design
-- Task 15 addresses the Lighthouse configAgent issue discovered during task 6 testing
+- Task 15 addressed the Lighthouse configAgent configuration (ConfigMaps and in-repo config)
+- Task 16 addresses keeper GitHub App authentication for fetching in-repo configurations
