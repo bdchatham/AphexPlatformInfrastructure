@@ -393,22 +393,34 @@ if ! kubectl get secret lighthouse-github-app -n pipeline-system &> /dev/null; t
     echo "Please provide your GitHub App configuration:"
     echo ""
     
-    # Prompt for GitHub App ID
-    read -p "GitHub App ID: " GITHUB_APP_ID
+    # Check for GitHub App ID (environment variable or prompt)
+    if [ -z "$GITHUB_APP_ID" ]; then
+        read -p "GitHub App ID: " GITHUB_APP_ID
+    else
+        echo "Using GITHUB_APP_ID from environment: ${GITHUB_APP_ID}"
+    fi
     if [ -z "$GITHUB_APP_ID" ]; then
         echo -e "${RED}  ✗${NC} GitHub App ID is required"
         exit 1
     fi
     
-    # Prompt for GitHub App Installation ID
-    read -p "GitHub App Installation ID: " GITHUB_APP_INSTALLATION_ID
+    # Check for GitHub App Installation ID (environment variable or prompt)
+    if [ -z "$GITHUB_APP_INSTALLATION_ID" ]; then
+        read -p "GitHub App Installation ID: " GITHUB_APP_INSTALLATION_ID
+    else
+        echo "Using GITHUB_APP_INSTALLATION_ID from environment: ${GITHUB_APP_INSTALLATION_ID}"
+    fi
     if [ -z "$GITHUB_APP_INSTALLATION_ID" ]; then
         echo -e "${RED}  ✗${NC} GitHub App Installation ID is required"
         exit 1
     fi
     
-    # Prompt for private key file
-    read -p "Path to GitHub App Private Key (.pem file): " GITHUB_APP_PRIVATE_KEY_FILE
+    # Check for private key file path (environment variable or prompt)
+    if [ -z "$GITHUB_APP_PRIVATE_KEY_FILE" ]; then
+        read -p "Path to GitHub App Private Key (.pem file): " GITHUB_APP_PRIVATE_KEY_FILE
+    else
+        echo "Using GITHUB_APP_PRIVATE_KEY_FILE from environment: ${GITHUB_APP_PRIVATE_KEY_FILE}"
+    fi
     if [ -z "$GITHUB_APP_PRIVATE_KEY_FILE" ]; then
         echo -e "${RED}  ✗${NC} Private Key file path is required"
         exit 1
