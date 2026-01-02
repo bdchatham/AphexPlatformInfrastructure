@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This document defines requirements for a GitOps-based Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository onboarding with automated tenant provisioning and CDKTF deployment pipelines, managed entirely through GitOps principles using ArgoCD.
+This document defines requirements for a GitOps-based Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository registration with automated tenant provisioning and CDKTF deployment pipelines, managed entirely through GitOps principles using ArgoCD.
 
 ## Glossary
 
@@ -13,7 +13,7 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 - **Sync**: Process of reconciling cluster state with Git repository state
 - **Tenant**: Isolated namespace with dedicated resources for a repository
 - **RepoBinding**: Custom resource that declares repository-to-tenant mapping
-- **Onboarding_Controller**: Kubernetes controller that provisions tenant resources based on RepoBindings
+- **Registration_Controller**: Kubernetes controller that provisions tenant resources based on RepoBindings
 - **Platform_Assets**: Shared Tekton Tasks and Pipelines for CDKTF deployments
 - **Lighthouse**: GitHub webhook handler and pipeline trigger
 
@@ -67,17 +67,19 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 4. WHEN component configuration changes in Git, THEN ArgoCD SHALL apply the changes automatically
 5. THE Platform SHALL use HelmRelease or Application resources instead of helm CLI commands
 
-### Requirement 5: Self-Service Repository Onboarding
+### Requirement 5: Self-Service Repository Registration
 
-**User Story:** As a developer, I want to onboard my repository by creating a RepoBinding, so that I get an isolated tenant namespace with pipeline access.
+**User Story:** As a developer, I want to register my repository by providing all required information, so that I get a fully configured tenant with webhook integration.
 
 #### Acceptance Criteria
 
-1. WHEN a developer creates a RepoBinding resource, THEN the Onboarding_Controller SHALL provision a tenant namespace
-2. THE Onboarding_Controller SHALL create a service account with appropriate RBAC
-3. THE Onboarding_Controller SHALL create ResourceQuota and LimitRange for the tenant
-4. THE Onboarding_Controller SHALL create NetworkPolicy for tenant isolation
-5. THE Onboarding_Controller SHALL update the Lighthouse allowlist to enable webhooks
+1. WHEN a developer creates a RepoBinding resource with GitHub App credentials, THEN the Registration_Controller SHALL provision a tenant namespace
+2. THE Registration_Controller SHALL create a Lighthouse secret with the provided GitHub App credentials
+3. THE Registration_Controller SHALL create a service account with appropriate RBAC
+4. THE Registration_Controller SHALL create ResourceQuota and LimitRange for the tenant
+5. THE Registration_Controller SHALL create NetworkPolicy for tenant isolation
+6. THE Registration_Controller SHALL update the Lighthouse allowlist to enable webhooks
+7. THE RepoBinding SHALL include GitHub App ID, Installation ID, and private key reference
 
 ### Requirement 6: Tenant Isolation
 
@@ -109,11 +111,11 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL deploy Lighthouse to handle GitHub webhooks
-2. WHEN a GitHub webhook is received, THEN Lighthouse SHALL validate the signature
+1. WHEN a repository is registered, THEN the Registration_Controller SHALL create a webhook on that repository via GitHub API
+2. WHEN a GitHub webhook is received, THEN Lighthouse SHALL validate the webhook signature
 3. WHEN a webhook is for an allowed repository, THEN Lighthouse SHALL create a PipelineRun
 4. WHEN a webhook is for a disallowed repository, THEN Lighthouse SHALL reject it
-5. THE Platform SHALL maintain an allowlist of repositories in a ConfigMap
+5. THE Platform SHALL store webhook secrets securely per tenant
 
 ### Requirement 9: Observability and Monitoring
 
@@ -129,15 +131,15 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 
 ### Requirement 10: Secrets Management
 
-**User Story:** As a platform engineer, I want secure secrets management, so that sensitive credentials are not stored in Git.
+**User Story:** As a platform engineer, I want secure secrets management, so that sensitive credentials are properly isolated per tenant.
 
 #### Acceptance Criteria
 
 1. THE Platform SHALL NOT store secrets in Git repository
-2. THE Platform SHALL use Kubernetes Secrets for sensitive data
-3. THE Platform SHALL document manual secret creation steps
-4. WHERE sealed secrets or external secrets operator is configured, THE Platform SHALL support automated secret management
-5. THE Bootstrap_Script SHALL prompt for required secrets during initialization
+2. THE Platform SHALL create tenant-specific Lighthouse secrets during registration
+3. THE Registration_Controller SHALL create secrets from RepoBinding spec data
+4. WHEN a RepoBinding includes GitHub App credentials, THEN the controller SHALL create a Lighthouse secret in the tenant namespace
+5. THE Platform SHALL support referencing existing secrets for shared credentials
 
 ### Requirement 11: Disaster Recovery
 
@@ -196,5 +198,5 @@ This document defines requirements for a GitOps-based Jenkins X platform for hom
 1. THE Platform SHALL eliminate custom installation scripts (except bootstrap)
 2. THE Platform SHALL use standard Kubernetes and ArgoCD patterns
 3. THE Platform SHALL leverage existing tools (Helm, Kustomize) instead of custom scripts
-4. THE Platform SHALL minimize the onboarding controller code to core logic only
+4. THE Platform SHALL minimize the registration controller code to core logic only
 5. THE Platform SHALL document any custom code with clear rationale

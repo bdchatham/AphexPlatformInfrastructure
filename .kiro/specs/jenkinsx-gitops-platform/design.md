@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the design of a GitOps-based Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository onboarding with automated tenant provisioning and CDKTF deployment pipelines, managed entirely through ArgoCD.
+This document describes the design of a GitOps-based Jenkins X platform for homelab Kubernetes clusters. The platform provides self-service repository registration with automated tenant provisioning and CDKTF deployment pipelines, managed entirely through ArgoCD.
 
 ### Key Design Principles
 
@@ -57,7 +57,7 @@ graph TB
             Infra["infrastructure/<br/>(Namespaces, CRDs, Dex)"]
             Tekton["tekton/<br/>(Tekton via Helm)"]
             Lighthouse["lighthouse/<br/>(Lighthouse via Helm)"]
-            Onboarding["onboarding/<br/>(Controller + RBAC)"]
+            Registration["registration/<br/>(Controller + RBAC)"]
             Catalog["catalog/<br/>(Pipeline Tasks)"]
         end
     end
@@ -70,7 +70,7 @@ graph TB
             TektonSvc["Tekton"]
             LighthouseSvc["Lighthouse"]
             DexSvc["Dex"]
-            OnboardingSvc["Onboarding<br/>Controller"]
+            RegistrationSvc["Registration<br/>Controller"]
             CatalogSvc["Catalog"]
         end
         
@@ -92,8 +92,8 @@ graph TB
 The platform is organized into three layers:
 
 1. **Infrastructure Layer**: Core Kubernetes resources (namespaces, CRDs, RBAC, Dex)
-2. **Platform Layer**: Platform services (Tekton, Lighthouse, Onboarding Controller, Catalog)
-3. **Tenant Layer**: User namespaces and resources (provisioned by Onboarding Controller)
+2. **Platform Layer**: Platform services (Tekton, Lighthouse, Registration Controller, Catalog)
+3. **Tenant Layer**: User namespaces and resources (provisioned by Registration Controller)
 
 ### ArgoCD Application Structure
 
@@ -111,7 +111,7 @@ graph TD
     
     PlatformApps --> Tekton["tekton"]
     PlatformApps --> Lighthouse["lighthouse"]
-    PlatformApps --> Onboarding["onboarding-controller"]
+    PlatformApps --> Registration["registration-controller"]
     PlatformApps --> Catalog["pipeline-catalog"]
     
     TenantApps -.->|dynamically created| TenantApp["tenant-*<br/>(created by controller)"]
@@ -133,7 +133,9 @@ graph TD
 - Install ArgoCD using official manifests
 - Create initial ArgoCD Application pointing to Git repository
 - Configure ArgoCD to watch the platform repository
-- Prompt for required secrets (GitHub App credentials, etc.)
+- Display ArgoCD admin credentials
+- Display Lighthouse webhook URL for product teams
+- No GitHub integration required (webhooks managed manually)
 
 **Interface**:
 ```bash
@@ -152,6 +154,7 @@ Options:
 - ArgoCD installed and accessible
 - Root Application created and syncing
 - ArgoCD admin password displayed
+- Lighthouse webhook URL displayed for product teams
 
 **Configuration**: None (minimal script, no config files)
 
@@ -397,7 +400,7 @@ spec:
 
 **Purpose**: Handle GitHub webhooks and trigger pipelines
 
-**Managed By**: ArgoCD Application using Helm
+**Managed By**: ArgoCD Application using Helm or Kustomize
 
 **Configuration**:
 ```yaml
@@ -415,10 +418,8 @@ spec:
     targetRevision: 1.x.x
     helm:
       values: |
-        github:
-          appId: "${GITHUB_APP_ID}"
-          appInstallationId: "${GITHUB_APP_INSTALLATION_ID}"
-          secretName: "lighthouse-github-app"
+        webhook:
+          enabled: true
         configMaps:
           config: "lighthouse-config"
           allowlist: "repo-allowlist"
@@ -432,16 +433,13 @@ spec:
   syncWave: 2
 ```
 
-**Secrets**: GitHub App credentials must be created manually before syncing:
-```bash
-kubectl create secret generic lighthouse-github-app \
-  -n platform-services \
-  --from-literal=app-id=<APP_ID> \
-  --from-literal=installation-id=<INSTALLATION_ID> \
-  --from-file=private-key=<PATH_TO_KEY>
-```
+**Webhook Management**:
+- Webhooks created manually by product teams in GitHub
+- Registration Controller generates webhook secrets
+- Lighthouse validates webhook signatures using stored secrets
+- Each repository has its own webhook secret stored in Kubernetes
 
-#### 4.3 Onboarding Controller
+#### 4.3 Registration Controller
 
 **Purpose**: Provision tenant resources based on RepoBinding CRs
 
@@ -455,7 +453,7 @@ kubectl create secret generic lighthouse-github-app \
 
 **Configuration**:
 ```yaml
-# platform/onboarding/kustomization.yaml
+# platform/registration/kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: platform-services
@@ -465,22 +463,31 @@ resources:
   - rbac.yaml
   - templates/
 images:
-  - name: onboarding-controller
-    newName: ghcr.io/bdchatham/onboarding-controller
+  - name: registration-controller
+    newName: ghcr.io/bdchatham/registration-controller
     newTag: latest
 ```
 
 **Controller Logic**:
 - Watch RepoBinding resources
 - Validate spec (org, repo, tenant name)
+- **Generate webhook secret** (cryptographically secure random string)
+- Store webhook secret in Kubernetes Secret for Lighthouse
 - Create namespace with labels
 - Create service account
 - Create Role/RoleBinding based on permission profile
 - Create ResourceQuota and LimitRange
 - Create NetworkPolicy
 - Create Terraform backend secret
-- Update Lighthouse allowlist ConfigMap
-- Update RepoBinding status
+- Update Lighthouse allowlist ConfigMap with repo + secret reference
+- Update RepoBinding status with webhook secret and URL
+- **Return webhook secret to user** for manual GitHub webhook configuration
+
+**Webhook Secret Management**:
+- Secret generated using crypto/rand (e.g., `whsec_` + 32 random bytes base64)
+- Stored in Secret: `webhook-<tenant-name>` in platform-services namespace
+- Lighthouse reads secrets to validate incoming webhooks
+- Secret displayed in RepoBinding status and CLI output
 
 #### 4.4 Pipeline Catalog
 
@@ -511,25 +518,28 @@ resources:
 
 **Purpose**: Represent tenant namespaces in ArgoCD
 
-**Managed By**: Onboarding Controller (creates ArgoCD Applications dynamically)
+**Managed By**: Registration Controller (creates ArgoCD Applications dynamically)
 
-**Pattern**: When a RepoBinding is created, the Onboarding Controller creates an ArgoCD Application that represents the tenant namespace. This allows ArgoCD to track tenant resources.
+**Pattern**: When a RepoBinding is created with GitHub App credentials, the Registration Controller provisions all tenant resources including the Lighthouse secret.
 
 ```mermaid
 sequenceDiagram
     participant Dev as Developer
     participant Git as Git Repository
     participant ArgoCD
-    participant Controller as Onboarding Controller
+    participant Controller as Registration Controller
     participant K8s as Kubernetes API
     participant Lighthouse
     
-    Dev->>Git: Create RepoBinding YAML
+    Dev->>K8s: Create Secret with GitHub App private key
+    Dev->>Git: Create RepoBinding YAML<br/>(includes GitHub App ID, Installation ID, secret ref)
     Dev->>Git: git commit & push
     ArgoCD->>Git: Detect change
     ArgoCD->>K8s: Apply RepoBinding
     K8s->>Controller: RepoBinding created event
+    Controller->>K8s: Validate GitHub App credentials exist
     Controller->>K8s: Create namespace
+    Controller->>K8s: Create Lighthouse secret<br/>(from GitHub App credentials)
     Controller->>K8s: Create ServiceAccount
     Controller->>K8s: Create RBAC
     Controller->>K8s: Create ResourceQuota
@@ -540,7 +550,8 @@ sequenceDiagram
     Controller->>ArgoCD: Create tenant Application
     ArgoCD->>K8s: Sync tenant resources
     
-    Note over Dev,ArgoCD: Fully declarative, no manual steps
+    Note over Dev,ArgoCD: Product team provides all credentials upfront
+    Note over Controller,K8s: Platform creates everything needed
 ```
 
 **Configuration** (created by controller):
@@ -581,14 +592,31 @@ spec:
   permissionProfile: standard  # or elevated
 status:
   phase: Ready  # Pending, Provisioning, Ready, Failed
-  message: "Tenant provisioned successfully"
+  message: "Tenant provisioned successfully. Configure webhook in GitHub."
+  webhookSecret: whsec_abc123xyz456  # Generated by controller, use in GitHub
+  webhookURL: https://lighthouse.homelab.local/hook
   namespaceCreated: true
   serviceAccountCreated: true
   rbacCreated: true
   quotasCreated: true
   networkPolicyCreated: true
   terraformSecretCreated: true
+  webhookSecretCreated: true
   allowlistUpdated: true
+```
+
+**Webhook Setup Instructions** (displayed after registration):
+```
+Registration successful!
+
+Next steps - Configure GitHub webhook:
+1. Go to: https://github.com/bdchatham/example-repo/settings/hooks/new
+2. Payload URL: https://lighthouse.homelab.local/hook
+3. Content type: application/json
+4. Secret: whsec_abc123xyz456
+5. Events: Push events, Pull request events
+6. Active: ✓
+7. Click "Add webhook"
 ```
 
 ### ArgoCD Application (Root)
@@ -671,7 +699,7 @@ ArbiterPipelineInfrastructure/
 │   │   └── config/
 │   │       ├── lighthouse-config.yaml
 │   │       └── repo-allowlist.yaml
-│   ├── onboarding/
+│   ├── registration/
 │   │   ├── kustomization.yaml
 │   │   ├── deployment.yaml
 │   │   ├── service-account.yaml
