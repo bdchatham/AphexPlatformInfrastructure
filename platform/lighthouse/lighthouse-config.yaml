@@ -10,29 +10,13 @@ data:
   config.yaml: |
     # Lighthouse configuration for Jenkins X platform
     
-    # GitHub App configuration
-    # These values reference the lighthouse-github-app secret
-    github:
-      # GitHub App ID (from secret)
-      app_id: "${GITHUB_APP_ID}"
-      
-      # GitHub App Installation ID (from secret)
-      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
-      
-      # Webhook secret for signature validation (from secret)
-      webhook_secret: "${GITHUB_WEBHOOK_SECRET}"
-    
-    # Trigger configuration
-    triggers:
-      # Enable automatic triggering on push events
-      - repos:
-          - "*/*"  # Will be filtered by allowlist
-        events:
-          - push
-        branches:
-          - main
-          - master
-        pipeline: cdktf-deploy-pipeline
+    # In-repo configuration
+    # Enable reading .lighthouse/jenkins-x/ directories from repositories
+    in_repo_config:
+      enabled: true
+      # Allow all repositories to define their own trigger configurations
+      allowed_clusters:
+        "*": ["*"]
     
     # Plank configuration (PipelineRun creation)
     plank:
@@ -42,24 +26,17 @@ data:
       # PipelineRun timeout
       default_timeout: 3600  # 1 hour
       
-      # Pod template for pipeline execution
-      pod_template:
-        # Use tenant service account
-        serviceAccountName: pipeline-runner
-        
-        # Resource limits
-        resources:
-          requests:
-            cpu: "100m"
-            memory: "128Mi"
-          limits:
-            cpu: "2000m"
-            memory: "2Gi"
+      # Job URL template for linking to Tekton Dashboard
+      job_url_template: 'http://tekton-dashboard.pipeline-system/pipelineruns/{{.Namespace}}/{{.PipelineRun}}'
+      
+      # Report template for GitHub status
+      report_template: 'Job {{.Spec.Job}} {{.Status.State}}. [Details]({{.Status.URL}})'
+    
+    # Prowjob namespace (where Lighthouse creates jobs)
+    prowjob_namespace: pipeline-system
+    
+    # Pod namespace (where pipeline pods run)
+    pod_namespace: pipeline-system
     
     # Logging configuration
     log_level: info
-    
-    # Metrics configuration
-    metrics:
-      enabled: true
-      port: 9090

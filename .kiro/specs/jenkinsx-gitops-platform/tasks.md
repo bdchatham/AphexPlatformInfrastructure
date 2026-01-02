@@ -144,19 +144,22 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
   - [x] 6.1 Configure GitHub webhook
     - Add webhook to platform repository
     - Use webhook secret from bootstrap output
-    - Point to Lighthouse URL
+    - Point to Lighthouse URL (Note: Use /hooks endpoint, not /hook)
     - _Requirements: 3.5_
+    - _Status: Webhook configured and delivering successfully (200 response)_
   
-  - [ ] 6.2 Trigger platform upgrade
+  - [x] 6.2 Trigger platform upgrade
     - Make test change to platform manifests
     - Commit and push to platform repository
     - Verify webhook delivered
     - _Requirements: 1.2_
+    - _Status: Added environment variable support to bootstrap script, webhook delivered_
   
   - [ ] 6.3 Verify pipeline execution
     - Check PipelineRun created in platform-infra namespace
     - Verify all tasks complete successfully
     - _Requirements: 1.3, 1.4, 1.5_
+    - _Status: Blocked by Lighthouse configAgent issue (see task 15)_
   
   - [ ] 6.4 Verify component upgrades
     - Check Tekton version updated
@@ -164,6 +167,7 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
     - Check onboarding controller updated
     - Check catalog updated
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+    - _Status: Blocked by Lighthouse configAgent issue (see task 15)_
 
 - [ ] 7. Test tenant registration workflow
   - [ ] 7.1 Create test RepoBinding
@@ -378,6 +382,33 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
     - Add clear success/failure messages
     - _Requirements: 2.5_
 
+- [-] 15. Fix Lighthouse configAgent for pipeline triggering
+  - [x] 15.1 Investigate Lighthouse configAgent configuration
+    - Research how Lighthouse reads .lighthouse/jenkins-x/ trigger configs from repositories
+    - Determine what configAgent settings are needed
+    - Review Lighthouse Helm chart values for configAgent options
+    - _Context: Webhooks are being delivered successfully (200 response) but PipelineRuns are not being created_
+    - _Context: Lighthouse logs show "no configAgent configuration" warning_
+    - _Context: Repository has .lighthouse/jenkins-x/triggers.yaml and release.yaml configured_
+  
+  - [x] 15.2 Configure Lighthouse configAgent
+    - Update Lighthouse Helm values or ConfigMap with configAgent settings
+    - Configure how Lighthouse fetches repository configuration
+    - Ensure Lighthouse can read .lighthouse directories from GitHub
+    - _Requirements: 1.2, 1.3_
+  
+  - [-] 15.3 Test webhook to PipelineRun flow
+    - Push a test commit to trigger webhook
+    - Verify Lighthouse creates PipelineRun in tenant-platform-infra namespace
+    - Check Lighthouse logs for successful trigger processing
+    - _Requirements: 1.2, 1.3_
+  
+  - [ ] 15.4 Verify platform upgrade pipeline execution
+    - Confirm PipelineRun executes all tasks (git-clone, apply-crds, upgrade-tekton, etc.)
+    - Verify platform components are updated based on commit changes
+    - Check that changes from Git are applied to the cluster
+    - _Requirements: 1.3, 1.4, 1.5, 4.1, 4.2, 4.3, 4.4, 4.5_
+
 ## Notes
 
 - Tasks are organized in dependency order
@@ -386,3 +417,4 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
 - Testing validates both bootstrap and self-upgrade workflows
 - Documentation ensures platform is maintainable and understandable
 - Cleanup removes all ArgoCD references from previous design
+- Task 15 addresses the Lighthouse configAgent issue discovered during task 6 testing

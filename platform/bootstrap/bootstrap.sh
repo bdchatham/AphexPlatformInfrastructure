@@ -475,7 +475,8 @@ if helm list -n pipeline-system | grep -q "lighthouse"; then
         --set githubApp.username="jenkins-x[bot]" \
         --set configMaps.config="lighthouse-config" \
         --set configMaps.allowlist="repo-allowlist" \
-        --set keeper.replicaCount=0 > /dev/null 2>&1; then
+        --set keeper.replicaCount=0 \
+        --set env.LIGHTHOUSE_IN_REPO_CONFIG_ENABLED=true > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse upgraded successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to upgrade Lighthouse"
@@ -488,7 +489,8 @@ else
         --set githubApp.username="jenkins-x[bot]" \
         --set configMaps.config="lighthouse-config" \
         --set configMaps.allowlist="repo-allowlist" \
-        --set keeper.replicaCount=0 > /dev/null 2>&1; then
+        --set keeper.replicaCount=0 \
+        --set env.LIGHTHOUSE_IN_REPO_CONFIG_ENABLED=true > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse installed successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to install Lighthouse"
