@@ -24,6 +24,7 @@ data:
     # Enable in-repo configuration
     # Lighthouse will fetch pipeline configurations from .lighthouse/jenkins-x/ in repositories
     in_repo_config:
-      enabled: true
+      enabled:
+        "*": true
       allowed_clusters:
         "*": ["*"]
