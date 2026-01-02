@@ -735,3 +735,175 @@ ArbiterPipelineInfrastructure/
 
 *A property is a characteristic or behavior that should hold true across all valid executions of a system—essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
 
+
+
+## Correctness Properties
+
+*A property is a characteristic or behavior that should hold true across all valid executions of a system—essentially, a formal statement about what the system should do. Properties serve as the bridge between human-readable specifications and machine-verifiable correctness guarantees.*
+
+### Property 1: GitOps Sync Consistency
+*For any* valid Kubernetes manifest committed to the watched Git path, ArgoCD should eventually sync it to the cluster and the resource should exist with matching spec.
+**Validates: Requirements 1.2**
+
+### Property 2: Drift Detection
+*For any* resource managed by ArgoCD, if the cluster state is manually modified to differ from Git, ArgoCD should detect and report the drift in the Application status.
+**Validates: Requirements 1.4**
+
+### Property 3: Git Revert Rollback
+*For any* Git commit that modifies a resource, reverting that commit should cause ArgoCD to restore the resource to its previous state.
+**Validates: Requirements 1.5**
+
+### Property 4: App-of-Apps Propagation
+*For any* Application manifest added to the apps directory in Git, the root Application should create the corresponding child Application in the cluster.
+**Validates: Requirements 3.3**
+
+### Property 5: Sync Wave Ordering
+*For any* set of resources with sync wave annotations, ArgoCD should apply resources in ascending sync wave order (wave 0 before wave 1, etc.).
+**Validates: Requirements 3.5**
+
+### Property 6: Tenant Namespace Provisioning
+*For any* valid RepoBinding resource, the Registration Controller should create a namespace with the specified tenant name and appropriate labels.
+**Validates: Requirements 5.1**
+
+### Property 7: Tenant Service Account Creation
+*For any* provisioned tenant, a service account named "pipeline-runner" should exist in the tenant namespace with appropriate RBAC bindings.
+**Validates: Requirements 5.2**
+
+### Property 8: Tenant Resource Limits
+*For any* provisioned tenant, ResourceQuota and LimitRange resources should exist in the tenant namespace.
+**Validates: Requirements 5.3**
+
+### Property 9: Tenant Network Isolation
+*For any* provisioned tenant, a NetworkPolicy should exist that denies ingress from other tenant namespaces.
+**Validates: Requirements 5.4**
+
+### Property 10: Allowlist Update
+*For any* successfully provisioned tenant, the Lighthouse allowlist ConfigMap should contain an entry for that repository.
+**Validates: Requirements 5.5**
+
+### Property 11: Cross-Tenant RBAC Isolation
+*For any* two distinct tenants A and B, the service account in tenant A should not be able to list, get, or modify resources in tenant B's namespace.
+**Validates: Requirements 6.2**
+
+### Property 12: Cross-Tenant Network Isolation
+*For any* two distinct tenants A and B, pods in tenant A should not be able to establish network connections to pods in tenant B.
+**Validates: Requirements 6.3**
+
+### Property 13: Resource Quota Enforcement
+*For any* tenant with a ResourceQuota, attempting to create resources exceeding the quota should be rejected by Kubernetes.
+**Validates: Requirements 6.4**
+
+### Property 14: Webhook to PipelineRun
+*For any* valid webhook received for an allowed repository, Lighthouse should create a PipelineRun in the corresponding tenant namespace.
+**Validates: Requirements 7.1**
+
+### Property 15: Git Clone at Commit SHA
+*For any* PipelineRun triggered by a webhook, the git-clone task should clone the repository at the exact commit SHA from the webhook payload.
+**Validates: Requirements 7.2**
+
+### Property 16: CDKTF Synth Execution
+*For any* PipelineRun, the cdktf-synth task should execute successfully and produce Terraform configuration files.
+**Validates: Requirements 7.3**
+
+### Property 17: CDKTF Deploy Execution
+*For any* PipelineRun with successful synth, the cdktf-deploy task should execute and apply infrastructure changes.
+**Validates: Requirements 7.4**
+
+### Property 18: Terraform State Persistence
+*For any* CDKTF deployment, the Terraform state should be stored in the Kubernetes backend and be retrievable for subsequent deployments.
+**Validates: Requirements 7.5**
+
+### Property 19: Webhook Secret Generation
+*For any* RepoBinding, the Registration Controller should generate a cryptographically secure webhook secret and store it in a Kubernetes Secret.
+**Validates: Requirements 8.1**
+
+### Property 20: Webhook Signature Validation
+*For any* webhook received with an invalid signature, Lighthouse should reject it and not create a PipelineRun.
+**Validates: Requirements 8.2**
+
+### Property 21: Disallowed Repository Rejection
+*For any* webhook received for a repository not in the allowlist, Lighthouse should reject it.
+**Validates: Requirements 8.4**
+
+### Property 22: Webhook Secret Isolation
+*For any* tenant, the webhook secret should be stored in a Secret accessible only to Lighthouse and not to the tenant's service account.
+**Validates: Requirements 8.5**
+
+### Property 23: Application Sync Failure Reporting
+*For any* Application that fails to sync, the Application status should contain an error message describing the failure.
+**Validates: Requirements 9.3**
+
+### Property 24: Component Upgrade Graceful Rollout
+*For any* component version change in Git, ArgoCD should perform a rolling update without downtime for stateless components.
+**Validates: Requirements 14.2**
+
+## Error Handling
+
+### ArgoCD Sync Failures
+- **Detection**: Application status shows "OutOfSync" or "Degraded"
+- **Logging**: Sync errors logged to ArgoCD application-controller logs
+- **Recovery**: Manual intervention via ArgoCD UI or CLI to inspect and fix issues
+- **Notification**: ArgoCD can be configured to send alerts on sync failures
+
+### Registration Controller Failures
+- **Validation Errors**: Invalid RepoBinding specs rejected with clear error messages in status
+- **Provisioning Failures**: Partial provisioning rolled back, status updated with failure reason
+- **Webhook Secret Generation**: Failures logged, RepoBinding status set to "Failed"
+- **Allowlist Update Failures**: Retried with exponential backoff
+
+### Lighthouse Webhook Failures
+- **Invalid Signature**: Webhook rejected with 401 Unauthorized
+- **Repository Not Allowed**: Webhook rejected with 403 Forbidden
+- **PipelineRun Creation Failure**: Error logged, webhook returns 500 Internal Server Error
+- **Retry**: GitHub automatically retries failed webhooks
+
+### Pipeline Execution Failures
+- **Git Clone Failure**: PipelineRun fails, logs show git error
+- **CDKTF Synth Failure**: Task fails, logs show cdktf error
+- **CDKTF Deploy Failure**: Task fails, Terraform state preserved for debugging
+- **Notification**: PipelineRun status visible in Tekton Dashboard and kubectl
+
+## Testing Strategy
+
+### Unit Tests
+- **Registration Controller**: Test RepoBinding validation, resource template rendering, webhook secret generation
+- **Bootstrap Script**: Test cluster creation, ArgoCD installation, root Application creation
+- **Webhook Secret Generation**: Test cryptographic randomness and format
+
+### Integration Tests
+- **ArgoCD Sync**: Deploy test Application, verify resources created
+- **Registration Flow**: Create RepoBinding, verify all tenant resources provisioned
+- **Webhook Flow**: Send test webhook, verify PipelineRun created
+- **RBAC Isolation**: Attempt cross-tenant access, verify denial
+- **Network Isolation**: Attempt cross-tenant connection, verify blocked
+
+### Property-Based Tests
+- **Property tests should run minimum 100 iterations** due to randomization
+- Each property test must reference its design document property
+- Tag format: **Feature: jenkinsx-gitops-platform, Property {number}: {property_text}**
+
+**Property Test Examples**:
+- Generate random valid RepoBindings, verify namespace creation (Property 6)
+- Generate random manifests, verify ArgoCD syncs them (Property 1)
+- Generate random webhook payloads, verify signature validation (Property 20)
+- Generate random tenant pairs, verify RBAC isolation (Property 11)
+
+### End-to-End Tests
+- **Bootstrap to Running Platform**: Run bootstrap, verify all Applications healthy
+- **Repository Registration to Pipeline**: Register repo, configure webhook, trigger pipeline, verify deployment
+- **Disaster Recovery**: Destroy cluster, bootstrap new cluster, verify platform restored
+- **Upgrade**: Change component version, verify rolling update
+
+### Manual Tests
+- **ArgoCD UI**: Verify UI accessible and shows correct Application status
+- **Tekton Dashboard**: Verify dashboard shows PipelineRuns
+- **Webhook Configuration**: Verify instructions are clear and webhook works
+- **CLI Experience**: Verify `arbiter register` command is intuitive
+
+## Source
+
+- `.kiro/specs/jenkinsx-gitops-platform/requirements.md` - Requirements document
+- `.kiro/specs/jenkinsx-gitops-platform/design.md` - This design document
+- ArgoCD documentation: https://argo-cd.readthedocs.io/
+- Tekton documentation: https://tekton.dev/docs/
+- Lighthouse documentation: https://github.com/jenkins-x/lighthouse
