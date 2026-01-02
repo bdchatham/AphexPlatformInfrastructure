@@ -372,10 +372,17 @@ fi
 
 # Create Lighthouse configuration ConfigMaps
 echo -e "${BLUE}▸${NC} Creating Lighthouse configuration..."
-if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/lighthouse-config.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse configuration ConfigMap created"
+if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/config-configmap.yaml" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓${NC} Lighthouse config ConfigMap created"
 else
-    echo -e "${RED}  ✗${NC} Failed to create Lighthouse configuration ConfigMap"
+    echo -e "${RED}  ✗${NC} Failed to create Lighthouse config ConfigMap"
+    exit 1
+fi
+
+if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/plugins-configmap.yaml" > /dev/null 2>&1; then
+    echo -e "${GREEN}  ✓${NC} Lighthouse plugins ConfigMap created"
+else
+    echo -e "${RED}  ✗${NC} Failed to create Lighthouse plugins ConfigMap"
     exit 1
 fi
 
@@ -473,10 +480,7 @@ if helm list -n pipeline-system | grep -q "lighthouse"; then
         --set git.kind=github \
         --set githubApp.enabled=true \
         --set githubApp.username="jenkins-x[bot]" \
-        --set configMaps.config="lighthouse-config" \
-        --set configMaps.allowlist="repo-allowlist" \
-        --set keeper.replicaCount=0 \
-        --set env.LIGHTHOUSE_IN_REPO_CONFIG_ENABLED=true > /dev/null 2>&1; then
+        --set keeper.replicaCount=0 > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse upgraded successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to upgrade Lighthouse"
@@ -487,10 +491,7 @@ else
         --set git.kind=github \
         --set githubApp.enabled=true \
         --set githubApp.username="jenkins-x[bot]" \
-        --set configMaps.config="lighthouse-config" \
-        --set configMaps.allowlist="repo-allowlist" \
-        --set keeper.replicaCount=0 \
-        --set env.LIGHTHOUSE_IN_REPO_CONFIG_ENABLED=true > /dev/null 2>&1; then
+        --set keeper.replicaCount=0 > /dev/null 2>&1; then
         echo -e "${GREEN}  ✓${NC} Lighthouse installed successfully"
     else
         echo -e "${RED}  ✗${NC} Failed to install Lighthouse"

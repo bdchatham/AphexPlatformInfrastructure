@@ -397,7 +397,7 @@ This implementation plan focuses on creating a batteries-included Jenkins X plat
     - Ensure Lighthouse can read .lighthouse directories from GitHub
     - _Requirements: 1.2, 1.3_
   
-  - [-] 15.3 Test webhook to PipelineRun flow
+  - [x] 15.3 Test webhook to PipelineRun flow
     - Push a test commit to trigger webhook
     - Verify Lighthouse creates PipelineRun in tenant-platform-infra namespace
     - Check Lighthouse logs for successful trigger processing
