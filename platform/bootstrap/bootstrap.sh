@@ -18,12 +18,15 @@ NC='\033[0m' # No Color
 DEFAULT_CLUSTER_NAME="arbiter-platform"
 DEFAULT_CLUSTER_TYPE="kind"
 DEFAULT_REPO_URL="https://github.com/bdchatham/ArbiterPipelineInfrastructure"
+DEFAULT_GITHUB_ORG="bdchatham"
 
 # Parse command-line arguments
 CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
 CLUSTER_TYPE="${DEFAULT_CLUSTER_TYPE}"
 REPO_URL="${DEFAULT_REPO_URL}"
 SKIP_ARGOCD_INSTALL="false"
+GITHUB_ORG="${DEFAULT_GITHUB_ORG}"
+GHCR_PAT=""
 
 print_usage() {
     echo "Usage: $0 [OPTIONS]"
@@ -32,8 +35,14 @@ print_usage() {
     echo "  --cluster-name NAME       Name of the cluster (default: ${DEFAULT_CLUSTER_NAME})"
     echo "  --cluster-type TYPE       Type of cluster: kind, k3s, existing (default: ${DEFAULT_CLUSTER_TYPE})"
     echo "  --repo-url URL            Platform repository URL (default: ${DEFAULT_REPO_URL})"
+    echo "  --github-org ORG          GitHub organization/username (default: ${DEFAULT_GITHUB_ORG})"
+    echo "  --ghcr-pat TOKEN          GitHub Personal Access Token for GHCR (required)"
     echo "  --skip-argocd-install     Skip ArgoCD installation (use existing)"
     echo "  -h, --help                Display this help message"
+    echo ""
+    echo "Required:"
+    echo "  --ghcr-pat: A GitHub PAT with 'packages:write' permission"
+    echo "              Create at: https://github.com/settings/tokens?type=beta"
     echo ""
 }
 
@@ -49,6 +58,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --repo-url)
             REPO_URL="$2"
+            shift 2
+            ;;
+        --github-org)
+            GITHUB_ORG="$2"
+            shift 2
+            ;;
+        --ghcr-pat)
+            GHCR_PAT="$2"
             shift 2
             ;;
         --skip-argocd-install)
@@ -67,6 +84,14 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Validate required parameters
+if [ -z "${GHCR_PAT}" ]; then
+    echo -e "${RED}Error: --ghcr-pat is required${NC}"
+    echo ""
+    print_usage
+    exit 1
+fi
+
 echo ""
 echo "=========================================="
 echo "  ArgoCD + Tekton Platform Bootstrap"
@@ -77,11 +102,14 @@ echo "  1. Create/verify Kubernetes cluster"
 echo "  2. Install Tekton Pipelines and Triggers"
 echo "  3. Install ArgoCD"
 echo "  4. Create platform namespaces"
-echo "  5. Create platform ArgoCD Application"
+echo "  5. Setup GHCR credentials and push runner image"
+echo "  6. Create platform ArgoCD Application"
 echo ""
 echo "Configuration:"
 echo "  Cluster: ${CLUSTER_NAME} (${CLUSTER_TYPE})"
 echo "  Platform Repo: ${REPO_URL}"
+echo "  GitHub Org: ${GITHUB_ORG}"
+echo "  GHCR PAT: ${GHCR_PAT:0:10}... (provided)"
 echo ""
 
 # Function to create Kind cluster
@@ -490,7 +518,101 @@ echo -e "${GREEN}  ✓ Platform namespace creation complete!${NC}"
 echo ""
 
 echo "=========================================="
-echo "  Step 5: Platform ArgoCD Application"
+echo "  Step 5: GHCR Setup and Image Push"
+echo "=========================================="
+echo ""
+
+# Function to create GHCR secret
+create_ghcr_secret() {
+    echo -e "${BLUE}▸${NC} Creating GHCR push secret..."
+    
+    # Check if secret already exists
+    if kubectl get secret ghcr-push-secret -n platform-system &>/dev/null; then
+        echo -e "${GREEN}  ✓${NC} GHCR push secret already exists"
+        return 0
+    fi
+    
+    # Create docker-registry secret
+    if kubectl create secret docker-registry ghcr-push-secret \
+        --docker-server=ghcr.io \
+        --docker-username="${GITHUB_ORG}" \
+        --docker-password="${GHCR_PAT}" \
+        --namespace=platform-system; then
+        echo -e "${GREEN}  ✓${NC} GHCR push secret created"
+    else
+        echo -e "${RED}  ✗${NC} Failed to create GHCR push secret"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Function to build and push pipeline-runner image
+push_pipeline_runner_image() {
+    echo -e "${BLUE}▸${NC} Building and pushing pipeline-runner image..."
+    
+    local runner_image="ghcr.io/${GITHUB_ORG}/pipeline-runner:latest"
+    local dockerfile_path="${REPO_ROOT}/platform/catalog/images/runner"
+    
+    # Check if Docker is available
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}  ⚠${NC} Docker not found, skipping image push"
+        echo "  You'll need to manually build and push the image later"
+        return 0
+    fi
+    
+    # Check if logged into Docker
+    if ! docker info &> /dev/null; then
+        echo -e "${YELLOW}  ⚠${NC} Docker daemon not running, skipping image push"
+        echo "  You'll need to manually build and push the image later"
+        return 0
+    fi
+    
+    echo "  Building image: ${runner_image}"
+    if docker build -t "${runner_image}" "${dockerfile_path}" > /dev/null 2>&1; then
+        echo -e "${GREEN}  ✓${NC} Image built successfully"
+    else
+        echo -e "${YELLOW}  ⚠${NC} Failed to build image, skipping push"
+        echo "  You can manually build later with:"
+        echo "    docker build -t ${runner_image} ${dockerfile_path}"
+        return 0
+    fi
+    
+    echo "  Pushing image to GHCR..."
+    if docker push "${runner_image}" > /dev/null 2>&1; then
+        echo -e "${GREEN}  ✓${NC} Image pushed successfully"
+        
+        # Also tag and push with commit SHA if in git repo
+        if git rev-parse --git-dir > /dev/null 2>&1; then
+            local commit_sha=$(git rev-parse --short HEAD)
+            local commit_image="ghcr.io/${GITHUB_ORG}/pipeline-runner:${commit_sha}"
+            docker tag "${runner_image}" "${commit_image}"
+            if docker push "${commit_image}" > /dev/null 2>&1; then
+                echo -e "${GREEN}  ✓${NC} Commit-tagged image pushed: ${commit_sha}"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}  ⚠${NC} Failed to push image"
+        echo "  You can manually push later with:"
+        echo "    docker push ${runner_image}"
+        return 0
+    fi
+    
+    return 0
+}
+
+# Create GHCR secret
+create_ghcr_secret
+
+# Build and push pipeline-runner image
+push_pipeline_runner_image
+
+echo ""
+echo -e "${GREEN}  ✓ GHCR setup complete!${NC}"
+echo ""
+
+echo "=========================================="
+echo "  Step 6: Platform ArgoCD Application"
 echo "=========================================="
 echo ""
 
