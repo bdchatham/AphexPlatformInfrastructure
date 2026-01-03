@@ -2,7 +2,7 @@ apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: test-tenant-binding
-  namespace: pipeline-system
+  namespace: platform-system
   labels:
     test: "true"
     purpose: "pipeline-execution-test"
