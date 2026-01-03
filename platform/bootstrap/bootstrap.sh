@@ -14,35 +14,128 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Configuration
-CLUSTER_NAME="${CLUSTER_NAME:-arbiter-infrastructure}"
-CLUSTER_TYPE="${CLUSTER_TYPE:-kind}"
-REPO_URL="${REPO_URL:-https://github.com/bdchatham/ArbiterPipelineInfrastructure}"
-REPO_ORG="${REPO_ORG:-bdchatham}"
-REPO_NAME="${REPO_NAME:-ArbiterPipelineInfrastructure}"
-MIN_KUBECTL_VERSION="1.24.0"
-MIN_HELM_VERSION="3.0.0"
-MIN_K8S_VERSION="1.24.0"
-TEKTON_VERSION="v0.56.0"
+# Default configuration
+DEFAULT_CLUSTER_NAME="arbiter-platform"
+DEFAULT_CLUSTER_TYPE="kind"
+DEFAULT_REPO_URL="https://github.com/bdchatham/ArbiterPipelineInfrastructure"
+
+# Parse command-line arguments
+CLUSTER_NAME="${DEFAULT_CLUSTER_NAME}"
+CLUSTER_TYPE="${DEFAULT_CLUSTER_TYPE}"
+REPO_URL="${DEFAULT_REPO_URL}"
+SKIP_ARGOCD_INSTALL="false"
+
+print_usage() {
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --cluster-name NAME       Name of the cluster (default: ${DEFAULT_CLUSTER_NAME})"
+    echo "  --cluster-type TYPE       Type of cluster: kind, k3s, existing (default: ${DEFAULT_CLUSTER_TYPE})"
+    echo "  --repo-url URL            Platform repository URL (default: ${DEFAULT_REPO_URL})"
+    echo "  --skip-argocd-install     Skip ArgoCD installation (use existing)"
+    echo "  -h, --help                Display this help message"
+    echo ""
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --cluster-name)
+            CLUSTER_NAME="$2"
+            shift 2
+            ;;
+        --cluster-type)
+            CLUSTER_TYPE="$2"
+            shift 2
+            ;;
+        --repo-url)
+            REPO_URL="$2"
+            shift 2
+            ;;
+        --skip-argocd-install)
+            SKIP_ARGOCD_INSTALL="true"
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
 
 echo ""
 echo "=========================================="
-echo "  Jenkins X Platform Bootstrap"
+echo "  ArgoCD + Tekton Platform Bootstrap"
 echo "=========================================="
 echo ""
 echo "This script will:"
 echo "  1. Create/verify Kubernetes cluster"
-echo "  2. Install Tekton Pipelines"
-echo "  3. Install Lighthouse"
+echo "  2. Install Tekton Pipelines and Triggers"
+echo "  3. Install ArgoCD"
 echo "  4. Create platform namespaces"
-echo "  5. Deploy onboarding controller"
-echo "  6. Deploy pipeline catalog"
-echo "  7. Register platform repository"
+echo "  5. Create platform ArgoCD Application"
 echo ""
 echo "Configuration:"
 echo "  Cluster: ${CLUSTER_NAME} (${CLUSTER_TYPE})"
 echo "  Platform Repo: ${REPO_URL}"
 echo ""
+
+# Function to create Kind cluster
+create_kind_cluster() {
+    local cluster_name="$1"
+    
+    echo -e "${BLUE}▸${NC} Creating Kind cluster: ${cluster_name}"
+    
+    # Check if cluster already exists (shouldn't happen, but safety check)
+    if kind get clusters 2>/dev/null | grep -q "^${cluster_name}$"; then
+        echo -e "${RED}  ✗${NC} Cluster ${cluster_name} already exists"
+        echo "  Please delete it first: kind delete cluster --name ${cluster_name}"
+        exit 1
+    fi
+    
+    # Create cluster
+    echo -e "${BLUE}▸${NC} Creating Kind cluster with ingress support..."
+    local kind_config="${SCRIPT_DIR}/kind-cluster-config.yaml"
+    
+    if ! kind create cluster --name "${cluster_name}" --config="${kind_config}"; then
+        echo -e "${RED}  ✗${NC} Failed to create Kind cluster"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Kind cluster created successfully"
+    
+    # Set kubectl context
+    kubectl config use-context "kind-${cluster_name}"
+    echo -e "${GREEN}  ✓${NC} kubectl context set to kind-${cluster_name}"
+}
+
+# Function to verify cluster accessibility
+verify_cluster_access() {
+    echo -e "${BLUE}▸${NC} Verifying cluster accessibility..."
+    
+    if ! kubectl cluster-info &> /dev/null; then
+        echo -e "${RED}  ✗${NC} Cannot access Kubernetes cluster"
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Cluster access confirmed"
+    
+    # Display cluster info
+    CURRENT_CONTEXT=$(kubectl config current-context)
+    echo "    Current context: ${CURRENT_CONTEXT}"
+    
+    # Get cluster version
+    K8S_VERSION=$(kubectl version --short 2>/dev/null | grep "Server Version" | awk '{print $3}')
+    if [ -n "$K8S_VERSION" ]; then
+        echo "    Kubernetes version: ${K8S_VERSION}"
+    fi
+    
+    return 0
+}
 
 echo ""
 echo "=========================================="
@@ -50,822 +143,535 @@ echo "  Step 1: Cluster Setup"
 echo "=========================================="
 echo ""
 
-# Check if cluster creation is needed
+# Check if cluster already exists
 echo -e "${BLUE}▸${NC} Checking for existing Kubernetes cluster..."
-if ! kubectl cluster-info &> /dev/null; then
-    echo -e "${YELLOW}  No accessible cluster found${NC}"
-    echo ""
-    
-    # Check if kind is available
-    if command -v kind &> /dev/null; then
-        echo -e "${GREEN}  ✓${NC} Kind is available for local cluster creation"
-        read -p "Would you like to create a local Kind cluster named '${CLUSTER_NAME}'? (y/n) " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo ""
-            echo -e "${BLUE}▸${NC} Creating Kind cluster: ${CLUSTER_NAME}"
-            
-            # Check if cluster already exists
-            if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-                echo -e "${YELLOW}  Cluster ${CLUSTER_NAME} already exists${NC}"
-                read -p "Delete and recreate? (y/n) " -n 1 -r
-                echo
-                if [[ $REPLY =~ ^[Yy]$ ]]; then
-                    echo -e "${BLUE}▸${NC} Deleting existing cluster..."
-                    kind delete cluster --name "${CLUSTER_NAME}"
-                else
-                    echo -e "${GREEN}  ✓${NC} Using existing cluster"
-                fi
-            fi
-            
-            # Create cluster if it doesn't exist
-            if ! kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-                echo -e "${BLUE}▸${NC} Creating Kind cluster with ingress support..."
-                cat <<EOF | kind create cluster --name "${CLUSTER_NAME}" --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-    kubeadmConfigPatches:
-      - |
-        kind: InitConfiguration
-        nodeRegistration:
-          kubeletExtraArgs:
-            node-labels: "ingress-ready=true"
-    extraPortMappings:
-      - containerPort: 80
-        hostPort: 80
-        protocol: TCP
-      - containerPort: 443
-        hostPort: 443
-        protocol: TCP
-      - containerPort: 5556
-        hostPort: 5556
-        protocol: TCP
-EOF
-                
-                if [ $? -eq 0 ]; then
-                    echo -e "${GREEN}  ✓${NC} Kind cluster created successfully"
-                    
-                    # Set kubectl context
-                    kubectl config use-context "kind-${CLUSTER_NAME}"
-                    echo -e "${GREEN}  ✓${NC} kubectl context set to kind-${CLUSTER_NAME}"
-                else
-                    echo -e "${RED}  ✗${NC} Failed to create Kind cluster"
-                    exit 1
-                fi
-            fi
-        else
-            echo "Cluster creation skipped. Please configure kubectl to access your cluster."
-            exit 1
-        fi
-    else
-        echo -e "${RED}  ✗${NC} No cluster access and Kind is not installed"
-        echo ""
-        echo "Options:"
-        echo "  1. Install Kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
-        echo "  2. Configure kubectl to access an existing cluster"
-        echo "  3. Install k3s for homelab: curl -sfL https://get.k3s.io | sh -"
-        exit 1
-    fi
-else
-    echo -e "${GREEN}  ✓${NC} Cluster access confirmed"
+if kubectl cluster-info &> /dev/null; then
     CURRENT_CONTEXT=$(kubectl config current-context)
-    echo "    Current context: ${CURRENT_CONTEXT}"
+    echo -e "${YELLOW}  ✓ Cluster already exists: ${CURRENT_CONTEXT}${NC}"
     echo ""
-    read -p "Continue with this cluster? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Bootstrap cancelled. Please switch to the desired cluster context."
-        exit 0
-    fi
+    echo "A Kubernetes cluster is already configured and accessible."
+    echo "This bootstrap script is designed to create a fresh cluster."
+    echo ""
+    echo "If you want to bootstrap this existing cluster, please ensure:"
+    echo "  1. The cluster is empty or you're okay with installing platform components"
+    echo "  2. You have appropriate permissions"
+    echo ""
+    echo "To create a fresh Kind cluster, first delete the existing one:"
+    echo "  kind delete cluster --name ${CLUSTER_NAME}"
+    echo ""
+    exit 0
 fi
 
+echo -e "${BLUE}▸${NC} No existing cluster found. Creating new cluster..."
+echo ""
+
+if [ "${CLUSTER_TYPE}" = "kind" ]; then
+    # Check if kind is available
+    if ! command -v kind &> /dev/null; then
+        echo -e "${RED}  ✗${NC} Kind is not installed"
+        echo ""
+        echo "Please install Kind: https://kind.sigs.k8s.io/docs/user/quick-start/#installation"
+        echo ""
+        echo "On macOS: brew install kind"
+        echo "On Linux: curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64 && chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Kind is available"
+    create_kind_cluster "${CLUSTER_NAME}"
+    
+elif [ "${CLUSTER_TYPE}" = "k3s" ]; then
+    echo -e "${RED}  ✗${NC} k3s cluster type specified but no cluster access"
+    echo "Please install k3s: curl -sfL https://get.k3s.io | sh -"
+    exit 1
+    
+elif [ "${CLUSTER_TYPE}" = "existing" ]; then
+    echo -e "${RED}  ✗${NC} Existing cluster type specified but no cluster access"
+    echo "Please configure kubectl to access your cluster"
+    exit 1
+    
+else
+    echo -e "${RED}  ✗${NC} Unknown cluster type: ${CLUSTER_TYPE}"
+    exit 1
+fi
+
+# Verify cluster access
+verify_cluster_access
+
+echo ""
+echo -e "${GREEN}  ✓ Cluster setup complete!${NC}"
+echo ""
+
 echo ""
 echo "=========================================="
-echo "  Step 2: Prerequisites Check"
+echo "  Step 2: Tekton Installation"
 echo "=========================================="
 echo ""
 
-# Function to compare versions
-version_ge() {
-    [ "$(printf '%s\n' "$1" "$2" | sort -V | head -n1)" = "$2" ]
+# Tekton versions
+TEKTON_PIPELINES_VERSION="v0.65.0"
+TEKTON_TRIGGERS_VERSION="v0.29.0"
+
+# Function to install Tekton Pipelines
+install_tekton_pipelines() {
+    echo -e "${BLUE}▸${NC} Installing Tekton Pipelines ${TEKTON_PIPELINES_VERSION}..."
+    
+    # Check if already installed
+    if kubectl get namespace tekton-pipelines &>/dev/null; then
+        echo -e "${GREEN}  ✓${NC} Tekton Pipelines already installed, skipping"
+        return 0
+    fi
+    
+    # Download and apply Tekton Pipelines manifest
+    local manifest_url="https://github.com/tektoncd/pipeline/releases/download/${TEKTON_PIPELINES_VERSION}/release.yaml"
+    echo "  Downloading manifest from: ${manifest_url}"
+    
+    # Download manifest and replace gcr.io with ghcr.io to avoid 403 errors
+    local temp_manifest="/tmp/tekton-pipelines-${TEKTON_PIPELINES_VERSION}.yaml"
+    if ! curl -sL "${manifest_url}" | sed -e 's,gcr.io/tekton-releases,ghcr.io/tektoncd,g' > "${temp_manifest}"; then
+        echo -e "${RED}  ✗${NC} Failed to download Tekton Pipelines manifest"
+        return 1
+    fi
+    
+    echo "  Applying manifest (using ghcr.io registry)..."
+    if ! kubectl apply -f "${temp_manifest}"; then
+        echo -e "${RED}  ✗${NC} Failed to install Tekton Pipelines"
+        rm -f "${temp_manifest}"
+        return 1
+    fi
+    
+    rm -f "${temp_manifest}"
+    echo -e "${GREEN}  ✓${NC} Tekton Pipelines manifest applied"
+    
+    # Wait for Tekton Pipelines to be ready
+    echo "  Waiting for Tekton Pipelines controller to be ready..."
+    local max_wait=60
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=controller 2>/dev/null | grep -q "controller"; then
+            break
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=controller -n tekton-pipelines --timeout=300s 2>/dev/null; then
+        echo -e "${RED}  ✗${NC} Tekton Pipelines controller failed to become ready"
+        echo "  Checking pod status:"
+        kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=controller
+        kubectl describe pods -n tekton-pipelines -l app.kubernetes.io/name=controller | tail -20
+        return 1
+    fi
+    
+    echo "  Waiting for Tekton Pipelines webhook to be ready..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook -n tekton-pipelines --timeout=300s 2>/dev/null; then
+        echo -e "${RED}  ✗${NC} Tekton Pipelines webhook failed to become ready"
+        echo "  Checking pod status:"
+        kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=webhook
+        kubectl describe pods -n tekton-pipelines -l app.kubernetes.io/name=webhook | tail -20
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Tekton Pipelines ${TEKTON_PIPELINES_VERSION} installed successfully"
+    return 0
 }
 
-# Function to extract version number
-extract_version() {
-    echo "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1
+# Install Tekton Pipelines
+install_tekton_pipelines
+
+echo ""
+echo -e "${GREEN}  ✓ Tekton Pipelines installation complete!${NC}"
+echo ""
+
+# Function to install Tekton Triggers
+install_tekton_triggers() {
+    echo -e "${BLUE}▸${NC} Installing Tekton Triggers ${TEKTON_TRIGGERS_VERSION}..."
+    
+    # Check if already installed
+    if kubectl get deployment tekton-triggers-controller -n tekton-pipelines &>/dev/null; then
+        echo -e "${GREEN}  ✓${NC} Tekton Triggers already installed, skipping"
+        return 0
+    fi
+    
+    # Download and apply Tekton Triggers manifest
+    local manifest_url="https://github.com/tektoncd/triggers/releases/download/${TEKTON_TRIGGERS_VERSION}/release.yaml"
+    echo "  Downloading manifest from: ${manifest_url}"
+    
+    # Download manifest and replace gcr.io with ghcr.io to avoid 403 errors
+    local temp_manifest="/tmp/tekton-triggers-${TEKTON_TRIGGERS_VERSION}.yaml"
+    if ! curl -sL "${manifest_url}" | sed -e 's,gcr.io/tekton-releases,ghcr.io/tektoncd,g' > "${temp_manifest}"; then
+        echo -e "${RED}  ✗${NC} Failed to download Tekton Triggers manifest"
+        return 1
+    fi
+    
+    echo "  Applying manifest (using ghcr.io registry)..."
+    if ! kubectl apply -f "${temp_manifest}"; then
+        echo -e "${RED}  ✗${NC} Failed to install Tekton Triggers"
+        rm -f "${temp_manifest}"
+        return 1
+    fi
+    
+    rm -f "${temp_manifest}"
+    echo -e "${GREEN}  ✓${NC} Tekton Triggers manifest applied"
+    
+    # Wait for Tekton Triggers to be ready
+    echo "  Waiting for Tekton Triggers controller to be ready..."
+    local max_wait=60
+    local elapsed=0
+    while [ $elapsed -lt $max_wait ]; do
+        if kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=controller,app.kubernetes.io/part-of=tekton-triggers 2>/dev/null | grep -q "controller"; then
+            break
+        fi
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=controller,app.kubernetes.io/part-of=tekton-triggers -n tekton-pipelines --timeout=300s 2>/dev/null; then
+        echo -e "${RED}  ✗${NC} Tekton Triggers controller failed to become ready"
+        echo "  Checking pod status:"
+        kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=controller,app.kubernetes.io/part-of=tekton-triggers
+        kubectl describe pods -n tekton-pipelines -l app.kubernetes.io/name=controller,app.kubernetes.io/part-of=tekton-triggers | tail -20
+        return 1
+    fi
+    
+    echo "  Waiting for Tekton Triggers webhook to be ready..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=webhook,app.kubernetes.io/part-of=tekton-triggers -n tekton-pipelines --timeout=300s 2>/dev/null; then
+        echo -e "${RED}  ✗${NC} Tekton Triggers webhook failed to become ready"
+        echo "  Checking pod status:"
+        kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=webhook,app.kubernetes.io/part-of=tekton-triggers
+        kubectl describe pods -n tekton-pipelines -l app.kubernetes.io/name=webhook,app.kubernetes.io/part-of=tekton-triggers | tail -20
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Tekton Triggers ${TEKTON_TRIGGERS_VERSION} installed successfully"
+    return 0
 }
 
-# Check if kubectl is installed
-echo -n -e "${BLUE}▸${NC} Checking kubectl installation... "
-if ! command -v kubectl &> /dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "kubectl is not installed. Please install kubectl version ${MIN_KUBECTL_VERSION} or higher."
-    echo "Visit: https://kubernetes.io/docs/tasks/tools/"
-    exit 1
-fi
-echo -e "${GREEN}✓${NC}"
-
-# Check kubectl version
-echo -n -e "${BLUE}▸${NC} Checking kubectl version... "
-KUBECTL_VERSION=$(kubectl version --client 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | sed 's/v//')
-if [ -z "$KUBECTL_VERSION" ]; then
-    KUBECTL_VERSION=$(kubectl version --client --short 2>/dev/null | extract_version)
-fi
-
-if [ -z "$KUBECTL_VERSION" ]; then
-    echo -e "${RED}FAILED${NC}"
-    echo "Could not determine kubectl version"
-    exit 1
-fi
-
-if version_ge "$KUBECTL_VERSION" "$MIN_KUBECTL_VERSION"; then
-    echo -e "${GREEN}✓${NC} (v${KUBECTL_VERSION})"
-else
-    echo -e "${RED}FAILED${NC}"
-    echo "kubectl version ${KUBECTL_VERSION} is too old. Minimum required: ${MIN_KUBECTL_VERSION}"
-    exit 1
-fi
-
-# Check if helm is installed
-echo -n -e "${BLUE}▸${NC} Checking helm installation... "
-if ! command -v helm &> /dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "helm is not installed. Please install helm version ${MIN_HELM_VERSION} or higher."
-    echo "Visit: https://helm.sh/docs/intro/install/"
-    exit 1
-fi
-echo -e "${GREEN}✓${NC}"
-
-# Check helm version
-echo -n -e "${BLUE}▸${NC} Checking helm version... "
-HELM_VERSION=$(helm version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 | sed 's/v//')
-if [ -z "$HELM_VERSION" ]; then
-    echo -e "${RED}FAILED${NC}"
-    echo "Could not determine helm version"
-    exit 1
-fi
-
-if version_ge "$HELM_VERSION" "$MIN_HELM_VERSION"; then
-    echo -e "${GREEN}✓${NC} (v${HELM_VERSION})"
-else
-    echo -e "${RED}FAILED${NC}"
-    echo "helm version ${HELM_VERSION} is too old. Minimum required: ${MIN_HELM_VERSION}"
-    exit 1
-fi
-
-# Check cluster access
-echo -n -e "${BLUE}▸${NC} Checking cluster access... "
-if ! kubectl cluster-info &> /dev/null; then
-    echo -e "${RED}FAILED${NC}"
-    echo "Cannot access Kubernetes cluster. Please check your kubeconfig."
-    exit 1
-fi
-echo -e "${GREEN}✓${NC}"
-
-# Check Kubernetes version
-echo -n -e "${BLUE}▸${NC} Checking Kubernetes version... "
-K8S_VERSION=$(kubectl version 2>/dev/null | grep "Server Version" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | sed 's/v//')
-if [ -z "$K8S_VERSION" ]; then
-    K8S_VERSION=$(kubectl version --short 2>/dev/null | grep "Server Version" | extract_version)
-fi
-
-if [ -z "$K8S_VERSION" ]; then
-    echo -e "${YELLOW}WARNING${NC}"
-    echo "Could not determine Kubernetes server version"
-else
-    if version_ge "$K8S_VERSION" "$MIN_K8S_VERSION"; then
-        echo -e "${GREEN}✓${NC} (v${K8S_VERSION})"
-    else
-        echo -e "${RED}FAILED${NC}"
-        echo "Kubernetes version ${K8S_VERSION} is too old. Minimum required: ${MIN_K8S_VERSION}"
-        exit 1
-    fi
-fi
-
-# Check for RBAC support
-echo -n -e "${BLUE}▸${NC} Checking RBAC support... "
-if kubectl api-versions | grep -q "rbac.authorization.k8s.io"; then
-    echo -e "${GREEN}✓${NC}"
-else
-    echo -e "${RED}FAILED${NC}"
-    echo "RBAC is not enabled on this cluster. RBAC is required for Jenkins X platform."
-    exit 1
-fi
-
-# Check for NetworkPolicy support
-echo -n -e "${BLUE}▸${NC} Checking NetworkPolicy support... "
-if kubectl api-versions | grep -q "networking.k8s.io"; then
-    echo -e "${GREEN}✓${NC}"
-else
-    echo -e "${YELLOW}WARNING${NC}"
-    echo "NetworkPolicy API is not available. Network isolation may not work."
-    echo "Consider installing a CNI plugin that supports NetworkPolicy (e.g., Calico, Cilium)."
-fi
-
-# Check cluster permissions
-echo -n -e "${BLUE}▸${NC} Checking cluster admin permissions... "
-if kubectl auth can-i create namespaces --all-namespaces &> /dev/null; then
-    echo -e "${GREEN}✓${NC}"
-else
-    echo -e "${RED}FAILED${NC}"
-    echo "Current user does not have cluster admin permissions."
-    echo "Bootstrap requires the ability to create namespaces and cluster-wide resources."
-    exit 1
-fi
-
-echo ""
-echo -e "${GREEN}  ✓ All prerequisites checks passed!${NC}"
-
-echo ""
-echo "=========================================="
-echo "  Step 3: Install Tekton Pipelines"
-echo "=========================================="
-echo ""
-
-TEKTON_RELEASE_URL="https://github.com/tektoncd/pipeline/releases/download/${TEKTON_VERSION}/release.yaml"
-
-echo -e "${BLUE}▸${NC} Installing Tekton Pipelines ${TEKTON_VERSION}..."
-if curl -sL "${TEKTON_RELEASE_URL}" | \
-   sed 's|gcr.io/tekton-releases|ghcr.io/tektoncd|g' | \
-   kubectl apply -f - > /dev/null; then
-    echo -e "${GREEN}  ✓${NC} Tekton Pipelines installed successfully"
-else
-    echo -e "${RED}  ✗${NC} Failed to install Tekton Pipelines"
-    exit 1
-fi
-
-echo -e "${BLUE}▸${NC} Waiting for Tekton Pipelines namespace..."
-timeout=60
-elapsed=0
-while ! kubectl get namespace tekton-pipelines &> /dev/null; do
-    if [ $elapsed -ge $timeout ]; then
-        echo -e "${RED}  ✗${NC} Timeout waiting for tekton-pipelines namespace"
-        exit 1
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-echo -e "${GREEN}  ✓${NC} tekton-pipelines namespace created"
-
-# Give pods time to be created
-sleep 5
-
-echo -e "${BLUE}▸${NC} Waiting for tekton-pipelines-controller..."
-if kubectl wait --for=condition=ready pod \
-    -l app.kubernetes.io/name=controller \
-    -n tekton-pipelines \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} tekton-pipelines-controller is ready"
-else
-    echo -e "${RED}  ✗${NC} tekton-pipelines-controller failed to become ready"
-    echo "Checking pod status:"
-    kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=controller
-    exit 1
-fi
-
-echo -e "${BLUE}▸${NC} Waiting for tekton-pipelines-webhook..."
-if kubectl wait --for=condition=ready pod \
-    -l app.kubernetes.io/name=webhook \
-    -n tekton-pipelines \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} tekton-pipelines-webhook is ready"
-else
-    echo -e "${RED}  ✗${NC} tekton-pipelines-webhook failed to become ready"
-    echo "Checking pod status:"
-    kubectl get pods -n tekton-pipelines -l app.kubernetes.io/name=webhook
-    exit 1
-fi
-
-
-echo ""
-echo "=========================================="
-echo "  Step 4: Install Lighthouse"
-echo "=========================================="
-echo ""
-
-# Ensure pipeline-system namespace exists
-echo -e "${BLUE}▸${NC} Creating pipeline-system namespace..."
-if ! kubectl get namespace pipeline-system &> /dev/null; then
-    kubectl create namespace pipeline-system
-    echo -e "${GREEN}  ✓${NC} pipeline-system namespace created"
-else
-    echo -e "${GREEN}  ✓${NC} pipeline-system namespace already exists"
-fi
-
-# Add Jenkins X Helm repository
-echo -e "${BLUE}▸${NC} Adding Jenkins X Helm repository..."
-if helm repo add jx3 https://jenkins-x-charts.github.io/repo 2>&1 | grep -q "already exists"; then
-    echo -e "${GREEN}  ✓${NC} Jenkins X Helm repository already exists"
-else
-    echo -e "${GREEN}  ✓${NC} Jenkins X Helm repository added"
-fi
-
-echo -e "${BLUE}▸${NC} Updating Helm repository cache..."
-if helm repo update > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Helm repository cache updated"
-else
-    echo -e "${RED}  ✗${NC} Failed to update Helm repository cache"
-    exit 1
-fi
-
-# Create Lighthouse configuration ConfigMaps
-echo -e "${BLUE}▸${NC} Creating Lighthouse configuration..."
-if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/config-configmap.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse config ConfigMap created"
-else
-    echo -e "${RED}  ✗${NC} Failed to create Lighthouse config ConfigMap"
-    exit 1
-fi
-
-if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/plugins-configmap.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse plugins ConfigMap created"
-else
-    echo -e "${RED}  ✗${NC} Failed to create Lighthouse plugins ConfigMap"
-    exit 1
-fi
-
-if kubectl apply -f "${REPO_ROOT}/platform/lighthouse/repo-allowlist.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Repository allowlist ConfigMap created"
-else
-    echo -e "${RED}  ✗${NC} Failed to create repository allowlist ConfigMap"
-    exit 1
-fi
-
-# Check if GitHub App secret exists, if not prompt for credentials
-if ! kubectl get secret lighthouse-github-app -n pipeline-system &> /dev/null; then
+# Install Tekton Triggers
+if ! install_tekton_triggers; then
     echo ""
-    echo -e "${YELLOW}GitHub App credentials required${NC}"
-    echo "Please provide your GitHub App configuration:"
+    echo -e "${YELLOW}  ⚠ Tekton Triggers installation failed${NC}"
+    echo "  This is likely due to GCR image pull issues (403 Forbidden)"
+    echo "  The platform can still function without Triggers for basic pipeline execution"
+    echo "  You can manually install Triggers later or use alternative trigger mechanisms"
     echo ""
-    
-    # Check for GitHub App ID (environment variable or prompt)
-    if [ -z "$GITHUB_APP_ID" ]; then
-        read -p "GitHub App ID: " GITHUB_APP_ID
-    else
-        echo "Using GITHUB_APP_ID from environment: ${GITHUB_APP_ID}"
-    fi
-    if [ -z "$GITHUB_APP_ID" ]; then
-        echo -e "${RED}  ✗${NC} GitHub App ID is required"
-        exit 1
-    fi
-    
-    # Check for GitHub App Installation ID (environment variable or prompt)
-    if [ -z "$GITHUB_APP_INSTALLATION_ID" ]; then
-        read -p "GitHub App Installation ID: " GITHUB_APP_INSTALLATION_ID
-    else
-        echo "Using GITHUB_APP_INSTALLATION_ID from environment: ${GITHUB_APP_INSTALLATION_ID}"
-    fi
-    if [ -z "$GITHUB_APP_INSTALLATION_ID" ]; then
-        echo -e "${RED}  ✗${NC} GitHub App Installation ID is required"
-        exit 1
-    fi
-    
-    # Check for private key file path (environment variable or prompt)
-    if [ -z "$GITHUB_APP_PRIVATE_KEY_FILE" ]; then
-        read -p "Path to GitHub App Private Key (.pem file): " GITHUB_APP_PRIVATE_KEY_FILE
-    else
-        echo "Using GITHUB_APP_PRIVATE_KEY_FILE from environment: ${GITHUB_APP_PRIVATE_KEY_FILE}"
-    fi
-    if [ -z "$GITHUB_APP_PRIVATE_KEY_FILE" ]; then
-        echo -e "${RED}  ✗${NC} Private Key file path is required"
-        exit 1
-    fi
-    
-    if [ ! -f "$GITHUB_APP_PRIVATE_KEY_FILE" ]; then
-        echo -e "${RED}  ✗${NC} Private Key file not found: ${GITHUB_APP_PRIVATE_KEY_FILE}"
-        exit 1
-    fi
-    
-    # Generate webhook secret
-    echo -e "${BLUE}▸${NC} Generating webhook secret..."
-    GITHUB_WEBHOOK_SECRET=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-32)
-    echo -e "${GREEN}  ✓${NC} Webhook secret generated"
-    
-    # Create the secret
-    echo -e "${BLUE}▸${NC} Creating GitHub App secret..."
-    if kubectl create secret generic lighthouse-github-app \
-        --from-file=private-key="${GITHUB_APP_PRIVATE_KEY_FILE}" \
-        --from-literal=app-id="${GITHUB_APP_ID}" \
-        --from-literal=installation-id="${GITHUB_APP_INSTALLATION_ID}" \
-        --from-literal=webhook-secret="${GITHUB_WEBHOOK_SECRET}" \
-        -n pipeline-system > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓${NC} GitHub App secret created"
-    else
-        echo -e "${RED}  ✗${NC} Failed to create GitHub App secret"
-        exit 1
-    fi
 else
-    # Secret exists, read credentials from it
-    echo -e "${BLUE}▸${NC} Reading GitHub App credentials from existing secret..."
-    GITHUB_APP_ID=$(kubectl get secret lighthouse-github-app -n pipeline-system -o jsonpath='{.data.app-id}' | base64 -d)
-    GITHUB_APP_INSTALLATION_ID=$(kubectl get secret lighthouse-github-app -n pipeline-system -o jsonpath='{.data.installation-id}' | base64 -d)
-    GITHUB_WEBHOOK_SECRET=$(kubectl get secret lighthouse-github-app -n pipeline-system -o jsonpath='{.data.webhook-secret}' | base64 -d)
-    
-    if [ -z "$GITHUB_APP_ID" ] || [ -z "$GITHUB_APP_INSTALLATION_ID" ] || [ -z "$GITHUB_WEBHOOK_SECRET" ]; then
-        echo -e "${RED}  ✗${NC} Failed to read GitHub App credentials from secret"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}  ✓${NC} GitHub App credentials loaded"
-    echo "    App ID: ${GITHUB_APP_ID}"
-    echo "    Installation ID: ${GITHUB_APP_INSTALLATION_ID}"
-fi
-
-# Add username to lighthouse-github-app secret for keeper
-echo -e "${BLUE}▸${NC} Updating GitHub App secret with username..."
-kubectl patch secret lighthouse-github-app -n pipeline-system --type=json -p='[
-  {
-    "op": "add",
-    "path": "/data/username",
-    "value": "'$(echo -n "jenkins-x[bot]" | base64)'"
-  }
-]' > /dev/null 2>&1
-echo -e "${GREEN}  ✓${NC} GitHub App secret updated"
-
-# Install Lighthouse
-echo -e "${BLUE}▸${NC} Installing Lighthouse..."
-if helm list -n pipeline-system | grep -q "lighthouse"; then
-    if helm upgrade lighthouse jx3/lighthouse -n pipeline-system \
-        --set git.kind=github \
-        --set githubApp.enabled=true \
-        --set githubApp.username="jenkins-x[bot]" > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓${NC} Lighthouse upgraded successfully"
-    else
-        echo -e "${RED}  ✗${NC} Failed to upgrade Lighthouse"
-        exit 1
-    fi
-else
-    if helm install lighthouse jx3/lighthouse -n pipeline-system \
-        --set git.kind=github \
-        --set githubApp.enabled=true \
-        --set githubApp.username="jenkins-x[bot]" > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓${NC} Lighthouse installed successfully"
-    else
-        echo -e "${RED}  ✗${NC} Failed to install Lighthouse"
-        exit 1
-    fi
-fi
-
-# Configure keeper with GitHub App credentials
-echo -e "${BLUE}▸${NC} Configuring Lighthouse keeper with GitHub App credentials..."
-
-# Wait for keeper deployment to exist
-timeout=60
-elapsed=0
-while ! kubectl get deployment lighthouse-keeper -n pipeline-system &> /dev/null; do
-    if [ $elapsed -ge $timeout ]; then
-        echo -e "${RED}  ✗${NC} Timeout waiting for keeper deployment"
-        exit 1
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-
-# Patch keeper deployment to add GitHub App environment variables
-kubectl patch deployment lighthouse-keeper -n pipeline-system --type=json -p='[
-  {
-    "op": "add",
-    "path": "/spec/template/spec/containers/0/env/-",
-    "value": {
-      "name": "GITHUB_APP_ID",
-      "valueFrom": {
-        "secretKeyRef": {
-          "name": "lighthouse-github-app",
-          "key": "app-id"
-        }
-      }
-    }
-  },
-  {
-    "op": "add",
-    "path": "/spec/template/spec/containers/0/env/-",
-    "value": {
-      "name": "GITHUB_APP_INSTALLATION_ID",
-      "valueFrom": {
-        "secretKeyRef": {
-          "name": "lighthouse-github-app",
-          "key": "installation-id"
-        }
-      }
-    }
-  },
-  {
-    "op": "add",
-    "path": "/spec/template/spec/containers/0/env/-",
-    "value": {
-      "name": "GIT_TOKEN_PATH",
-      "value": "/secrets/githubapp/tokens/private-key"
-    }
-  }
-]' > /dev/null 2>&1
-
-# Update keeper volume to use lighthouse-github-app secret
-kubectl patch deployment lighthouse-keeper -n pipeline-system --type=json -p='[
-  {
-    "op": "replace",
-    "path": "/spec/template/spec/volumes/0/secret/secretName",
-    "value": "lighthouse-github-app"
-  }
-]' > /dev/null 2>&1
-
-echo -e "${GREEN}  ✓${NC} Keeper configured with GitHub App credentials"
-
-echo -e "${BLUE}▸${NC} Waiting for Lighthouse webhooks deployment..."
-timeout=120
-elapsed=0
-while ! kubectl get deployment lighthouse-webhooks -n pipeline-system &> /dev/null; do
-    if [ $elapsed -ge $timeout ]; then
-        echo -e "${RED}  ✗${NC} Timeout waiting for Lighthouse webhooks deployment"
-        exit 1
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-
-if kubectl wait --for=condition=available deployment/lighthouse-webhooks \
-    -n pipeline-system \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse webhooks is ready"
-else
-    echo -e "${RED}  ✗${NC} Lighthouse webhooks failed to become ready"
-    kubectl get deployment lighthouse-webhooks -n pipeline-system
-    kubectl get pods -n pipeline-system -l app=lighthouse-webhooks
-    exit 1
-fi
-
-echo -e "${BLUE}▸${NC} Waiting for Lighthouse foghorn deployment..."
-if kubectl wait --for=condition=available deployment/lighthouse-foghorn \
-    -n pipeline-system \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse foghorn is ready"
-else
-    echo -e "${RED}  ✗${NC} Lighthouse foghorn failed to become ready"
-    kubectl get deployment lighthouse-foghorn -n pipeline-system
-    kubectl get pods -n pipeline-system -l app=lighthouse-foghorn
-    exit 1
-fi
-
-echo -e "${BLUE}▸${NC} Waiting for Lighthouse keeper deployment..."
-if kubectl wait --for=condition=available deployment/lighthouse-keeper \
-    -n pipeline-system \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse keeper is ready"
-else
-    echo -e "${RED}  ✗${NC} Lighthouse keeper failed to become ready"
-    kubectl get deployment lighthouse-keeper -n pipeline-system
-    kubectl get pods -n pipeline-system -l app=lighthouse-keeper
-    exit 1
-fi
-
-# Install nginx ingress controller for Kind
-if [ "${CLUSTER_TYPE}" = "kind" ]; then
     echo ""
-    echo -e "${BLUE}▸${NC} Installing nginx ingress controller..."
-    if kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓${NC} Nginx ingress controller installed"
-    else
-        echo -e "${RED}  ✗${NC} Failed to install nginx ingress controller"
-        exit 1
-    fi
-    
-    echo -e "${BLUE}▸${NC} Waiting for ingress controller..."
-    if kubectl wait --namespace ingress-nginx \
-        --for=condition=ready pod \
-        --selector=app.kubernetes.io/component=controller \
-        --timeout=300s > /dev/null 2>&1; then
-        echo -e "${GREEN}  ✓${NC} Ingress controller is ready"
-    else
-        echo -e "${RED}  ✗${NC} Ingress controller failed to become ready"
-        exit 1
-    fi
-fi
-
-# Create ingress for Lighthouse webhooks
-echo -e "${BLUE}▸${NC} Creating Lighthouse webhook ingress..."
-if kubectl apply -f "${REPO_ROOT}/platform/infrastructure/ingress/lighthouse-ingress.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Lighthouse webhook ingress created"
-else
-    echo -e "${RED}  ✗${NC} Failed to create Lighthouse webhook ingress"
-    exit 1
-fi
-
-echo ""
-echo "=========================================="
-echo "  Step 5: Deploy Onboarding Controller"
-echo "=========================================="
-echo ""
-
-# Build and load onboarding controller image
-echo -e "${BLUE}▸${NC} Building onboarding controller image..."
-if (cd "${REPO_ROOT}/platform/onboarding/controller" && make docker-build IMG=ghcr.io/bdchatham/onboarding-controller:latest > /dev/null 2>&1); then
-    echo -e "${GREEN}  ✓${NC} Onboarding controller image built"
-else
-    echo -e "${RED}  ✗${NC} Failed to build onboarding controller image"
-    exit 1
-fi
-
-echo -e "${BLUE}▸${NC} Loading onboarding controller image into Kind cluster..."
-if kind load docker-image ghcr.io/bdchatham/onboarding-controller:latest --name "${CLUSTER_NAME}" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Onboarding controller image loaded"
-else
-    echo -e "${RED}  ✗${NC} Failed to load onboarding controller image"
-    exit 1
-fi
-
-# Apply RepoBinding CRD
-echo -e "${BLUE}▸${NC} Installing RepoBinding CRD..."
-if kubectl apply -f "${REPO_ROOT}/platform/infrastructure/crds/repobinding-crd.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} RepoBinding CRD installed"
-else
-    echo -e "${RED}  ✗${NC} Failed to install RepoBinding CRD"
-    exit 1
-fi
-
-# Deploy onboarding controller
-echo -e "${BLUE}▸${NC} Deploying onboarding controller..."
-if kubectl apply -f "${REPO_ROOT}/platform/onboarding/controller-service-account.yaml" > /dev/null 2>&1 && \
-   kubectl apply -f "${REPO_ROOT}/platform/onboarding/controller-rbac.yaml" > /dev/null 2>&1 && \
-   kubectl apply -f "${REPO_ROOT}/platform/onboarding/controller-deployment.yaml" > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Onboarding controller deployed"
-else
-    echo -e "${RED}  ✗${NC} Failed to deploy onboarding controller"
-    exit 1
-fi
-
-# Wait for onboarding controller to be ready
-echo -e "${BLUE}▸${NC} Waiting for onboarding controller..."
-timeout=120
-elapsed=0
-while ! kubectl get deployment onboarding-controller -n pipeline-system &> /dev/null; do
-    if [ $elapsed -ge $timeout ]; then
-        echo -e "${RED}  ✗${NC} Timeout waiting for onboarding controller deployment"
-        exit 1
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-
-if kubectl wait --for=condition=available deployment/onboarding-controller \
-    -n pipeline-system \
-    --timeout=300s > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Onboarding controller is ready"
-else
-    echo -e "${RED}  ✗${NC} Onboarding controller failed to become ready"
-    kubectl get deployment onboarding-controller -n pipeline-system
-    kubectl get pods -n pipeline-system -l app=onboarding-controller
-    exit 1
-fi
-
-echo ""
-echo "=========================================="
-echo "  Step 6: Deploy Pipeline Catalog"
-echo "=========================================="
-echo ""
-
-# Create pipeline-catalog namespace
-echo -e "${BLUE}▸${NC} Creating pipeline-catalog namespace..."
-kubectl create namespace pipeline-catalog --dry-run=client -o yaml | kubectl apply -f - > /dev/null 2>&1
-echo -e "${GREEN}  ✓${NC} pipeline-catalog namespace created"
-
-# Deploy catalog tasks
-echo -e "${BLUE}▸${NC} Deploying pipeline catalog tasks..."
-if kubectl apply -f "${REPO_ROOT}/platform/catalog/tasks/" -n pipeline-catalog > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Pipeline catalog tasks deployed"
-else
-    echo -e "${YELLOW}  ⚠${NC} Some catalog tasks may have failed to deploy"
-fi
-
-# Deploy catalog pipelines
-echo -e "${BLUE}▸${NC} Deploying pipeline catalog pipelines..."
-if kubectl apply -f "${REPO_ROOT}/platform/catalog/pipelines/" -n pipeline-catalog > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Pipeline catalog pipelines deployed"
-else
-    echo -e "${YELLOW}  ⚠${NC} Some catalog pipelines may have failed to deploy"
-fi
-
-echo ""
-echo "=========================================="
-echo "  Step 7: Register Platform Repository"
-echo "=========================================="
-echo ""
-
-# Create platform RepoBinding
-echo -e "${BLUE}▸${NC} Creating platform RepoBinding..."
-set +e  # Temporarily disable exit on error
-REPOBINDING_OUTPUT=$(cat <<EOF | kubectl apply -f - 2>&1
-apiVersion: arbiter.io/v1alpha1
-kind: RepoBinding
-metadata:
-  name: platform-binding
-  namespace: pipeline-system
-spec:
-  repoOrg: "${REPO_ORG}"
-  repoName: "${REPO_NAME}"
-  tenantName: "tenant-platform-infra"
-  permissionProfile: "elevated"
-EOF
-)
-REPOBINDING_EXIT_CODE=$?
-set -e  # Re-enable exit on error
-
-if [ $REPOBINDING_EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}  ✓${NC} Platform RepoBinding created"
-else
-    echo -e "${RED}  ✗${NC} Platform RepoBinding creation failed:"
-    echo "${REPOBINDING_OUTPUT}"
-    exit 1
-fi
-
-# Wait for tenant-platform-infra namespace to be created by onboarding controller
-echo -e "${BLUE}▸${NC} Waiting for onboarding controller to create tenant-platform-infra namespace..."
-timeout=60
-elapsed=0
-while ! kubectl get namespace tenant-platform-infra &> /dev/null; do
-    if [ $elapsed -ge $timeout ]; then
-        echo -e "${RED}  ✗${NC} Timeout waiting for tenant-platform-infra namespace"
-        echo "Checking onboarding controller logs:"
-        kubectl logs -n pipeline-system -l app=onboarding-controller --tail=20
-        exit 1
-    fi
-    sleep 2
-    elapsed=$((elapsed + 2))
-done
-echo -e "${GREEN}  ✓${NC} tenant-platform-infra namespace created by onboarding controller"
-
-# Deploy platform upgrade pipeline
-echo -e "${BLUE}▸${NC} Deploying platform upgrade pipeline..."
-if kubectl apply -f "${REPO_ROOT}/platform/catalog/pipelines/platform-upgrade-pipeline.yaml" -n tenant-platform-infra > /dev/null 2>&1; then
-    echo -e "${GREEN}  ✓${NC} Platform upgrade pipeline deployed"
-else
-    echo -e "${YELLOW}  ⚠${NC} Failed to deploy platform upgrade pipeline"
-fi
-
-echo ""
-echo "=========================================="
-echo -e "${GREEN}  ✓ Bootstrap Complete!${NC}"
-echo "=========================================="
-
-echo ""
-echo "Installed components:"
-echo ""
-echo "Tekton Pipelines:"
-kubectl get pods -n tekton-pipelines
-echo ""
-echo "Lighthouse:"
-kubectl get deployments -n pipeline-system -l app.kubernetes.io/name=lighthouse
-echo ""
-echo "=========================================="
-echo "  GitHub Webhook Configuration"
-echo "=========================================="
-echo ""
-echo -e "${GREEN}GitHub App Webhook Secret:${NC}"
-echo ""
-echo "  ${GITHUB_WEBHOOK_SECRET}"
-echo ""
-echo -e "${YELLOW}Configure GitHub App webhook:${NC}"
-echo ""
-echo "  1. Go to your GitHub App settings:"
-echo "     https://github.com/settings/apps"
-echo ""
-echo "  2. Webhook URL:"
-if [ "${CLUSTER_TYPE}" = "kind" ]; then
-    echo "     http://localhost/hook"
+    echo -e "${GREEN}  ✓ Tekton Triggers installation complete!${NC}"
     echo ""
-    echo "     ${YELLOW}Note:${NC} For Kind clusters, use localhost since ports are mapped to your host"
-else
-    # Get LoadBalancer IP if available
-    LIGHTHOUSE_ENDPOINT=$(kubectl get ingress lighthouse-webhooks -n pipeline-system -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
-    if [ -z "$LIGHTHOUSE_ENDPOINT" ]; then
-        LIGHTHOUSE_ENDPOINT=$(kubectl get ingress lighthouse-webhooks -n pipeline-system -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+fi
+
+echo "=========================================="
+echo "  Step 3: ArgoCD Installation"
+echo "=========================================="
+echo ""
+
+# ArgoCD version
+ARGOCD_VERSION="stable"
+
+# Function to install ArgoCD
+install_argocd() {
+    if [ "${SKIP_ARGOCD_INSTALL}" = "true" ]; then
+        echo -e "${YELLOW}  Skipping ArgoCD installation (--skip-argocd-install flag)${NC}"
+        return 0
     fi
     
-    if [ -n "$LIGHTHOUSE_ENDPOINT" ]; then
-        echo "     http://${LIGHTHOUSE_ENDPOINT}/hook"
+    echo -e "${BLUE}▸${NC} Installing ArgoCD ${ARGOCD_VERSION}..."
+    
+    # Create argocd namespace if it doesn't exist
+    if ! kubectl get namespace argocd &>/dev/null; then
+        echo "  Creating argocd namespace..."
+        kubectl create namespace argocd
     else
-        echo "     ${YELLOW}Waiting for LoadBalancer IP...${NC}"
-        echo "     Run: kubectl get ingress lighthouse-webhooks -n pipeline-system"
+        echo -e "${GREEN}  ✓${NC} ArgoCD already installed, skipping"
+        return 0
     fi
+    
+    # Download and apply ArgoCD manifest
+    local manifest_url="https://raw.githubusercontent.com/argoproj/argo-cd/${ARGOCD_VERSION}/manifests/install.yaml"
+    echo "  Downloading manifest from: ${manifest_url}"
+    
+    if ! kubectl apply -n argocd -f "${manifest_url}"; then
+        echo -e "${RED}  ✗${NC} Failed to install ArgoCD"
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} ArgoCD manifest applied"
+    
+    # Patch argocd-cmd-params-cm for insecure mode (homelab)
+    echo "  Configuring ArgoCD for insecure mode (homelab)..."
+    kubectl patch configmap argocd-cmd-params-cm -n argocd \
+        --type merge \
+        -p '{"data":{"server.insecure":"true"}}' 2>/dev/null || \
+    kubectl create configmap argocd-cmd-params-cm -n argocd \
+        --from-literal=server.insecure=true \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Restart argocd-server to pick up the config change
+    echo "  Restarting ArgoCD server to apply configuration..."
+    kubectl rollout restart deployment argocd-server -n argocd
+    
+    # Wait for ArgoCD components to be ready
+    echo "  Waiting for ArgoCD server to be ready..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-server -n argocd --timeout=300s; then
+        echo -e "${RED}  ✗${NC} ArgoCD server failed to become ready"
+        return 1
+    fi
+    
+    echo "  Waiting for ArgoCD application controller to be ready..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-application-controller -n argocd --timeout=300s; then
+        echo -e "${RED}  ✗${NC} ArgoCD application controller failed to become ready"
+        return 1
+    fi
+    
+    echo "  Waiting for ArgoCD repo server to be ready..."
+    if ! kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=argocd-repo-server -n argocd --timeout=300s; then
+        echo -e "${RED}  ✗${NC} ArgoCD repo server failed to become ready"
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} ArgoCD ${ARGOCD_VERSION} installed successfully"
+    
+    return 0
+}
+
+# Install ArgoCD
+install_argocd
+
+echo ""
+echo -e "${GREEN}  ✓ ArgoCD installation complete!${NC}"
+echo ""
+
+echo "=========================================="
+echo "  Step 4: Platform Namespace Creation"
+echo "=========================================="
+echo ""
+
+# Function to create platform namespaces
+create_platform_namespaces() {
+    echo -e "${BLUE}▸${NC} Creating platform namespaces..."
+    
+    # argocd namespace (should already exist from ArgoCD installation)
+    if ! kubectl get namespace argocd &>/dev/null; then
+        echo "  Creating argocd namespace..."
+        kubectl create namespace argocd
+        echo -e "${GREEN}  ✓${NC} argocd namespace created"
+    else
+        echo -e "${GREEN}  ✓${NC} argocd namespace already exists"
+    fi
+    
+    # tekton-pipelines namespace (should already exist from Tekton installation)
+    if ! kubectl get namespace tekton-pipelines &>/dev/null; then
+        echo "  Creating tekton-pipelines namespace..."
+        kubectl create namespace tekton-pipelines
+        echo -e "${GREEN}  ✓${NC} tekton-pipelines namespace created"
+    else
+        echo -e "${GREEN}  ✓${NC} tekton-pipelines namespace already exists"
+    fi
+    
+    # platform-system namespace (new namespace for platform components)
+    if ! kubectl get namespace platform-system &>/dev/null; then
+        echo "  Creating platform-system namespace..."
+        kubectl create namespace platform-system
+        echo -e "${GREEN}  ✓${NC} platform-system namespace created"
+    else
+        echo -e "${GREEN}  ✓${NC} platform-system namespace already exists"
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} All platform namespaces verified"
+    return 0
+}
+
+# Create platform namespaces
+create_platform_namespaces
+
+echo ""
+echo -e "${GREEN}  ✓ Platform namespace creation complete!${NC}"
+echo ""
+
+echo "=========================================="
+echo "  Step 5: Platform ArgoCD Application"
+echo "=========================================="
+echo ""
+
+# Function to create platform root ArgoCD Application (App of Apps)
+create_platform_application() {
+    echo -e "${BLUE}▸${NC} Creating platform root ArgoCD Application (App of Apps)..."
+    
+    # Path to platform-root.yaml
+    local app_manifest="${REPO_ROOT}/platform/argocd/apps/platform-root.yaml"
+    
+    if [ ! -f "${app_manifest}" ]; then
+        echo -e "${RED}  ✗${NC} Platform root Application manifest not found: ${app_manifest}"
+        echo "  Expected location: ${app_manifest}"
+        return 1
+    fi
+    
+    # Check if root Application already exists
+    if kubectl get application platform-root -n argocd &>/dev/null; then
+        echo -e "${GREEN}  ✓${NC} Platform root Application already exists, skipping"
+        return 0
+    fi
+    
+    # Apply platform root Application manifest
+    echo "  Applying platform root Application manifest..."
+    if ! kubectl apply -f "${app_manifest}"; then
+        echo -e "${RED}  ✗${NC} Failed to create platform root Application"
+        return 1
+    fi
+    
+    echo -e "${GREEN}  ✓${NC} Platform root Application created"
+    
+    # Wait for root Application to sync
+    echo "  Waiting for root Application to sync..."
+    local max_wait=180
+    local elapsed=0
+    
+    while [ $elapsed -lt $max_wait ]; do
+        sync_status=$(kubectl get application platform-root -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+        health_status=$(kubectl get application platform-root -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+        
+        if [ "$sync_status" = "Synced" ]; then
+            echo -e "${GREEN}  ✓${NC} Root Application synced successfully"
+            echo "    Health status: ${health_status}"
+            break
+        fi
+        
+        echo "    Sync status: ${sync_status}, Health status: ${health_status} (${elapsed}s elapsed)"
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+    
+    if [ "$sync_status" != "Synced" ]; then
+        echo -e "${YELLOW}  Root Application sync is taking longer than expected${NC}"
+    fi
+    
+    # Wait for child Applications to be created
+    echo ""
+    echo "  Waiting for child Applications to be created..."
+    local child_apps=("platform-crds" "platform-infrastructure" "platform-controllers" "platform-catalog")
+    local all_created=false
+    elapsed=0
+    max_wait=120
+    
+    while [ $elapsed -lt $max_wait ]; do
+        all_created=true
+        for app in "${child_apps[@]}"; do
+            if ! kubectl get application "$app" -n argocd &>/dev/null; then
+                all_created=false
+                break
+            fi
+        done
+        
+        if [ "$all_created" = true ]; then
+            echo -e "${GREEN}  ✓${NC} All child Applications created"
+            break
+        fi
+        
+        echo "    Waiting for child Applications... (${elapsed}s elapsed)"
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+    
+    if [ "$all_created" = false ]; then
+        echo -e "${YELLOW}  Some child Applications not yet created${NC}"
+        echo "  This is normal - they will be created as the root Application syncs"
+    fi
+    
+    # Display child Application status
+    echo ""
+    echo "  Child Application Status:"
+    for app in "${child_apps[@]}"; do
+        if kubectl get application "$app" -n argocd &>/dev/null; then
+            sync_status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+            health_status=$(kubectl get application "$app" -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+            echo "    ${app}: Sync=${sync_status}, Health=${health_status}"
+        else
+            echo "    ${app}: Not yet created"
+        fi
+    done
+    
+    echo ""
+    echo -e "${GREEN}  ✓${NC} Platform Applications configured"
+    echo ""
+    echo "  Monitor Application sync status:"
+    echo "    kubectl get applications -n argocd"
+    echo "    argocd app list"
+    
+    return 0
+}
+
+# Create platform Application
+create_platform_application
+
+echo ""
+echo -e "${GREEN}  ✓ Platform Application creation complete!${NC}"
+echo ""
+
+echo "=========================================="
+echo "  Bootstrap Complete!"
+echo "=========================================="
+echo ""
+echo -e "${GREEN}✓ Platform bootstrap completed successfully!${NC}"
+echo ""
+
+# Display ArgoCD access information
+echo "=========================================="
+echo "  ArgoCD Access Information"
+echo "=========================================="
+echo ""
+
+# Retrieve admin password
+admin_password=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" 2>/dev/null | base64 -d)
+
+if [ -n "$admin_password" ]; then
+    echo "  Username: admin"
+    echo "  Password: ${admin_password}"
+    echo ""
+else
+    echo "  Username: admin"
+    echo "  Password: (retrieve with command below)"
+    echo ""
 fi
+
+echo "  To access ArgoCD UI:"
+echo "    kubectl port-forward svc/argocd-server -n argocd 8080:443"
+echo "    Then open: http://localhost:8080"
 echo ""
-echo "  3. Webhook secret:"
-echo "     ${GITHUB_WEBHOOK_SECRET}"
-echo ""
-echo "  4. Subscribe to events:"
-echo "     - Push"
-echo "     - Pull request"
-echo ""
-echo "  5. Ensure webhook is Active"
-echo ""
-echo -e "${YELLOW}Note:${NC} The platform repository uses the GitHub App webhook above."
-echo "Individual tenant repositories will have their own webhook secrets"
-echo "generated by the onboarding controller when RepoBindings are created."
+
+if [ -z "$admin_password" ]; then
+    echo "  To retrieve admin password:"
+    echo "    kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath=\"{.data.password}\" | base64 -d"
+    echo ""
+fi
+
+echo "  Or install ArgoCD CLI and login:"
+if [ -n "$admin_password" ]; then
+    echo "    argocd login localhost:8080 --username admin --password '${admin_password}' --insecure"
+else
+    echo "    argocd login localhost:8080 --username admin --insecure"
+fi
 echo ""
 echo "=========================================="
 echo ""
+
 echo "Next steps:"
-echo "  1. Configure GitHub webhook (see instructions above)"
-echo "  2. Create RepoBinding for your repositories"
-echo "  3. Deploy pipeline catalog"
+echo ""
+echo "1. Monitor platform Applications:"
+echo "   kubectl get applications -n argocd"
+echo "   argocd app list"
+echo ""
+echo "2. View platform components:"
+echo "   kubectl get all -n platform-system"
+echo ""
+echo "3. Check child Application sync status:"
+echo "   kubectl get application platform-crds -n argocd"
+echo "   kubectl get application platform-infrastructure -n argocd"
+echo "   kubectl get application platform-controllers -n argocd"
+echo "   kubectl get application platform-catalog -n argocd"
+echo ""
+echo "4. Register a repository by creating a RepoBinding:"
+echo "   kubectl apply -f platform/crds/example-repobinding.yaml"
+echo ""
+echo "=========================================="
 echo ""
