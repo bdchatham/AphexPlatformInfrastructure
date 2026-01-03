@@ -73,6 +73,54 @@ rules:
   - watch
   - update
   - patch
+  - escalate
+  - bind
+# Permissions that can be granted to tenant service accounts
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - persistentvolumeclaims
+  - pods
+  - pods/log
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - delete
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - update
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - create
+  - update
+  - delete
+- apiGroups:
+  - tekton.dev
+  resources:
+  - pipelineruns
+  - taskruns
+  verbs:
+  - get
+  - list
+  - create
+  - watch
 # ResourceQuota permissions
 - apiGroups:
   - ""
