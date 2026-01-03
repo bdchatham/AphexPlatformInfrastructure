@@ -1,0 +1,23 @@
+apiVersion: arbiter.io/v1alpha1
+kind: RepoBinding
+metadata:
+  name: platform-images-binding
+  namespace: platform-system
+  labels:
+    purpose: "platform-image-builds"
+    managed-by: "platform-team"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+    description: "Automated builds for platform container images"
+spec:
+  # GitHub repository details
+  repoOrg: "bdchatham"
+  repoName: "ArbiterPipelineInfrastructure"
+  
+  # Tenant namespace for running image build pipelines
+  tenantName: "platform-images"
+  
+  # Elevated permissions needed for:
+  # - Building container images (requires privileged operations)
+  # - Pushing to GHCR (requires secret access)
+  permissionProfile: "elevated"
