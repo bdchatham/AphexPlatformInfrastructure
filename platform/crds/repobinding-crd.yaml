@@ -88,12 +88,22 @@ spec:
                 terraformSecretCreated:
                   type: boolean
                   description: Whether Terraform backend secret has been created
+                allowlistUpdated:
+                  type: boolean
+                  description: Whether repository has been added to the allowlist (legacy)
+                webhookSecretCreated:
+                  type: boolean
+                  description: Whether webhook secret has been created
                 eventListenerCreated:
                   type: boolean
                   description: Whether Tekton EventListener has been created
                 ingressCreated:
                   type: boolean
                   description: Whether Ingress for webhook routing has been created
+                lastReconcileTime:
+                  type: string
+                  format: date-time
+                  description: Timestamp of last reconciliation
       subresources:
         status: {}
       additionalPrinterColumns:

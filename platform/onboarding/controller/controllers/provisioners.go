@@ -216,6 +216,11 @@ func (r *RepoBindingReconciler) buildRole(namespace, profile string) *rbacv1.Rol
 			Verbs:     []string{"get", "list", "create", "watch"},
 		},
 		{
+			APIGroups: []string{"triggers.tekton.dev"},
+			Resources: []string{"eventlisteners", "triggers", "triggerbindings", "triggertemplates", "interceptors"},
+			Verbs:     []string{"get", "list", "watch"},
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"persistentvolumeclaims"},
 			Verbs:     []string{"get", "list"},
