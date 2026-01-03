@@ -289,6 +289,46 @@ subjects:
     namespace: ${TENANT_NAME}
 ```
 
+### ClusterRole (Tekton Triggers Resources)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pipeline-runner-${TENANT_NAME}
+  labels:
+    platform.arbiter.io/tenant: "${TENANT_NAME}"
+    platform.arbiter.io/managed-by: "onboarding-controller"
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["clusterinterceptors", "clustertriggerbindings"]
+    verbs: ["get", "list", "watch"]
+```
+
+**Purpose**: Grants read-only access to cluster-scoped Tekton Triggers resources. Required for EventListener pods to validate webhooks and create PipelineRuns.
+
+### ClusterRoleBinding (Tekton Triggers Resources)
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pipeline-runner-${TENANT_NAME}
+  labels:
+    platform.arbiter.io/tenant: "${TENANT_NAME}"
+    platform.arbiter.io/managed-by: "onboarding-controller"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pipeline-runner-${TENANT_NAME}
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runner
+    namespace: ${TENANT_NAME}
+```
+
+**Purpose**: Binds the ClusterRole to the tenant's pipeline-runner ServiceAccount, granting cluster-scoped read permissions for Tekton Triggers resources.
+
 ### ResourceQuota
 
 ```yaml

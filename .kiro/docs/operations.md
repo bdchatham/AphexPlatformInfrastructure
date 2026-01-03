@@ -30,11 +30,15 @@ cd platform/bootstrap
 **Bootstrap Script Actions**:
 1. Detects and cleans up existing JenkinsX installations (if present)
 2. Creates Kubernetes cluster (Kind for local, configurable for others)
-3. Installs Tekton Pipelines and Tekton Triggers
-4. Installs ArgoCD
-5. Creates platform namespaces (argocd, tekton-pipelines, platform-system)
-6. Creates platform root ArgoCD Application
-7. Displays ArgoCD credentials and access instructions
+3. Installs Tekton Pipelines v0.65.0
+4. Installs Tekton Triggers v0.29.0
+5. Installs Tekton Triggers Core Interceptors v0.29.0
+6. Installs ArgoCD
+7. Creates platform namespaces (argocd, tekton-pipelines, platform-system)
+8. Creates platform root ArgoCD Application
+9. Displays ArgoCD credentials and access instructions
+
+**Note**: After bootstrap, Tekton is managed by ArgoCD via the `platform-tekton` Application. Updates to Tekton versions are made by updating `platform/tekton/kustomization.yaml` in Git.
 
 **Step 2: Verify Bootstrap**
 
@@ -323,6 +327,86 @@ kubectl logs -n platform-system -l app=onboarding-controller | grep "repobinding
 
 ## Troubleshooting
 
+### EventListener CrashLoopBackOff
+
+**Symptoms**: EventListener pod crashes with "empty caBundle in clusterInterceptor spec" error.
+
+**Diagnosis**:
+
+```bash
+# Check EventListener pod status
+kubectl get pods -n <tenant-namespace> -l eventlistener=github-listener
+
+# Check EventListener logs
+kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=50
+
+# Check if ClusterInterceptors exist
+kubectl get clusterinterceptors
+
+# Check if Core Interceptors deployment exists
+kubectl get deployment tekton-triggers-core-interceptors -n tekton-pipelines
+```
+
+**Resolution**:
+
+This error occurs when Tekton Triggers Core Interceptors are not installed. The Core Interceptors provide ClusterInterceptor resources (github, gitlab, cel, etc.) that EventListeners need.
+
+```bash
+# Install Core Interceptors
+kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+
+# Verify ClusterInterceptors are created
+kubectl get clusterinterceptors
+
+# Delete EventListener pod to restart
+kubectl delete pod -n <tenant-namespace> -l eventlistener=github-listener
+
+# Verify EventListener is running
+kubectl get pods -n <tenant-namespace> -l eventlistener=github-listener
+```
+
+**Prevention**: Ensure bootstrap script installs Core Interceptors, or ensure `platform-tekton` ArgoCD Application includes interceptors.yaml.
+
+### EventListener RBAC Permission Errors
+
+**Symptoms**: EventListener pod logs show "cannot list resource clusterinterceptors" or "cannot list resource clustertriggerbindings" errors.
+
+**Diagnosis**:
+
+```bash
+# Check EventListener logs
+kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=50
+
+# Check if ClusterRole exists for tenant
+kubectl get clusterrole pipeline-runner-<tenant-name>
+
+# Check if ClusterRoleBinding exists for tenant
+kubectl get clusterrolebinding pipeline-runner-<tenant-name>
+```
+
+**Resolution**:
+
+EventListener pods need cluster-scoped read permissions for ClusterInterceptor and ClusterTriggerBinding resources. The onboarding controller should provision these automatically.
+
+```bash
+# Check if controller provisioned cluster-scoped RBAC
+kubectl describe clusterrole pipeline-runner-<tenant-name>
+kubectl describe clusterrolebinding pipeline-runner-<tenant-name>
+
+# If missing, delete and recreate RepoBinding to trigger reprovisioning
+kubectl delete repobinding <name> -n platform-system
+kubectl apply -f repobinding.yaml
+
+# Verify cluster-scoped RBAC was created
+kubectl get clusterrole pipeline-runner-<tenant-name>
+kubectl get clusterrolebinding pipeline-runner-<tenant-name>
+
+# Delete EventListener pod to restart with new permissions
+kubectl delete pod -n <tenant-namespace> -l eventlistener=github-listener
+```
+
+**Prevention**: Ensure onboarding controller has permissions to create ClusterRoles and ClusterRoleBindings (check `platform/onboarding/controller-rbac.yaml`).
+
 ### Repository Not Triggering Pipelines
 
 **Diagnosis**:
@@ -572,24 +656,33 @@ kubectl describe repobinding <name> -n platform-system
 
 ### Update Tekton
 
-```bash
-# Update Tekton version in bootstrap script
-vi platform/bootstrap/bootstrap.sh
+Tekton is managed by ArgoCD after bootstrap. To update Tekton versions:
 
-# Update version URLs
-# Tekton Pipelines: https://github.com/tektoncd/pipeline/releases/download/v0.57.0/release.yaml
-# Tekton Triggers: https://github.com/tektoncd/triggers/releases/download/v0.26.0/release.yaml
+```bash
+# Update Tekton versions in kustomization
+vi platform/tekton/kustomization.yaml
+
+# Update resource URLs to new versions
+# Example: Update to Tekton Pipelines v0.66.0
+resources:
+  - https://github.com/tektoncd/pipeline/releases/download/v0.66.0/release.yaml
+  - https://github.com/tektoncd/triggers/releases/download/v0.30.0/release.yaml
+  - https://github.com/tektoncd/triggers/releases/download/v0.30.0/interceptors.yaml
 
 # Commit changes
-git add platform/bootstrap/bootstrap.sh
-git commit -m "Update Tekton to v0.57.0"
+git add platform/tekton/kustomization.yaml
+git commit -m "Update Tekton to v0.66.0"
 git push
 
-# ArgoCD will NOT automatically update Tekton (installed by bootstrap)
-# To update Tekton, manually apply new manifests:
-kubectl apply -f https://github.com/tektoncd/pipeline/releases/download/v0.57.0/release.yaml
-kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.26.0/release.yaml
+# ArgoCD will automatically sync and update Tekton
+# Watch sync status
+kubectl get application platform-tekton -n argocd -w
+
+# Verify updates
+kubectl get pods -n tekton-pipelines
 ```
+
+**Note**: The bootstrap script installs Tekton initially, but ArgoCD manages updates from Git. This enables GitOps-based Tekton upgrades.
 
 ### Update ArgoCD
 

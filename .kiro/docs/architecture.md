@@ -189,12 +189,14 @@ spec:
 2. **platform-infrastructure** (Namespaces, RBAC, base resources)
 3. **platform-controllers** (Onboarding controller)
 4. **platform-catalog** (Tekton tasks, pipelines, triggers)
+5. **platform-tekton** (Tekton Pipelines, Triggers, and Core Interceptors)
 
 **Sync Order**: ArgoCD automatically syncs Applications in dependency order using sync waves:
 1. platform-crds (wave 0 - CRDs must exist first)
-2. platform-infrastructure (wave 1 - Namespaces and RBAC)
-3. platform-controllers (wave 2 - Controllers depend on CRDs and infrastructure)
-4. platform-catalog (wave 3 - Catalog depends on Tekton being installed)
+2. platform-tekton (wave 1 - Tekton must be installed before controllers)
+3. platform-infrastructure (wave 1 - Namespaces and RBAC)
+4. platform-controllers (wave 2 - Controllers depend on CRDs and infrastructure)
+5. platform-catalog (wave 3 - Catalog depends on Tekton being installed)
 
 **Benefits of App of Apps**:
 - Independent lifecycle management for each component
@@ -210,21 +212,24 @@ spec:
 - `platform/argocd/apps/platform-controllers.yaml`
 - `platform/argocd/apps/platform-catalog.yaml`
 
-### 4. Tekton Pipelines and Triggers
+### 4. Tekton Pipelines, Triggers, and Core Interceptors
 
-**Purpose**: Pipeline execution engine and webhook handling
+**Purpose**: Pipeline execution engine, webhook handling, and interceptor services
 
 **Namespace**: `tekton-pipelines`
 
-**Installation**: Applied via kubectl during bootstrap from Tekton release manifests
+**Installation**: Applied via kubectl during bootstrap, then managed by ArgoCD from `platform/tekton/`
 
 **Configuration**:
 ```yaml
-# Tekton Pipelines v0.56.0
-# https://github.com/tektoncd/pipeline/releases/download/v0.56.0/release.yaml
+# Tekton Pipelines v0.65.0
+# https://github.com/tektoncd/pipeline/releases/download/v0.65.0/release.yaml
 
-# Tekton Triggers v0.25.0
-# https://github.com/tektoncd/triggers/releases/download/v0.25.0/release.yaml
+# Tekton Triggers v0.29.0
+# https://github.com/tektoncd/triggers/releases/download/v0.29.0/release.yaml
+
+# Tekton Triggers Core Interceptors v0.29.0
+# https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
 ```
 
 **Components**:
@@ -232,9 +237,22 @@ spec:
 - tekton-pipelines-webhook: Validates and mutates Tekton resources
 - tekton-triggers-controller: Manages EventListeners and Triggers
 - tekton-triggers-webhook: Validates Trigger resources
+- tekton-triggers-core-interceptors: Provides ClusterInterceptors (github, gitlab, cel, bitbucket, slack)
+
+**ClusterInterceptors**:
+- github: Validates GitHub webhook signatures and filters events
+- gitlab: Validates GitLab webhook signatures and filters events
+- cel: Evaluates CEL expressions for custom filtering
+- bitbucket: Validates Bitbucket webhook signatures
+- slack: Validates Slack webhook signatures
+
+**ArgoCD Management**:
+After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. Updates to Tekton versions are made by updating `platform/tekton/kustomization.yaml` and committing to Git. ArgoCD automatically syncs changes.
 
 **Source**
-- `platform/bootstrap/bootstrap.sh` (installation)
+- `platform/bootstrap/bootstrap.sh` (initial installation)
+- `platform/tekton/kustomization.yaml` (ArgoCD management)
+- `platform/argocd/apps/platform-tekton.yaml` (ArgoCD Application)
 
 ### 5. Onboarding Controller
 
@@ -255,13 +273,33 @@ spec:
 2. Validate spec (org, repo, tenant name)
 3. Generate webhook secret (cryptographically secure)
 4. Create namespace with labels
-5. Create service account and RBAC
-6. Create ResourceQuota and LimitRange
-7. Create NetworkPolicy
-8. Create Terraform backend secret
-9. Create EventListener for webhooks
-10. Create Ingress for EventListener
-11. Update RepoBinding status with webhook URL and secret
+5. Create service account
+6. Create namespace-scoped RBAC (Role, RoleBinding)
+7. Create cluster-scoped RBAC (ClusterRole, ClusterRoleBinding for Tekton Triggers)
+8. Create ResourceQuota and LimitRange
+9. Create NetworkPolicy
+10. Create Terraform backend secret
+11. Create EventListener for webhooks
+12. Create Ingress for EventListener
+13. Update RepoBinding status with webhook URL and secret
+
+**RBAC Provisioning**:
+
+The controller provisions two types of RBAC for each tenant:
+
+1. **Namespace-scoped RBAC**: Role and RoleBinding in tenant namespace for pipeline execution
+   - Permissions for pods, configmaps, secrets, PipelineRuns, TaskRuns
+   - Scoped to tenant namespace only
+
+2. **Cluster-scoped RBAC**: ClusterRole and ClusterRoleBinding for Tekton Triggers resources
+   - Read-only permissions for ClusterInterceptor and ClusterTriggerBinding
+   - Required for EventListener pods to function correctly
+   - ClusterRole named `pipeline-runner-<tenant-name>`
+   - ClusterRoleBinding binds ClusterRole to tenant's `pipeline-runner` ServiceAccount
+
+**Why Cluster-scoped RBAC is Needed**:
+
+EventListener pods need to read cluster-scoped Tekton Triggers resources (ClusterInterceptor, ClusterTriggerBinding) to validate webhooks and create PipelineRuns. These resources are cluster-scoped and cannot be accessed via namespace-scoped Roles.
 
 **Webhook Secret Management**:
 - Secret generated using crypto/rand (e.g., `whsec_` + 32 random bytes base64)

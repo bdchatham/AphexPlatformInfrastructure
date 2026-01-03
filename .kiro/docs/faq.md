@@ -342,6 +342,52 @@ kubectl get pods -n platform-system -l app=onboarding-controller
 kubectl rollout restart deployment onboarding-controller -n platform-system
 ```
 
+### Why is my EventListener pod crashing?
+
+**Common Issues**:
+
+1. **Missing Core Interceptors**: EventListener needs ClusterInterceptors (github, gitlab, cel, etc.) to validate webhooks
+   ```bash
+   # Check if ClusterInterceptors exist
+   kubectl get clusterinterceptors
+   
+   # If missing, install Core Interceptors
+   kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+   ```
+
+2. **Missing Cluster-scoped RBAC**: EventListener needs read permissions for ClusterInterceptor and ClusterTriggerBinding
+   ```bash
+   # Check if ClusterRole exists
+   kubectl get clusterrole pipeline-runner-<tenant-name>
+   
+   # If missing, delete and recreate RepoBinding
+   kubectl delete repobinding <name> -n platform-system
+   kubectl apply -f repobinding.yaml
+   ```
+
+3. **Webhook Secret Missing**: EventListener needs webhook secret for signature validation
+   ```bash
+   # Check if secret exists
+   kubectl get secret webhook-<tenant-name> -n <tenant-namespace>
+   ```
+
+### What are ClusterInterceptors?
+
+ClusterInterceptors are cluster-scoped Tekton Triggers resources that provide webhook validation and filtering capabilities. The Core Interceptors include:
+- **github**: Validates GitHub webhook signatures and filters events
+- **gitlab**: Validates GitLab webhook signatures and filters events
+- **cel**: Evaluates CEL expressions for custom filtering
+- **bitbucket**: Validates Bitbucket webhook signatures
+- **slack**: Validates Slack webhook signatures
+
+EventListeners reference ClusterInterceptors to validate incoming webhooks before creating PipelineRuns.
+
+### Why does my tenant need cluster-scoped RBAC?
+
+EventListener pods run with the tenant's `pipeline-runner` ServiceAccount and need to read cluster-scoped Tekton Triggers resources (ClusterInterceptor, ClusterTriggerBinding). These resources are cluster-scoped and cannot be accessed via namespace-scoped Roles.
+
+The onboarding controller provisions a ClusterRole with read-only permissions for these resources and binds it to the tenant's ServiceAccount. This follows the principle of least privilege - tenants can only read cluster-scoped Tekton Triggers resources, not modify them.
+
 ### Why is my webhook not being delivered?
 
 **Common Issues**:
