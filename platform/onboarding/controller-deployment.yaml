@@ -21,8 +21,8 @@ spec:
       serviceAccountName: onboarding-controller
       containers:
       - name: manager
-        image: onboarding-controller:latest
-        imagePullPolicy: IfNotPresent
+        image: ghcr.io/bdchatham/onboarding-controller:latest
+        imagePullPolicy: Always
         command:
         - /manager
         resources:
