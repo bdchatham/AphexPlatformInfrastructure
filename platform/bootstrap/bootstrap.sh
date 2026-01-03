@@ -372,6 +372,32 @@ install_tekton_triggers() {
     fi
     
     echo -e "${GREEN}  ✓${NC} Tekton Triggers ${TEKTON_TRIGGERS_VERSION} installed successfully"
+    
+    # Install Tekton Triggers Core Interceptors
+    echo -e "${BLUE}▸${NC} Installing Tekton Triggers Core Interceptors ${TEKTON_TRIGGERS_VERSION}..."
+    INTERCEPTORS_URL="https://github.com/tektoncd/triggers/releases/download/v${TEKTON_TRIGGERS_VERSION}/interceptors.yaml"
+    echo -e "  Downloading manifest from: ${INTERCEPTORS_URL}"
+    
+    echo -e "  Applying manifest (using ghcr.io registry)..."
+    if ! curl -sL "${INTERCEPTORS_URL}" | \
+        sed 's|gcr.io/tekton-releases|ghcr.io/tektoncd|g' | \
+        kubectl apply -f - > /dev/null; then
+        echo -e "${RED}  ✗${NC} Failed to apply Tekton Triggers Core Interceptors manifest"
+        return 1
+    fi
+    echo -e "${GREEN}  ✓${NC} Tekton Triggers Core Interceptors manifest applied"
+    
+    echo -e "  Waiting for Tekton Triggers Core Interceptors to be ready..."
+    if ! kubectl wait --for=condition=ready pod \
+        -l app.kubernetes.io/name=core-interceptors \
+        -n tekton-pipelines \
+        --timeout=120s > /dev/null 2>&1; then
+        echo -e "${RED}  ✗${NC} Tekton Triggers Core Interceptors failed to become ready"
+        kubectl describe pods -n tekton-pipelines -l app.kubernetes.io/name=core-interceptors | tail -20
+        return 1
+    fi
+    echo -e "${GREEN}  ✓${NC} Tekton Triggers Core Interceptors ${TEKTON_TRIGGERS_VERSION} installed successfully"
+    
     return 0
 }
 
