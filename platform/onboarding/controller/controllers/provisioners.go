@@ -97,7 +97,7 @@ func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb 
 	return nil
 }
 
-// provisionRBAC creates or updates the tenant RBAC (Role and RoleBinding)
+// provisionRBAC creates or updates the tenant RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding)
 func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// Determine permission profile (default to "standard")
 	profile := rb.Spec.PermissionProfile
@@ -105,14 +105,24 @@ func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv
 		profile = "standard"
 	}
 
-	// Create Role
+	// Create namespace-scoped Role
 	if err := r.provisionRole(ctx, rb, profile); err != nil {
 		return fmt.Errorf("failed to provision role: %w", err)
 	}
 
-	// Create RoleBinding
+	// Create namespace-scoped RoleBinding
 	if err := r.provisionRoleBinding(ctx, rb); err != nil {
 		return fmt.Errorf("failed to provision rolebinding: %w", err)
+	}
+
+	// Create cluster-scoped ClusterRole for Tekton Triggers resources
+	if err := r.provisionClusterRole(ctx, rb); err != nil {
+		return fmt.Errorf("failed to provision cluster role: %w", err)
+	}
+
+	// Create cluster-scoped ClusterRoleBinding
+	if err := r.provisionClusterRoleBinding(ctx, rb); err != nil {
+		return fmt.Errorf("failed to provision cluster rolebinding: %w", err)
 	}
 
 	return nil
@@ -189,6 +199,101 @@ func (r *RepoBindingReconciler) provisionRoleBinding(ctx context.Context, rb *pl
 	return nil
 }
 
+// provisionClusterRole creates or updates the tenant ClusterRole for cluster-scoped Tekton Triggers resources
+func (r *RepoBindingReconciler) provisionClusterRole(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
+	
+	clusterRole := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterRoleName,
+			Labels: map[string]string{
+				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/managed-by": "onboarding-controller",
+			},
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"triggers.tekton.dev"},
+				Resources: []string{"clusterinterceptors", "clustertriggerbindings"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+		},
+	}
+
+	existingCR := &rbacv1.ClusterRole{}
+	err := r.Get(ctx, client.ObjectKey{Name: clusterRoleName}, existingCR)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating ClusterRole for Tekton Triggers", "clusterRole", clusterRoleName)
+			if err := r.Create(ctx, clusterRole); err != nil {
+				return fmt.Errorf("failed to create ClusterRole: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ClusterRole: %w", err)
+	}
+
+	r.Log.Info("Updating ClusterRole for Tekton Triggers", "clusterRole", clusterRoleName)
+	existingCR.Rules = clusterRole.Rules
+	existingCR.Labels = clusterRole.Labels
+	if err := r.Update(ctx, existingCR); err != nil {
+		return fmt.Errorf("failed to update ClusterRole: %w", err)
+	}
+
+	return nil
+}
+
+// provisionClusterRoleBinding creates or updates the tenant ClusterRoleBinding
+func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
+	clusterRoleBindingName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
+	
+	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterRoleBindingName,
+			Labels: map[string]string{
+				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/managed-by": "onboarding-controller",
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     clusterRoleName,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "pipeline-runner",
+				Namespace: rb.Spec.TenantName,
+			},
+		},
+	}
+
+	existingCRB := &rbacv1.ClusterRoleBinding{}
+	err := r.Get(ctx, client.ObjectKey{Name: clusterRoleBindingName}, existingCRB)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating ClusterRoleBinding for Tekton Triggers", "clusterRoleBinding", clusterRoleBindingName)
+			if err := r.Create(ctx, clusterRoleBinding); err != nil {
+				return fmt.Errorf("failed to create ClusterRoleBinding: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ClusterRoleBinding: %w", err)
+	}
+
+	r.Log.Info("Updating ClusterRoleBinding for Tekton Triggers", "clusterRoleBinding", clusterRoleBindingName)
+	existingCRB.RoleRef = clusterRoleBinding.RoleRef
+	existingCRB.Subjects = clusterRoleBinding.Subjects
+	existingCRB.Labels = clusterRoleBinding.Labels
+	if err := r.Update(ctx, existingCRB); err != nil {
+		return fmt.Errorf("failed to update ClusterRoleBinding: %w", err)
+	}
+
+	return nil
+}
+
 // buildRole constructs a Role based on the permission profile
 func (r *RepoBindingReconciler) buildRole(namespace, profile string) *rbacv1.Role {
 	role := &rbacv1.Role{
@@ -251,8 +356,8 @@ func (r *RepoBindingReconciler) buildRole(namespace, profile string) *rbacv1.Rol
 				Verbs:     []string{"get", "list", "watch"},
 			},
 		}
-		// Override PVC rule and add elevated rules
-		role.Rules = append(standardRules[:3], elevatedRules...)
+		// Keep all standard rules except the PVC rule (which gets replaced), then add elevated rules
+		role.Rules = append(standardRules[:4], elevatedRules...)
 	} else {
 		role.Rules = standardRules
 	}

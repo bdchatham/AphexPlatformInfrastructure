@@ -60,12 +60,27 @@ rules:
   - watch
   - update
   - patch
-# RBAC permissions
+# RBAC permissions (namespace-scoped)
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - roles
   - rolebindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - escalate
+  - bind
+# RBAC permissions (cluster-scoped)
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  - clusterrolebindings
   verbs:
   - create
   - get
@@ -120,6 +135,16 @@ rules:
   - get
   - list
   - create
+  - watch
+# Tekton Triggers permissions (cluster-scoped resources that tenants need read access to)
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - clusterinterceptors
+  - clustertriggerbindings
+  verbs:
+  - get
+  - list
   - watch
 # ResourceQuota permissions
 - apiGroups:
