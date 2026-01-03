@@ -25,6 +25,10 @@ type RepoBindingSpec struct {
 	// +kubebuilder:validation:Enum=standard;elevated
 	// +kubebuilder:default=standard
 	PermissionProfile string `json:"permissionProfile,omitempty"`
+
+	// IngressHost is the hostname for the webhook ingress (optional)
+	// +kubebuilder:validation:Optional
+	IngressHost string `json:"ingressHost,omitempty"`
 }
 
 // RepoBindingStatus defines the observed state of RepoBinding
@@ -59,6 +63,12 @@ type RepoBindingStatus struct {
 
 	// WebhookSecretCreated indicates if the webhook secret was created
 	WebhookSecretCreated bool `json:"webhookSecretCreated,omitempty"`
+
+	// EventListenerCreated indicates if the EventListener was created
+	EventListenerCreated bool `json:"eventListenerCreated,omitempty"`
+
+	// IngressCreated indicates if the Ingress was created
+	IngressCreated bool `json:"ingressCreated,omitempty"`
 
 	// WebhookSecret is the generated webhook secret for GitHub webhook configuration
 	WebhookSecret string `json:"webhookSecret,omitempty"`

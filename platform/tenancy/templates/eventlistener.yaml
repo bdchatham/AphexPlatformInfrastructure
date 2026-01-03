@@ -1,0 +1,37 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-listener
+  namespace: {{TENANT_NAME}}
+  labels:
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
+spec:
+  serviceAccountName: pipeline-runner
+  triggers:
+    - name: github-push-main
+      interceptors:
+        # GitHub webhook signature validation
+        - ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: webhook-{{TENANT_NAME}}
+                secretKey: secret
+            - name: eventTypes
+              value:
+                - push
+        
+        # CEL filter for main branch pushes only
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: "body.ref == 'refs/heads/main'"
+      
+      bindings:
+        - ref: github-push-binding
+      
+      template:
+        ref: cdktf-deploy-trigger-template

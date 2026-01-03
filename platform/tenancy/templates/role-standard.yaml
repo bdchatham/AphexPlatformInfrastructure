@@ -1,25 +1,39 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: pipeline-runner
-  namespace: ${TENANT_NAME}
+  name: pipeline-runner-standard
+  namespace: {{TENANT_NAME}}
+  labels:
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
+    arbiter.io/permission-profile: "standard"
 rules:
-  # Allow managing pods for pipeline execution
-  - apiGroups: [""]
-    resources: ["pods", "pods/log"]
-    verbs: ["get", "list", "create", "update", "delete", "watch"]
-  
-  # Allow managing ConfigMaps and Secrets for pipeline configuration
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "create", "update", "delete"]
-  
-  # Allow managing Tekton resources
+  # Allow pipeline execution
   - apiGroups: ["tekton.dev"]
     resources: ["pipelineruns", "taskruns"]
-    verbs: ["get", "list", "create", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   
-  # Allow reading PersistentVolumeClaims for workspace management
+  # Allow reading pipeline definitions
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelines", "tasks"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow managing ConfigMaps and Secrets for pipeline workspaces
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Allow managing PersistentVolumeClaims for pipeline workspaces
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Allow reading pods for pipeline execution
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading pod logs for debugging
+  - apiGroups: [""]
+    resources: ["pods/log"]
     verbs: ["get", "list"]

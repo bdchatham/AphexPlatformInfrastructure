@@ -2,26 +2,39 @@ apiVersion: v1
 kind: LimitRange
 metadata:
   name: tenant-limits
-  namespace: ${TENANT_NAME}
+  namespace: {{TENANT_NAME}}
+  labels:
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
 spec:
   limits:
+    # Container limits
     - type: Container
-      # Default limits applied to containers without explicit limits
       default:
-        cpu: "500m"
-        memory: "512Mi"
-      
-      # Default requests applied to containers without explicit requests
+        cpu: "1"
+        memory: "2Gi"
       defaultRequest:
         cpu: "100m"
-        memory: "128Mi"
-      
-      # Maximum limits a container can request
+        memory: "256Mi"
       max:
-        cpu: "2"
-        memory: "4Gi"
-      
-      # Minimum limits a container must request
+        cpu: "4"
+        memory: "8Gi"
       min:
         cpu: "50m"
-        memory: "64Mi"
+        memory: "128Mi"
+    
+    # Pod limits
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: "8Gi"
+      min:
+        cpu: "50m"
+        memory: "128Mi"
+    
+    # PersistentVolumeClaim limits
+    - type: PersistentVolumeClaim
+      max:
+        storage: "10Gi"
+      min:
+        storage: "1Gi"

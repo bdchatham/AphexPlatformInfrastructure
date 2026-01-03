@@ -6,7 +6,7 @@ kind: ClusterRole
 metadata:
   name: repo-onboarder
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: onboarding
 rules:
   # Allow creating and managing RepoBinding resources
@@ -23,12 +23,6 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
-  
-  # Allow reading ConfigMaps in pipeline-system (to view allowlist)
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list", "watch"]
-    resourceNames: ["repo-allowlist", "lighthouse-config"]
   
   # Allow reading pods and logs in tenant namespaces for debugging
   - apiGroups: [""]
@@ -53,7 +47,7 @@ kind: ClusterRoleBinding
 metadata:
   name: engineering-onboarders
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: onboarding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -73,7 +67,7 @@ kind: ClusterRole
 metadata:
   name: pipeline-catalog-viewer
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: catalog
 rules:
   # Allow reading Tasks and Pipelines in pipeline-catalog namespace
@@ -88,7 +82,7 @@ kind: ClusterRoleBinding
 metadata:
   name: engineering-catalog-viewers
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: catalog
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -108,7 +102,7 @@ metadata:
   name: engineering-platform-viewers
   namespace: pipeline-system
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: platform
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -127,7 +121,7 @@ metadata:
   name: engineering-catalog-viewers
   namespace: pipeline-catalog
   labels:
-    app: jenkins-x-platform
+    app: argocd-tekton-platform
     component: catalog
 roleRef:
   apiGroup: rbac.authorization.k8s.io

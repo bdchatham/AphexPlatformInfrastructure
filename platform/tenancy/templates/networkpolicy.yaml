@@ -2,42 +2,55 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: tenant-isolation
-  namespace: ${TENANT_NAME}
+  namespace: {{TENANT_NAME}}
+  labels:
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
 spec:
-  # Apply to all pods in the namespace
   podSelector: {}
-  
-  # Define both ingress and egress policies
   policyTypes:
     - Ingress
     - Egress
   
-  # Ingress rules: allow traffic from same namespace only
   ingress:
+    # Allow ingress from ingress controller namespace
     - from:
-        - podSelector: {}  # Allow from same namespace
-  
-  # Egress rules: allow same namespace, DNS, and internet
-  egress:
-    # Allow to same namespace
-    - to:
-        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
     
-    # Allow DNS queries to kube-system
+    # Allow ingress from same namespace
+    - from:
+        - podSelector: {}
+  
+  egress:
+    # Allow DNS resolution
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kube-system
+              name: kube-system
       ports:
         - protocol: UDP
           port: 53
     
-    # Allow internet egress (for git clone, terraform providers, etc.)
+    # Allow egress to same namespace
     - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              # Block access to private IP ranges (cross-namespace traffic)
-              - 10.0.0.0/8
-              - 172.16.0.0/12
-              - 192.168.0.0/16
+        - podSelector: {}
+    
+    # Allow egress to internet (for git clone, package downloads, etc.)
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    
+    # Allow egress to Kubernetes API server
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: default
+      ports:
+        - protocol: TCP
+          port: 443

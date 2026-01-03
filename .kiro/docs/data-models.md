@@ -2,12 +2,12 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs) and ConfigMaps to define data structures. All state is managed by Kubernetes (cluster state) and the onboarding controller (tenant provisioning state).
+The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs) and standard Kubernetes resources to define data structures. All state is managed by Kubernetes (cluster state) and the onboarding controller (tenant provisioning state).
 
 Data flows through the system in three main forms:
 1. **RepoBinding Resources**: Custom resources for onboarding requests
 2. **Kubernetes Resources**: YAML manifests for tenant infrastructure
-3. **Configuration Data**: ConfigMaps for allowlist and Lighthouse configuration
+3. **ArgoCD Applications**: GitOps application definitions
 
 ## RepoBinding Data Model
 
@@ -19,14 +19,16 @@ interface RepoBindingSpec {
   repoName: string;             // Repository name (e.g., "archon-agent")
   tenantName: string;           // Tenant namespace name (e.g., "archon")
   permissionProfile: "standard" | "elevated";  // Permission level (default: "standard")
+  ingressHost?: string;         // Optional ingress hostname (e.g., "webhooks.example.com")
 }
 ```
 
 **Validation Rules**:
-- `repoOrg`: Must match pattern `^[a-z0-9-]+$`, must be in approved organization list
+- `repoOrg`: Must match pattern `^[a-z0-9-]+$`
 - `repoName`: Must match pattern `^[a-z0-9-]+$`
 - `tenantName`: Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace
 - `permissionProfile`: Must be "standard" or "elevated"
+- `ingressHost`: Must be valid hostname format (if provided)
 
 **Example**:
 ```yaml
@@ -35,6 +37,7 @@ spec:
   repoName: "archon-agent"
   tenantName: "archon"
   permissionProfile: "standard"
+  ingressHost: "webhooks.example.com"
 ```
 
 ### RepoBinding Status
@@ -43,11 +46,16 @@ spec:
 interface RepoBindingStatus {
   phase: "Pending" | "Provisioning" | "Ready" | "Failed";
   message: string;
+  webhookURL: string;
+  webhookSecret: string;
   namespaceCreated: boolean;
   serviceAccountCreated: boolean;
-  rbacConfigured: boolean;
-  allowlistUpdated: boolean;
-  lastReconcileTime: string;  // ISO 8601 timestamp
+  rbacCreated: boolean;
+  quotasCreated: boolean;
+  networkPolicyCreated: boolean;
+  terraformSecretCreated: boolean;
+  eventListenerCreated: boolean;
+  ingressCreated: boolean;
 }
 ```
 
@@ -63,40 +71,162 @@ Pending → Provisioning → Ready
 status:
   phase: Ready
   message: "All resources provisioned successfully"
+  webhookURL: "https://webhooks.example.com/archon"
+  webhookSecret: "whsec_abc123xyz456"
   namespaceCreated: true
   serviceAccountCreated: true
-  rbacConfigured: true
-  allowlistUpdated: true
-  lastReconcileTime: "2024-12-31T10:00:00Z"
+  rbacCreated: true
+  quotasCreated: true
+  networkPolicyCreated: true
+  terraformSecretCreated: true
+  eventListenerCreated: true
+  ingressCreated: true
 ```
 
-## Allowlist Data Model
+## ArgoCD Application Data Model
 
-### Allowlist Entry
+### Application Spec
 
 ```typescript
-interface AllowlistEntry {
-  org: string;           // GitHub organization
-  name: string;          // Repository name
-  tenant: string;        // Tenant namespace
-  enabled: boolean;      // Whether triggers are active (default: true)
+interface ApplicationSpec {
+  project: string;              // ArgoCD project (default: "default")
+  source: {
+    repoURL: string;            // Git repository URL
+    targetRevision: string;     // Git branch/tag/commit (e.g., "main")
+    path: string;               // Path within repository
+  };
+  destination: {
+    server: string;             // Kubernetes API server URL
+    namespace: string;          // Target namespace
+  };
+  syncPolicy: {
+    automated?: {
+      prune: boolean;           // Delete resources not in Git
+      selfHeal: boolean;        // Revert manual changes
+    };
+    retry?: {
+      limit: number;            // Max retry attempts
+      backoff: {
+        duration: string;       // Initial backoff duration
+        factor: number;         // Backoff multiplier
+        maxDuration: string;    // Max backoff duration
+      };
+    };
+  };
 }
 ```
 
 **Example**:
 ```yaml
-repos:
-  - org: "your-github-org"
-    name: "archon-agent"
-    tenant: "archon"
-    enabled: true
-  - org: "your-github-org"
-    name: "another-repo"
-    tenant: "another"
-    enabled: true
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    targetRevision: main
+    path: platform/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
 ```
 
-**Storage**: ConfigMap `repo-allowlist` in `pipeline-system` namespace
+### Application Status
+
+```typescript
+interface ApplicationStatus {
+  sync: {
+    status: "Synced" | "OutOfSync" | "Unknown";
+    revision: string;           // Git commit SHA
+  };
+  health: {
+    status: "Healthy" | "Progressing" | "Degraded" | "Suspended" | "Missing" | "Unknown";
+  };
+  conditions: Array<{
+    type: string;
+    status: string;
+    message: string;
+  }>;
+}
+```
+
+**Example**:
+```yaml
+status:
+  sync:
+    status: Synced
+    revision: abc123def456
+  health:
+    status: Healthy
+  conditions:
+    - type: ComparisonError
+      status: "False"
+      message: ""
+```
+
+## EventListener Configuration Data Model
+
+### EventListener Spec
+
+```typescript
+interface EventListenerSpec {
+  serviceAccountName: string;   // Service account for pipeline execution
+  triggers: Array<{
+    name: string;               // Trigger name
+    interceptors: Array<{
+      ref: {
+        name: string;           // Interceptor type (e.g., "github", "cel")
+      };
+      params: Array<{
+        name: string;
+        value: any;
+      }>;
+    }>;
+    bindings: Array<{
+      ref: string;              // TriggerBinding name
+    }>;
+    template: {
+      ref: string;              // TriggerTemplate name
+    };
+  }>;
+}
+```
+
+**Example**:
+```yaml
+spec:
+  serviceAccountName: pipeline-runner
+  triggers:
+    - name: github-push
+      interceptors:
+        - ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: webhook-archon
+                secretKey: secret
+            - name: eventTypes
+              value:
+                - push
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: "body.ref == 'refs/heads/main'"
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: cdktf-deploy-trigger-template
+```
 
 ## Pipeline Parameters Data Model
 
@@ -107,7 +237,6 @@ interface PipelineParams {
   repoUrl: string;       // Git repository URL
   commitSha: string;     // Git commit SHA to build
   tenantName: string;    // Tenant namespace for RBAC context
-  branch: string;        // Git branch (for reference)
 }
 ```
 
@@ -120,8 +249,6 @@ params:
     value: "abc123def456..."
   - name: tenant-name
     value: "archon"
-  - name: branch
-    value: "main"
 ```
 
 ## Terraform Backend Configuration Data Model
@@ -147,69 +274,6 @@ terraform {
   }
 }
 ```
-
-### Terraform Backend Config (MinIO/S3 Backend)
-
-```typescript
-interface TerraformBackendConfigS3 {
-  backend: "s3";
-  bucket: string;        // State bucket name
-  key: string;           // State file key
-  region: string;        // AWS region or equivalent
-  endpoint: string;      // S3-compatible endpoint URL
-  skipCredentialsValidation: boolean;
-  skipMetadataApiCheck: boolean;
-  skipRegionValidation: boolean;
-  forcePathStyle: boolean;
-}
-```
-
-**Example**:
-```yaml
-terraform {
-  backend "s3" {
-    bucket = "terraform-state-archon"
-    key    = "state.tfstate"
-    region = "us-east-1"
-    endpoint = "http://minio.storage-system.svc.cluster.local:9000"
-    skip_credentials_validation = true
-    skip_metadata_api_check = true
-    skip_region_validation = true
-    force_path_style = true
-  }
-}
-```
-
-## Lighthouse Configuration Data Model
-
-### Lighthouse Config
-
-```typescript
-interface LighthouseConfig {
-  github: {
-    appId: string;              // GitHub App ID
-    appInstallationId: string;  // GitHub App Installation ID
-  };
-  allowlist: Array<{
-    org: string;                // GitHub organization
-    repos: string[];            // List of repository names
-  }>;
-}
-```
-
-**Example**:
-```yaml
-github:
-  app_id: "123456"
-  app_installation_id: "78901234"
-allowlist:
-  - org: "your-github-org"
-    repos:
-      - "archon-agent"
-      - "another-repo"
-```
-
-**Storage**: ConfigMap `lighthouse-config` in `pipeline-system` namespace
 
 ## Tenant Resource Data Models
 
@@ -415,7 +479,9 @@ User creates RepoBinding
     ↓
 Onboarding Controller reconciles
     ↓
-Validate spec (org, namespace, profile)
+Validate spec (org, repo, namespace, profile)
+    ↓
+Generate webhook secret
     ↓
 Create Namespace with labels
     ↓
@@ -433,7 +499,9 @@ Create NetworkPolicy
     ↓
 Create Terraform backend secret
     ↓
-Update allowlist ConfigMap
+Create EventListener
+    ↓
+Create Ingress
     ↓
 Update RepoBinding status to Ready
 ```
@@ -443,13 +511,13 @@ Update RepoBinding status to Ready
 ```
 GitHub webhook event
     ↓
-Lighthouse receives event
+Ingress routes to EventListener
     ↓
-Check allowlist ConfigMap
+EventListener validates webhook signature
     ↓
-Lookup tenant namespace from allowlist
+EventListener checks CEL filter (main branch)
     ↓
-Create PipelineRun in tenant namespace
+EventListener creates PipelineRun in tenant namespace
     ↓
 PipelineRun executes as tenant ServiceAccount
     ↓
@@ -460,50 +528,48 @@ Pipeline accesses Terraform state via secret
 Pipeline completes, logs stored
 ```
 
-### Configuration Update Flow
+### GitOps Sync Flow
 
 ```
-User updates RepoBinding
+Engineer commits platform changes to Git
     ↓
-Onboarding Controller detects change
+ArgoCD polls Git repository (every 3 minutes)
     ↓
-Reconcile resources (idempotent)
+ArgoCD detects changes
     ↓
-Update status
+ArgoCD compares Git state with cluster state
+    ↓
+ArgoCD applies changes to cluster
+    ↓
+ArgoCD updates Application status
 ```
 
 ## Validation Rules
 
 ### RepoBinding Validation
 
-- `repoOrg`: Must match `^[a-z0-9-]+$`, must be in approved list
+- `repoOrg`: Must match `^[a-z0-9-]+$`
 - `repoName`: Must match `^[a-z0-9-]+$`
 - `tenantName`: Must match `^[a-z0-9-]+$`, cannot be privileged namespace
 - `permissionProfile`: Must be "standard" or "elevated"
+- `ingressHost`: Must be valid hostname format (if provided)
 
 ### Namespace Validation
 
 - Name must be valid DNS label (lowercase alphanumeric and hyphens)
-- Name cannot be privileged (kube-system, pipeline-system, tekton-pipelines, etc.)
+- Name cannot be privileged (kube-system, platform-system, argocd, tekton-pipelines, etc.)
 - Name must be unique in cluster
-
-### Allowlist Validation
-
-- Organization must be string
-- Repository name must be string
-- Tenant must be valid namespace name
-- Enabled must be boolean (default: true)
 
 ### Pipeline Parameters Validation
 
 - `repoUrl`: Must be valid Git URL
 - `commitSha`: Must be valid Git commit hash (40 hex characters)
 - `tenantName`: Must be existing namespace
-- `branch`: Must be string
 
 **Source**
-- `.kiro/specs/jenkinsx-platform/design.md`
-- `.kiro/specs/jenkinsx-platform/requirements.md`
-- `platform/crds/README.md`
-- `platform/onboarding/README.md`
-- `platform/tenancy/README.md`
+- `.kiro/specs/argocd-tekton-platform/design.md`
+- `.kiro/specs/argocd-tekton-platform/requirements.md`
+- `platform/crds/repobinding-crd.yaml`
+- `platform/onboarding/controller/`
+- `platform/tenancy/templates/`
+- `platform/argocd/apps/`

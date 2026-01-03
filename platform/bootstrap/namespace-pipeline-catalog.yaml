@@ -6,4 +6,4 @@ metadata:
     platform.arbiter.io/component: "catalog"
     platform.arbiter.io/managed-by: "bootstrap"
     app.kubernetes.io/name: "pipeline-catalog"
-    app.kubernetes.io/part-of: "jenkins-x-platform"
+    app.kubernetes.io/part-of: "argocd-tekton-platform"

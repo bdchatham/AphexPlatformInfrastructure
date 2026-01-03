@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: auth-system
-  labels:
-    app.kubernetes.io/name: auth-system
-    app.kubernetes.io/component: infrastructure
-    app.kubernetes.io/managed-by: argocd

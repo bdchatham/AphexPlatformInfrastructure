@@ -12,7 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -512,6 +514,190 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 }
 
 
+// provisionEventListener creates or updates the tenant EventListener
+func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Define the EventListener GVK
+	eventListenerGVK := schema.GroupVersionKind{
+		Group:   "triggers.tekton.dev",
+		Version: "v1beta1",
+		Kind:    "EventListener",
+	}
+	
+	// Build the EventListener spec
+	eventListener := &unstructured.Unstructured{}
+	eventListener.SetGroupVersionKind(eventListenerGVK)
+	eventListener.SetName("github-listener")
+	eventListener.SetNamespace(rb.Spec.TenantName)
+	eventListener.SetLabels(map[string]string{
+		"arbiter.io/tenant":     rb.Spec.TenantName,
+		"arbiter.io/managed-by": "onboarding-controller",
+	})
+	
+	// Set the spec
+	spec := map[string]interface{}{
+		"serviceAccountName": "pipeline-runner",
+		"triggers": []interface{}{
+			map[string]interface{}{
+				"name": "github-push-main",
+				"interceptors": []interface{}{
+					map[string]interface{}{
+						"ref": map[string]interface{}{
+							"name": "github",
+						},
+						"params": []interface{}{
+							map[string]interface{}{
+								"name": "secretRef",
+								"value": map[string]interface{}{
+									"secretName": fmt.Sprintf("webhook-%s", rb.Spec.TenantName),
+									"secretKey":  "secret",
+								},
+							},
+							map[string]interface{}{
+								"name": "eventTypes",
+								"value": []interface{}{
+									"push",
+								},
+							},
+						},
+					},
+					map[string]interface{}{
+						"ref": map[string]interface{}{
+							"name": "cel",
+						},
+						"params": []interface{}{
+							map[string]interface{}{
+								"name":  "filter",
+								"value": "body.ref == 'refs/heads/main'",
+							},
+						},
+					},
+				},
+				"bindings": []interface{}{
+					map[string]interface{}{
+						"ref": "github-push-binding",
+					},
+				},
+				"template": map[string]interface{}{
+					"ref": "cdktf-deploy-trigger-template",
+				},
+			},
+		},
+	}
+	
+	if err := unstructured.SetNestedMap(eventListener.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("failed to set EventListener spec: %w", err)
+	}
+	
+	// Try to get existing EventListener
+	existingEL := &unstructured.Unstructured{}
+	existingEL.SetGroupVersionKind(eventListenerGVK)
+	err := r.Get(ctx, client.ObjectKey{Name: "github-listener", Namespace: rb.Spec.TenantName}, existingEL)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new EventListener
+			r.Log.Info("Creating EventListener", "namespace", rb.Spec.TenantName)
+			if err := r.Create(ctx, eventListener); err != nil {
+				return fmt.Errorf("failed to create EventListener: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get EventListener: %w", err)
+	}
+	
+	// EventListener exists, update if needed
+	r.Log.Info("Updating EventListener", "namespace", rb.Spec.TenantName)
+	if err := unstructured.SetNestedMap(existingEL.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("failed to update EventListener spec: %w", err)
+	}
+	if err := r.Update(ctx, existingEL); err != nil {
+		return fmt.Errorf("failed to update EventListener: %w", err)
+	}
+	
+	return nil
+}
+
+
+// provisionIngress creates or updates the tenant Ingress for webhook routing
+func (r *RepoBindingReconciler) provisionIngress(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Determine ingress hostname (default to "webhooks.local" for homelab)
+	ingressHost := "webhooks.local"
+	if rb.Spec.IngressHost != "" {
+		ingressHost = rb.Spec.IngressHost
+	}
+	
+	pathType := networkingv1.PathTypePrefix
+	ingress := &networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-webhook",
+			Namespace: rb.Spec.TenantName,
+			Labels: map[string]string{
+				"arbiter.io/tenant":     rb.Spec.TenantName,
+				"arbiter.io/managed-by": "onboarding-controller",
+			},
+			Annotations: map[string]string{
+				"nginx.ingress.kubernetes.io/rewrite-target": "/",
+			},
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: stringPtr("nginx"),
+			Rules: []networkingv1.IngressRule{
+				{
+					Host: ingressHost,
+					IngressRuleValue: networkingv1.IngressRuleValue{
+						HTTP: &networkingv1.HTTPIngressRuleValue{
+							Paths: []networkingv1.HTTPIngressPath{
+								{
+									Path:     fmt.Sprintf("/%s", rb.Spec.TenantName),
+									PathType: &pathType,
+									Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{
+											Name: "el-github-listener",
+											Port: networkingv1.ServiceBackendPort{
+												Number: 8080,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	
+	// Try to get existing Ingress
+	existingIngress := &networkingv1.Ingress{}
+	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook", Namespace: rb.Spec.TenantName}, existingIngress)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create new Ingress
+			r.Log.Info("Creating Ingress", "namespace", rb.Spec.TenantName, "host", ingressHost)
+			if err := r.Create(ctx, ingress); err != nil {
+				return fmt.Errorf("failed to create Ingress: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get Ingress: %w", err)
+	}
+	
+	// Ingress exists, update if needed
+	r.Log.Info("Updating Ingress", "namespace", rb.Spec.TenantName, "host", ingressHost)
+	existingIngress.Spec = ingress.Spec
+	existingIngress.Annotations = ingress.Annotations
+	if err := r.Update(ctx, existingIngress); err != nil {
+		return fmt.Errorf("failed to update Ingress: %w", err)
+	}
+	
+	return nil
+}
+
+// stringPtr returns a pointer to a string
+func stringPtr(s string) *string {
+	return &s
+}
+
+
 // AllowlistEntry represents a repository entry in the allowlist
 type AllowlistEntry struct {
 	Org              string `yaml:"org"`
@@ -642,9 +828,9 @@ func generateWebhookSecret() (string, error) {
 func (r *RepoBindingReconciler) provisionWebhookSecret(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	secretName := fmt.Sprintf("webhook-%s", rb.Spec.TenantName)
 	
-	// Check if secret already exists
+	// Check if secret already exists in tenant namespace
 	existingSecret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: "pipeline-system"}, existingSecret)
+	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: rb.Spec.TenantName}, existingSecret)
 	if err == nil {
 		// Secret exists, verify it has the required key
 		if _, ok := existingSecret.Data["secret"]; ok {
@@ -664,11 +850,11 @@ func (r *RepoBindingReconciler) provisionWebhookSecret(ctx context.Context, rb *
 		return fmt.Errorf("failed to generate webhook secret: %w", err)
 	}
 	
-	// Create secret in pipeline-system namespace
+	// Create secret in tenant namespace
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
-			Namespace: "pipeline-system",
+			Namespace: rb.Spec.TenantName,
 			Labels: map[string]string{
 				"platform.arbiter.io/tenant": rb.Spec.TenantName,
 				"platform.arbiter.io/type":   "webhook-secret",
@@ -694,7 +880,7 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 	
 	// Retrieve the webhook secret from Kubernetes
 	secret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: "pipeline-system"}, secret)
+	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: rb.Spec.TenantName}, secret)
 	if err != nil {
 		return fmt.Errorf("failed to get webhook secret: %w", err)
 	}
@@ -704,9 +890,15 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 		return fmt.Errorf("webhook secret missing 'secret' key")
 	}
 	
+	// Determine ingress hostname
+	ingressHost := "webhooks.local"
+	if rb.Spec.IngressHost != "" {
+		ingressHost = rb.Spec.IngressHost
+	}
+	
 	// Update RepoBinding status with webhook information
 	rb.Status.WebhookSecret = string(webhookSecret)
-	rb.Status.WebhookURL = "http://lighthouse.pipeline-system/hook"
+	rb.Status.WebhookURL = fmt.Sprintf("http://%s/%s", ingressHost, rb.Spec.TenantName)
 	
 	// Build configuration instructions message
 	instructions := fmt.Sprintf(`Registration successful!

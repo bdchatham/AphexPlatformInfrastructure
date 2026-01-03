@@ -2,10 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: onboarding-controller
-  namespace: pipeline-system
+  namespace: platform-system
   labels:
     app: onboarding-controller
-    platform.arbiter.io/component: onboarding
+    component: controller
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   replicas: 1
   selector:
@@ -15,53 +17,45 @@ spec:
     metadata:
       labels:
         app: onboarding-controller
-        platform.arbiter.io/component: onboarding
     spec:
       serviceAccountName: onboarding-controller
+      containers:
+      - name: manager
+        image: onboarding-controller:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /manager
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 65532
+          capabilities:
+            drop:
+            - ALL
       securityContext:
         runAsNonRoot: true
-        runAsUser: 65532
-        fsGroup: 65532
-      containers:
-        - name: manager
-          image: ghcr.io/bdchatham/onboarding-controller:latest
-          imagePullPolicy: IfNotPresent
-          command:
-            - /manager
-          args:
-            - --leader-elect
-            - --metrics-bind-address=:8080
-            - --health-probe-bind-address=:8081
-          ports:
-            - name: metrics
-              containerPort: 8080
-              protocol: TCP
-            - name: health
-              containerPort: 8081
-              protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: health
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: health
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          resources:
-            requests:
-              cpu: 100m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            readOnlyRootFilesystem: true
-      terminationGracePeriodSeconds: 10
+        seccompProfile:
+          type: RuntimeDefault

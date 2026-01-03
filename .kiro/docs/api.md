@@ -10,24 +10,25 @@ The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for reposit
 
 The primary API for onboarding repositories to the platform.
 
-**API Group**: `platform.arbiter.io`  
+**API Group**: `arbiter.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
-**Scope**: Namespaced (must be created in `pipeline-system` namespace)
+**Scope**: Namespaced (must be created in `platform-system` namespace)
 
 ### RepoBinding Spec
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: <binding-name>
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: <string>              # Required: GitHub organization
   repoName: <string>             # Required: Repository name
   tenantName: <string>           # Required: Tenant namespace name
   permissionProfile: <string>    # Optional: "standard" or "elevated" (default: "standard")
+  ingressHost: <string>          # Optional: Ingress hostname for webhooks
 ```
 
 **Field Descriptions**:
@@ -38,10 +39,10 @@ spec:
 | `repoName` | string | Yes | Repository name | Must match pattern `^[a-z0-9-]+$` |
 | `tenantName` | string | Yes | Tenant namespace name | Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace |
 | `permissionProfile` | string | No | Permission level | Must be "standard" or "elevated" (default: "standard") |
+| `ingressHost` | string | No | Ingress hostname | Valid hostname format |
 
 **Validation Rules**:
-- `repoOrg` must be in the approved organization list
-- `tenantName` cannot be a privileged namespace (kube-system, pipeline-system, etc.)
+- `tenantName` cannot be a privileged namespace (kube-system, platform-system, argocd, tekton-pipelines, etc.)
 - `permissionProfile` must be one of the predefined profiles
 
 ### RepoBinding Status
@@ -52,11 +53,16 @@ The onboarding controller updates the status to reflect provisioning progress.
 status:
   phase: <string>                    # "Pending" | "Provisioning" | "Ready" | "Failed"
   message: <string>                  # Human-readable status message
+  webhookURL: <string>               # Webhook URL for GitHub configuration
+  webhookSecret: <string>            # Webhook secret for GitHub configuration
   namespaceCreated: <boolean>        # Whether tenant namespace was created
   serviceAccountCreated: <boolean>   # Whether service account was created
-  rbacConfigured: <boolean>          # Whether RBAC was configured
-  allowlistUpdated: <boolean>        # Whether allowlist was updated
-  lastReconcileTime: <string>        # ISO 8601 timestamp of last reconciliation
+  rbacCreated: <boolean>             # Whether RBAC was configured
+  quotasCreated: <boolean>           # Whether resource quotas were created
+  networkPolicyCreated: <boolean>    # Whether network policy was created
+  terraformSecretCreated: <boolean>  # Whether Terraform secret was created
+  eventListenerCreated: <boolean>    # Whether EventListener was created
+  ingressCreated: <boolean>          # Whether Ingress was created
 ```
 
 **Phase Values**:
@@ -70,44 +76,46 @@ status:
 **Example 1: Standard Onboarding**
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "your-github-org"
   repoName: "archon-agent"
   tenantName: "archon"
   permissionProfile: "standard"
+  ingressHost: "webhooks.example.com"
 ```
 
 **Example 2: Elevated Permissions**
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "your-github-org"
   repoName: "infrastructure-repo"
   tenantName: "infrastructure"
   permissionProfile: "elevated"
+  ingressHost: "webhooks.example.com"
 ```
 
 **Example 3: Check Status**
 
 ```bash
 # Get RepoBinding status
-kubectl get repobinding archon-binding -n pipeline-system
+kubectl get repobinding archon-binding -n platform-system
 
 # Get detailed status
-kubectl describe repobinding archon-binding -n pipeline-system
+kubectl describe repobinding archon-binding -n platform-system
 
 # Get status as YAML
-kubectl get repobinding archon-binding -n pipeline-system -o yaml
+kubectl get repobinding archon-binding -n platform-system -o yaml
 ```
 
 **Example Status Output**:
@@ -116,92 +124,88 @@ kubectl get repobinding archon-binding -n pipeline-system -o yaml
 status:
   phase: Ready
   message: "All resources provisioned successfully"
+  webhookURL: "https://webhooks.example.com/archon"
+  webhookSecret: "whsec_abc123xyz456"
   namespaceCreated: true
   serviceAccountCreated: true
-  rbacConfigured: true
-  allowlistUpdated: true
-  lastReconcileTime: "2024-12-31T10:00:00Z"
+  rbacCreated: true
+  quotasCreated: true
+  networkPolicyCreated: true
+  terraformSecretCreated: true
+  eventListenerCreated: true
+  ingressCreated: true
 ```
 
-## Repository Allowlist API
+## EventListener Webhook API
 
-The allowlist is managed through a ConfigMap in the `pipeline-system` namespace.
+Each tenant gets a dedicated Tekton EventListener that receives GitHub webhooks.
 
-### Allowlist ConfigMap
+### Webhook Endpoint
 
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: repo-allowlist
-  namespace: pipeline-system
-data:
-  allowlist.yaml: |
-    repos:
-      - org: "your-github-org"
-        name: "archon-agent"
-        tenant: "archon"
-        enabled: true
-      - org: "your-github-org"
-        name: "another-repo"
-        tenant: "another"
-        enabled: true
+**URL Format**: `https://<ingressHost>/<tenantName>`
+
+**Example**: `https://webhooks.example.com/archon`
+
+### Webhook Request
+
+**Method**: POST
+
+**Headers**:
+- `Content-Type: application/json`
+- `X-GitHub-Event: push`
+- `X-Hub-Signature-256: sha256=<signature>`
+
+**Body** (GitHub Push Event):
+```json
+{
+  "ref": "refs/heads/main",
+  "after": "abc123def456...",
+  "repository": {
+    "clone_url": "https://github.com/org/repo.git",
+    "name": "repo",
+    "full_name": "org/repo"
+  },
+  "pusher": {
+    "name": "username"
+  }
+}
 ```
 
-**Field Descriptions**:
+### Webhook Response
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `org` | string | Yes | GitHub organization |
-| `name` | string | Yes | Repository name |
-| `tenant` | string | Yes | Tenant namespace |
-| `enabled` | boolean | No | Whether triggers are active (default: true) |
-
-**Usage**:
-
-```bash
-# View allowlist
-kubectl get configmap repo-allowlist -n pipeline-system -o yaml
-
-# Edit allowlist (manual - not recommended)
-kubectl edit configmap repo-allowlist -n pipeline-system
-
-# Lighthouse automatically reloads on ConfigMap changes
+**Success (200 OK)**:
+```json
+{
+  "eventListener": "github-listener",
+  "namespace": "archon",
+  "eventID": "abc123"
+}
 ```
 
-**Note**: The onboarding controller automatically updates the allowlist when RepoBinding resources are created. Manual editing is not recommended.
-
-## Lighthouse Configuration API
-
-Lighthouse configuration is managed through a ConfigMap.
-
-### Lighthouse ConfigMap
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: lighthouse-config
-  namespace: pipeline-system
-data:
-  config.yaml: |
-    github:
-      app_id: "${GITHUB_APP_ID}"
-      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
-    allowlist:
-      - org: "your-github-org"
-        repos:
-          - "archon-agent"
-          - "another-repo"
+**Unauthorized (401 Unauthorized)**:
+```json
+{
+  "error": "Invalid webhook signature"
+}
 ```
 
-**Configuration Fields**:
+**Bad Request (400 Bad Request)**:
+```json
+{
+  "error": "Invalid webhook payload"
+}
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `github.app_id` | string | GitHub App ID |
-| `github.app_installation_id` | string | GitHub App Installation ID |
-| `allowlist` | array | List of allowed organizations and repositories |
+### Webhook Signature Validation
+
+EventListeners validate webhook signatures using HMAC-SHA256:
+
+```
+signature = HMAC-SHA256(secret, payload)
+X-Hub-Signature-256 = "sha256=" + hex(signature)
+```
+
+The webhook secret is stored in a Kubernetes Secret and referenced by the EventListener.
 
 ## Tenant Resources API
 
@@ -353,60 +357,113 @@ spec:
             cidr: 0.0.0.0/0
 ```
 
-## Pipeline Catalog API
-
-Tenants reference shared Tekton Tasks and Pipelines from the `pipeline-catalog` namespace.
-
-### Referencing Catalog Tasks
+### EventListener
 
 ```yaml
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
 metadata:
-  name: my-deployment
-  namespace: my-tenant
+  name: github-listener
+  namespace: ${TENANT_NAME}
 spec:
-  pipelineRef:
-    name: cdktf-deploy-pipeline
-    namespace: pipeline-catalog
-  params:
-    - name: repo-url
-      value: "https://github.com/org/repo"
-    - name: commit-sha
-      value: "abc123..."
-    - name: tenant-name
-      value: "my-tenant"
+  serviceAccountName: pipeline-runner
+  triggers:
+    - name: github-push
+      interceptors:
+        - ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: webhook-${TENANT_NAME}
+                secretKey: secret
+            - name: eventTypes
+              value:
+                - push
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: "body.ref == 'refs/heads/main'"
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: cdktf-deploy-trigger-template
 ```
 
-### Available Catalog Tasks
+### Ingress
 
-| Task Name | Description | Parameters |
-|-----------|-------------|------------|
-| `git-clone` | Clone repository at commit SHA | `url`, `revision` |
-| `cdktf-synth` | Run cdktf synth | None |
-| `cdktf-deploy` | Run cdktf deploy with remote state | `tenant-name` |
-| `upload-artifacts` | Upload logs/outputs to external storage | `bucket`, `key` |
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: github-webhook
+  namespace: ${TENANT_NAME}
+spec:
+  rules:
+    - host: ${INGRESS_HOST}
+      http:
+        paths:
+          - path: /${TENANT_NAME}
+            pathType: Prefix
+            backend:
+              service:
+                name: el-github-listener
+                port:
+                  number: 8080
+```
 
-### Available Catalog Pipelines
+## ArgoCD Application API
 
-| Pipeline Name | Description | Parameters |
-|---------------|-------------|------------|
-| `cdktf-deploy-pipeline` | Complete CDKTF deployment workflow | `repo-url`, `commit-sha`, `tenant-name` |
+The platform uses ArgoCD Applications to manage components via GitOps.
+
+### Application Spec
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    targetRevision: main
+    path: platform/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+```
+
+### Application Status
+
+```yaml
+status:
+  sync:
+    status: Synced  # Synced | OutOfSync | Unknown
+    revision: abc123def456
+  health:
+    status: Healthy  # Healthy | Progressing | Degraded | Suspended | Missing | Unknown
+  conditions:
+    - type: ComparisonError
+      status: "False"
+      message: ""
+```
 
 ## Error Responses
 
 ### RepoBinding Validation Errors
-
-**Invalid Organization**:
-```yaml
-status:
-  phase: Failed
-  message: "Repository organization not in approved list"
-  namespaceCreated: false
-  serviceAccountCreated: false
-  rbacConfigured: false
-  allowlistUpdated: false
-```
 
 **Invalid Namespace Pattern**:
 ```yaml
@@ -415,8 +472,12 @@ status:
   message: "Namespace name must match pattern ^[a-z0-9-]+$"
   namespaceCreated: false
   serviceAccountCreated: false
-  rbacConfigured: false
-  allowlistUpdated: false
+  rbacCreated: false
+  quotasCreated: false
+  networkPolicyCreated: false
+  terraformSecretCreated: false
+  eventListenerCreated: false
+  ingressCreated: false
 ```
 
 **Privileged Namespace**:
@@ -426,88 +487,55 @@ status:
   message: "Cannot create namespace with privileged name"
   namespaceCreated: false
   serviceAccountCreated: false
-  rbacConfigured: false
-  allowlistUpdated: false
+  rbacCreated: false
+  quotasCreated: false
+  networkPolicyCreated: false
+  terraformSecretCreated: false
+  eventListenerCreated: false
+  ingressCreated: false
 ```
 
-### Lighthouse Event Rejections
-
-**Repository Not in Allowlist**:
-```json
-{
-  "level": "warn",
-  "msg": "Repository not in allowlist",
-  "repo": "org/unauthorized-repo",
-  "event": "push",
-  "timestamp": "2024-12-31T10:00:00Z"
-}
-```
+### EventListener Webhook Rejections
 
 **Invalid Webhook Signature**:
 ```json
 {
   "level": "error",
   "msg": "Invalid webhook signature",
-  "repo": "org/repo",
-  "event": "push",
+  "eventListener": "github-listener",
+  "namespace": "archon",
   "timestamp": "2024-12-31T10:00:00Z"
 }
 ```
 
-## Authentication
-
-### OIDC Authentication
-
-Users authenticate via OIDC to create RepoBinding resources.
-
-**kubectl Configuration**:
-
-```bash
-# Configure kubectl with OIDC
-kubectl config set-credentials oidc \
-  --exec-api-version=client.authentication.k8s.io/v1beta1 \
-  --exec-command=kubectl \
-  --exec-arg=oidc-login \
-  --exec-arg=get-token \
-  --exec-arg=--oidc-issuer-url=https://dex.homelab.local \
-  --exec-arg=--oidc-client-id=kubernetes \
-  --exec-arg=--oidc-client-secret=kubernetes-client-secret
-
-# Use OIDC credentials
-kubectl config set-context --current --user=oidc
+**Invalid Event Type**:
+```json
+{
+  "level": "warn",
+  "msg": "Event type not supported",
+  "eventType": "pull_request",
+  "eventListener": "github-listener",
+  "namespace": "archon",
+  "timestamp": "2024-12-31T10:00:00Z"
+}
 ```
 
-**RBAC for Onboarding**:
-
-Users in the `engineering` OIDC group can create RepoBinding resources:
-
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: repo-onboarder
-rules:
-  - apiGroups: ["platform.arbiter.io"]
-    resources: ["repobindings"]
-    verbs: ["create", "get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: engineering-onboarders
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: repo-onboarder
-subjects:
-  - kind: Group
-    name: "system:authenticated:engineering"
-    apiGroup: rbac.authorization.k8s.io
+**Branch Filter Not Matched**:
+```json
+{
+  "level": "info",
+  "msg": "Branch filter not matched",
+  "ref": "refs/heads/feature-branch",
+  "eventListener": "github-listener",
+  "namespace": "archon",
+  "timestamp": "2024-12-31T10:00:00Z"
+}
 ```
 
 **Source**
-- `.kiro/specs/jenkinsx-platform/design.md`
-- `.kiro/specs/jenkinsx-platform/requirements.md`
-- `platform/crds/README.md`
-- `platform/onboarding/README.md`
-- `platform/lighthouse/README.md`
+- `.kiro/specs/argocd-tekton-platform/design.md`
+- `.kiro/specs/argocd-tekton-platform/requirements.md`
+- `platform/crds/repobinding-crd.yaml`
+- `platform/onboarding/controller/`
+- `platform/tenancy/templates/`
+- `platform/argocd/apps/`

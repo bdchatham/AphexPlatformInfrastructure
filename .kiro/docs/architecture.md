@@ -2,153 +2,405 @@
 
 ## System Design
 
-The Arbiter Pipeline Infrastructure is a Jenkins X-based CI/CD platform designed for homelab deployment. The system provides shared pipeline infrastructure for multiple product teams with strong tenant isolation through Kubernetes namespaces, RBAC, and network policies.
+The Arbiter Pipeline Infrastructure is an ArgoCD + Tekton-based GitOps platform designed for homelab deployment. The system provides self-service repository onboarding with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through ArgoCD.
+
+The platform follows a **"Bootstrap Once, GitOps Forever"** pattern: a one-time bootstrap script sets up the cluster and installs core components, then ArgoCD takes over and manages all platform components declaratively from Git.
+
+## High-Level Architecture
 
 ```mermaid
 graph TB
-    subgraph "Git Provider"
-        GH[GitHub Repository]
-        APP[GitHub App]
+    subgraph Git["Git Repository (Platform)"]
+        subgraph Platform_Manifests["platform/"]
+            Bootstrap["bootstrap/<br/>(Bootstrap Script)"]
+            ArgoCD_Apps["argocd/apps/<br/>(App of Apps)"]
+            CRDs["crds/<br/>(RepoBinding CRD)"]
+            Infrastructure["infrastructure/<br/>(Namespaces, RBAC)"]
+            Onboarding["onboarding/<br/>(Controller)"]
+            Catalog["catalog/<br/>(Pipeline Tasks)"]
+        end
     end
     
-    subgraph "Platform Namespaces"
-        LH[Lighthouse]
-        TEK[Tekton Controllers]
-        CAT[Pipeline Catalog]
-        OB[Onboarding Controller]
+    Git -->|ArgoCD syncs| ArgoCD_Svc
+    Git -->|Webhooks trigger| EventListeners
+    
+    subgraph Cluster["Kubernetes Cluster"]
+        subgraph ArgoCD_NS["argocd namespace"]
+            ArgoCD_Svc["ArgoCD<br/>Server"]
+            ArgoCD_Controller["ArgoCD<br/>Controller"]
+        end
+        
+        subgraph Platform_System["platform-system namespace"]
+            Onboarding_Ctrl["Onboarding<br/>Controller"]
+            Catalog_Tasks["Shared Tasks<br/>(git-clone, cdktf-*)"]
+        end
+        
+        subgraph Tenants["Tenant Namespaces"]
+            subgraph Tenant1["tenant-1"]
+                EL1["EventListener"]
+                Pipeline1["Pipelines"]
+            end
+            subgraph Tenant2["tenant-2"]
+                EL2["EventListener"]
+                Pipeline2["Pipelines"]
+            end
+        end
+        
+        subgraph Ingress_Layer["Ingress"]
+            Ingress["Ingress<br/>Controller"]
+        end
     end
     
-    subgraph "Tenant Namespace: archon"
-        SA[pipeline-runner SA]
-        PR[PipelineRun]
-        POD[Pipeline Pod]
-    end
+    ArgoCD_Controller -->|Syncs| Platform_System
+    ArgoCD_Controller -->|Syncs| Onboarding_Ctrl
+    ArgoCD_Controller -->|Syncs| Catalog_Tasks
     
-    subgraph "External"
-        TF[Terraform State Backend]
-        REG[Container Registry]
-    end
+    Ingress -->|Routes webhooks| EL1
+    Ingress -->|Routes webhooks| EL2
     
-    GH -->|webhook| APP
-    APP -->|event| LH
-    LH -->|create| PR
-    PR -->|execute as| SA
-    SA -->|run| POD
-    POD -->|reference| CAT
-    POD -->|pull| REG
-    POD -->|state| TF
+    EL1 -->|Creates| Pipeline1
+    EL2 -->|Creates| Pipeline2
     
-    OB -->|provision| SA
+    style Git fill:#e1f5ff
+    style Cluster fill:#fff4e1
+    style ArgoCD_NS fill:#e8f5e9
+    style Platform_System fill:#fff9c4
+    style Tenants fill:#f3e5f5
 ```
+
+## Component Layers
+
+The platform is organized into four layers:
+
+1. **Bootstrap Layer**: One-time initialization script
+2. **GitOps Layer**: ArgoCD manages all platform components
+3. **Platform Services Layer**: Core services (Tekton, Onboarding Controller, Catalog)
+4. **Tenant Layer**: User namespaces with EventListeners and Pipelines
 
 ## Components
 
-### 1. Jenkins X Platform Components
+### 1. Bootstrap Script
 
-**Namespace**: `pipeline-system`
+**Purpose**: One-time initialization of cluster and platform components
 
-**Components**:
-- **Lighthouse**: Git event handler that receives webhooks and triggers pipelines
-- **Tekton Pipelines**: Kubernetes-native pipeline execution engine
-- **Tekton Triggers**: Event-driven pipeline triggering (used by Lighthouse)
-- **jx-build-controller**: Jenkins X controller for managing builds
-
-**Installation Method**: Helm charts
+**Location**: `platform/bootstrap/bootstrap.sh`
 
 **Responsibilities**:
-- Process GitHub webhooks
-- Validate repository allowlist
-- Create PipelineRuns in tenant namespaces
-- Manage pipeline execution lifecycle
+- Detect and clean up existing JenkinsX installations
+- Create Kubernetes cluster (Kind for local, configurable for others)
+- Install Tekton Pipelines and Tekton Triggers
+- Install ArgoCD
+- Create platform namespaces (argocd, tekton-pipelines, platform-system)
+- Create platform root ArgoCD Application
+- Display ArgoCD credentials and access instructions
 
-### 2. GitHub App Integration
+**Interface**:
+```bash
+./bootstrap.sh [OPTIONS]
 
-**Purpose**: Centralized webhook delivery at organization level
+Options:
+  --cluster-name NAME    Name of the cluster (default: arbiter-platform)
+  --repo-url URL         Platform repository URL (default: current repo)
+```
 
-**Required Permissions**:
-- Repository: Read access to code
-- Repository: Read and write access to pull requests
-- Repository: Read and write access to checks
-- Organization: Read access to members
+**Output**:
+- Kubernetes cluster running
+- Tekton Pipelines and Triggers installed
+- ArgoCD installed and accessible
+- Platform root Application created and syncing
+- ArgoCD admin password displayed
+- Next steps instructions displayed
 
-**Webhook Events**:
-- Push
-- Pull request
-- Check run
-- Check suite
+**Source**
+- `platform/bootstrap/bootstrap.sh`
 
-**Webhook URL**: `https://<lighthouse-ingress>/hook`
+### 2. ArgoCD
+
+**Purpose**: GitOps continuous delivery tool that manages platform components
+
+**Namespace**: `argocd`
+
+**Installation**: Installed via kubectl during bootstrap from ArgoCD release manifests
 
 **Configuration**:
 ```yaml
+# Patch for insecure mode (homelab)
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: lighthouse-config
-  namespace: pipeline-system
+  name: argocd-cmd-params-cm
+  namespace: argocd
 data:
-  config.yaml: |
-    github:
-      app_id: "${GITHUB_APP_ID}"
-      app_installation_id: "${GITHUB_APP_INSTALLATION_ID}"
+  server.insecure: "true"  # For homelab without TLS
 ```
 
-### 3. Repository Allowlist
+**Access**:
+- UI: `http://localhost:8080` (port-forward) or via Ingress
+- CLI: `argocd login <server>`
+- Initial admin password: Retrieved from Secret `argocd-initial-admin-secret`
 
-**Implementation**: ConfigMap in `pipeline-system` namespace
+**Components**:
+- argocd-server: Web UI and API server
+- argocd-application-controller: Syncs Applications from Git
+- argocd-repo-server: Manages Git repository connections
+- argocd-dex-server: SSO and authentication (optional)
 
-**Structure**:
+**Source**
+- `platform/bootstrap/bootstrap.sh` (installation)
+- `platform/argocd/argocd-cm-patch.yaml` (configuration)
+
+### 3. Platform ArgoCD Applications (App of Apps Pattern)
+
+**Purpose**: Manage all platform components via GitOps using the App of Apps pattern
+
+**Architecture**: The platform uses a root Application that manages child Applications for each component layer.
+
+**Root Application** (platform-root):
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: argoproj.io/v1alpha1
+kind: Application
 metadata:
-  name: repo-allowlist
-  namespace: pipeline-system
-data:
-  allowlist.yaml: |
-    repos:
-      - org: "your-github-org"
-        name: "archon-agent"
-        tenant: "archon"
-      - org: "your-github-org"
-        name: "another-repo"
-        tenant: "another"
+  name: platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    targetRevision: main
+    path: platform/argocd/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
 ```
 
-**Reload Mechanism**: Lighthouse watches ConfigMap for changes and reloads automatically
+**Child Applications**:
 
-### 4. Onboarding Controller
+1. **platform-crds** (CRDs and foundational resources)
+2. **platform-infrastructure** (Namespaces, RBAC, base resources)
+3. **platform-controllers** (Onboarding controller)
+4. **platform-catalog** (Tekton tasks, pipelines, triggers)
 
-**Purpose**: Reconcile RepoBinding resources and provision tenant infrastructure
+**Sync Order**: ArgoCD automatically syncs Applications in dependency order using sync waves:
+1. platform-crds (wave 0 - CRDs must exist first)
+2. platform-infrastructure (wave 1 - Namespaces and RBAC)
+3. platform-controllers (wave 2 - Controllers depend on CRDs and infrastructure)
+4. platform-catalog (wave 3 - Catalog depends on Tekton being installed)
 
-**Reconciliation Logic**:
-1. Validate request (org allowlist, namespace pattern, permission profile)
-2. Create tenant namespace with labels
-3. Create tenant service account
-4. Create RBAC (Role + RoleBinding)
-5. Create ResourceQuota and LimitRange
-6. Create NetworkPolicy
-7. Create Terraform backend secret references
-8. Update repository allowlist ConfigMap
-9. Update RepoBinding status
+**Benefits of App of Apps**:
+- Independent lifecycle management for each component
+- Clearer separation of concerns
+- Easier troubleshooting (each Application has its own sync status)
+- Can have different sync policies per component
+- Better visibility in ArgoCD UI
 
-**RBAC for Controller**:
-- ClusterRole with permissions to create namespaces, roles, rolebindings
-- ServiceAccount in `pipeline-system` namespace
-- ClusterRoleBinding associating SA with ClusterRole
+**Source**
+- `platform/argocd/apps/platform-root.yaml`
+- `platform/argocd/apps/platform-crds.yaml`
+- `platform/argocd/apps/platform-infrastructure.yaml`
+- `platform/argocd/apps/platform-controllers.yaml`
+- `platform/argocd/apps/platform-catalog.yaml`
 
-**Implementation Language**: Go (using controller-runtime framework)
+### 4. Tekton Pipelines and Triggers
 
-### 5. RepoBinding Custom Resource Definition
+**Purpose**: Pipeline execution engine and webhook handling
+
+**Namespace**: `tekton-pipelines`
+
+**Installation**: Applied via kubectl during bootstrap from Tekton release manifests
+
+**Configuration**:
+```yaml
+# Tekton Pipelines v0.56.0
+# https://github.com/tektoncd/pipeline/releases/download/v0.56.0/release.yaml
+
+# Tekton Triggers v0.25.0
+# https://github.com/tektoncd/triggers/releases/download/v0.25.0/release.yaml
+```
+
+**Components**:
+- tekton-pipelines-controller: Manages PipelineRun execution
+- tekton-pipelines-webhook: Validates and mutates Tekton resources
+- tekton-triggers-controller: Manages EventListeners and Triggers
+- tekton-triggers-webhook: Validates Trigger resources
+
+**Source**
+- `platform/bootstrap/bootstrap.sh` (installation)
+
+### 5. Onboarding Controller
+
+**Purpose**: Provision tenant resources based on RepoBinding CRs
+
+**Namespace**: `platform-system`
+
+**Installation**: Managed by ArgoCD from `platform/onboarding/`
+
+**Resources**:
+- Controller Deployment
+- Controller ServiceAccount
+- Controller ClusterRole and ClusterRoleBinding
+- Tenant resource templates
+
+**Controller Logic**:
+1. Watch RepoBinding resources
+2. Validate spec (org, repo, tenant name)
+3. Generate webhook secret (cryptographically secure)
+4. Create namespace with labels
+5. Create service account and RBAC
+6. Create ResourceQuota and LimitRange
+7. Create NetworkPolicy
+8. Create Terraform backend secret
+9. Create EventListener for webhooks
+10. Create Ingress for EventListener
+11. Update RepoBinding status with webhook URL and secret
+
+**Webhook Secret Management**:
+- Secret generated using crypto/rand (e.g., `whsec_` + 32 random bytes base64)
+- Stored in Secret: `webhook-<tenant-name>` in tenant namespace
+- EventListener configured to validate using this secret
+- Secret displayed in RepoBinding status for GitHub configuration
+
+**Source**
+- `platform/onboarding/controller/` (Go source code)
+- `platform/onboarding/controller-deployment.yaml`
+- `platform/onboarding/controller-rbac.yaml`
+- `platform/onboarding/controller-service-account.yaml`
+
+### 6. Tekton EventListener (Per Tenant)
+
+**Purpose**: Receive GitHub webhooks and create PipelineRuns
+
+**Namespace**: Tenant namespace (e.g., `tenant-example`)
+
+**Created By**: Onboarding Controller when RepoBinding is created
+
+**Definition**:
+```yaml
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-listener
+  namespace: tenant-example
+spec:
+  serviceAccountName: pipeline-runner
+  triggers:
+    - name: github-push
+      interceptors:
+        - ref:
+            name: github
+          params:
+            - name: secretRef
+              value:
+                secretName: webhook-tenant-example
+                secretKey: secret
+            - name: eventTypes
+              value:
+                - push
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: "body.ref == 'refs/heads/main'"
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: cdktf-deploy-trigger-template
+```
+
+**Service and Ingress**:
+```yaml
+# Service created automatically by EventListener
+apiVersion: v1
+kind: Service
+metadata:
+  name: el-github-listener
+  namespace: tenant-example
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    eventlistener: github-listener
+
+---
+# Ingress created by Onboarding Controller
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: github-webhook
+  namespace: tenant-example
+spec:
+  rules:
+    - host: webhooks.example.com
+      http:
+        paths:
+          - path: /tenant-example
+            pathType: Prefix
+            backend:
+              service:
+                name: el-github-listener
+                port:
+                  number: 8080
+```
+
+**Source**
+- `platform/tenancy/templates/eventlistener-template.yaml`
+- `platform/tenancy/templates/ingress-template.yaml`
+
+### 7. Pipeline Catalog
+
+**Purpose**: Provide shared Tekton Tasks and Pipelines
+
+**Namespace**: `platform-system`
+
+**Installation**: Managed by ArgoCD from `platform/catalog/`
+
+**Resources**:
+- git-clone Task
+- cdktf-synth Task
+- cdktf-deploy Task
+- cdktf-deploy-pipeline Pipeline
+- TriggerBindings and TriggerTemplates
+
+**Configuration**:
+```yaml
+# Tasks and Pipelines deployed to platform-system namespace
+# Referenced by tenants using namespace-qualified names
+```
+
+**Source**
+- `platform/catalog/tasks/git-clone.yaml`
+- `platform/catalog/tasks/cdktf-synth.yaml`
+- `platform/catalog/tasks/cdktf-deploy.yaml`
+- `platform/catalog/pipelines/cdktf-deploy-pipeline.yaml`
+- `platform/catalog/triggers/github-push-binding.yaml`
+- `platform/catalog/triggers/cdktf-deploy-trigger-template.yaml`
+
+### 8. RepoBinding Custom Resource Definition
+
+**Purpose**: Define repository onboarding requests
+
+**Namespace**: `platform-system` (CRD is cluster-scoped, instances are namespaced)
+
+**Installation**: Managed by ArgoCD from `platform/crds/`
 
 **CRD Definition**:
 ```yaml
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: repobindings.platform.arbiter.io
+  name: repobindings.arbiter.io
 spec:
-  group: platform.arbiter.io
+  group: arbiter.io
   names:
     kind: RepoBinding
     plural: repobindings
@@ -171,17 +423,16 @@ spec:
               properties:
                 repoOrg:
                   type: string
-                  pattern: '^[a-z0-9-]+$'
                 repoName:
                   type: string
-                  pattern: '^[a-z0-9-]+$'
                 tenantName:
                   type: string
-                  pattern: '^[a-z0-9-]+$'
                 permissionProfile:
                   type: string
                   enum: ["standard", "elevated"]
                   default: "standard"
+                ingressHost:
+                  type: string
             status:
               type: object
               properties:
@@ -190,280 +441,178 @@ spec:
                   enum: ["Pending", "Provisioning", "Ready", "Failed"]
                 message:
                   type: string
+                webhookURL:
+                  type: string
+                webhookSecret:
+                  type: string
                 namespaceCreated:
                   type: boolean
                 serviceAccountCreated:
                   type: boolean
-                rbacConfigured:
+                rbacCreated:
                   type: boolean
-                allowlistUpdated:
+                quotasCreated:
+                  type: boolean
+                networkPolicyCreated:
+                  type: boolean
+                terraformSecretCreated:
+                  type: boolean
+                eventListenerCreated:
+                  type: boolean
+                ingressCreated:
                   type: boolean
 ```
 
-### 6. Tenant Namespace Resources
+**Source**
+- `platform/crds/repobinding-crd.yaml`
+- `platform/crds/example-repobinding.yaml`
 
-**Namespace Template**:
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: ${TENANT_NAME}
-  labels:
-    platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/repo: "${REPO_ORG}/${REPO_NAME}"
-    platform.arbiter.io/managed-by: "onboarding-controller"
-```
+## Data Flow
 
-**Service Account**:
-```yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: pipeline-runner
-  namespace: ${TENANT_NAME}
-```
+### Git to Kubernetes (GitOps Sync)
 
-**Role (Standard Profile)**:
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: pipeline-runner
-  namespace: ${TENANT_NAME}
-rules:
-  - apiGroups: [""]
-    resources: ["pods", "pods/log", "configmaps", "secrets"]
-    verbs: ["get", "list", "create", "update", "delete"]
-  - apiGroups: ["tekton.dev"]
-    resources: ["pipelineruns", "taskruns"]
-    verbs: ["get", "list", "create"]
-```
-
-**ResourceQuota**:
-```yaml
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: tenant-quota
-  namespace: ${TENANT_NAME}
-spec:
-  hard:
-    requests.cpu: "4"
-    requests.memory: "8Gi"
-    limits.cpu: "8"
-    limits.memory: "16Gi"
-    persistentvolumeclaims: "5"
-    pods: "20"
-```
-
-**NetworkPolicy**:
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: tenant-isolation
-  namespace: ${TENANT_NAME}
-spec:
-  podSelector: {}
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - podSelector: {}
-  egress:
-    - to:
-        - podSelector: {}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: kube-system
-      ports:
-        - protocol: UDP
-          port: 53
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-```
-
-### 7. Golden Pipeline Catalog
-
-**Namespace**: `pipeline-catalog`
-
-**Shared Tekton Tasks**:
-- `git-clone`: Clone repository at specific commit
-- `cdktf-synth`: Run cdktf synth
-- `cdktf-deploy`: Run cdktf deploy with remote state
-- `upload-artifacts`: Upload logs/outputs to external storage
-
-**Shared Tekton Pipeline**:
-```yaml
-apiVersion: tekton.dev/v1beta1
-kind: Pipeline
-metadata:
-  name: cdktf-deploy-pipeline
-  namespace: pipeline-catalog
-spec:
-  params:
-    - name: repo-url
-      type: string
-    - name: commit-sha
-      type: string
-    - name: tenant-name
-      type: string
-  workspaces:
-    - name: source
-    - name: terraform-state
-  tasks:
-    - name: clone
-      taskRef:
-        name: git-clone
-        kind: Task
-      params:
-        - name: url
-          value: $(params.repo-url)
-        - name: revision
-          value: $(params.commit-sha)
-      workspaces:
-        - name: output
-          workspace: source
+```mermaid
+sequenceDiagram
+    participant Engineer as Platform Engineer
+    participant Git as Git Repository
+    participant ArgoCD
+    participant K8s as Kubernetes Cluster
     
-    - name: synth
-      taskRef:
-        name: cdktf-synth
-        kind: Task
-      runAfter:
-        - clone
-      workspaces:
-        - name: source
-          workspace: source
+    Engineer->>Git: Commit platform changes
+    ArgoCD->>Git: Poll for changes (every 3 minutes)
+    ArgoCD->>ArgoCD: Detect changes
+    ArgoCD->>K8s: Sync manifests
+    ArgoCD->>K8s: Apply updates
+    K8s-->>ArgoCD: Sync status
+    ArgoCD-->>Engineer: Display sync status in UI
+```
+
+**Flow Description**:
+1. Platform engineer commits changes to platform manifests in Git
+2. ArgoCD polls Git repository every 3 minutes (default)
+3. ArgoCD detects changes and compares with cluster state
+4. ArgoCD applies changes to Kubernetes cluster
+5. ArgoCD reports sync status in UI
+
+**Key Points**:
+- All platform configuration is stored in Git (version-controlled)
+- ArgoCD automatically syncs changes (no manual kubectl apply)
+- Sync policies: automated sync, self-heal, prune
+- Retry policy with exponential backoff for transient failures
+
+### GitHub Webhook to PipelineRun
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GitHub
+    participant Ingress
+    participant EventListener
+    participant Tekton
+    participant Pipeline Pod
     
-    - name: deploy
-      taskRef:
-        name: cdktf-deploy
-        kind: Task
-      runAfter:
-        - synth
-      params:
-        - name: tenant-name
-          value: $(params.tenant-name)
-      workspaces:
-        - name: source
-          workspace: source
-        - name: terraform-state
-          workspace: terraform-state
+    Dev->>GitHub: Merge to main
+    GitHub->>Ingress: Push event webhook
+    Ingress->>EventListener: Route to tenant EventListener
+    EventListener->>EventListener: Validate webhook signature
+    EventListener->>EventListener: Check CEL filter (main branch)
+    EventListener->>Tekton: Create PipelineRun
+    Tekton->>Pipeline Pod: Start pipeline (as tenant SA)
+    Pipeline Pod->>GitHub: Clone repo at commit SHA
+    Pipeline Pod->>Pipeline Pod: cdktf synth
+    Pipeline Pod->>Pipeline Pod: cdktf deploy (remote state)
+    Pipeline Pod-->>Tekton: Pipeline complete
 ```
 
-### 8. OIDC Authentication
+**Flow Description**:
+1. Developer merges code to main branch
+2. GitHub sends push event webhook to Ingress
+3. Ingress routes webhook to tenant EventListener based on path
+4. EventListener validates webhook signature using tenant secret
+5. EventListener checks CEL filter (only main branch pushes)
+6. EventListener creates PipelineRun in tenant namespace
+7. Tekton starts pipeline pod using tenant service account
+8. Pipeline clones repository at specific commit SHA
+9. Pipeline runs cdktf synth to generate Terraform config
+10. Pipeline runs cdktf deploy to apply infrastructure changes
+11. Pipeline completes and reports status
 
-**Identity Provider**: Self-hosted OIDC provider (Dex recommended for homelab)
+**Key Points**:
+- Each tenant has dedicated EventListener with unique webhook secret
+- Webhook signature validation prevents unauthorized triggers
+- CEL filters enable branch-specific triggering
+- Pipelines run with tenant service account (RBAC isolation)
+- Terraform state stored in Kubernetes backend (per-tenant isolation)
 
-**Dex Configuration**:
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: dex-config
-  namespace: auth-system
-data:
-  config.yaml: |
-    issuer: https://dex.homelab.local
-    storage:
-      type: kubernetes
-      config:
-        inCluster: true
-    staticClients:
-      - id: kubernetes
-        name: Kubernetes
-        secret: kubernetes-client-secret
-        redirectURIs:
-          - http://localhost:8000
-    connectors:
-      - type: github
-        id: github
-        name: GitHub
-        config:
-          clientID: $GITHUB_OAUTH_CLIENT_ID
-          clientSecret: $GITHUB_OAUTH_CLIENT_SECRET
-          orgs:
-            - name: your-github-org
-              teams:
-                - engineering
-    staticPasswords:
-      - email: "admin@homelab.local"
-        hash: "$2a$10$..."
-        username: "admin"
-        userID: "admin"
-        groups:
-          - engineering
+### Tenant Provisioning Flow
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant K8s as Kubernetes API
+    participant Controller as Onboarding Controller
+    participant GitHub
+    
+    Dev->>K8s: Create RepoBinding YAML
+    K8s->>Controller: RepoBinding created event
+    Controller->>Controller: Validate spec
+    Controller->>Controller: Generate webhook secret
+    Controller->>K8s: Create namespace
+    Controller->>K8s: Create webhook Secret
+    Controller->>K8s: Create ServiceAccount
+    Controller->>K8s: Create RBAC
+    Controller->>K8s: Create ResourceQuota
+    Controller->>K8s: Create NetworkPolicy
+    Controller->>K8s: Create Terraform secret
+    Controller->>K8s: Create EventListener
+    Controller->>K8s: Create Ingress
+    Controller->>K8s: Update RepoBinding status
+    
+    Note over Dev,K8s: RepoBinding status shows webhook URL and secret
+    
+    Dev->>Dev: Read webhook URL and secret from status
+    Dev->>GitHub: Configure webhook with URL and secret
+    
+    Note over Dev,K8s: Tenant is ready for webhooks
 ```
 
-**RBAC for Onboarding**:
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: repo-onboarder
-rules:
-  - apiGroups: ["platform.arbiter.io"]
-    resources: ["repobindings"]
-    verbs: ["create", "get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: engineering-onboarders
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: repo-onboarder
-subjects:
-  - kind: Group
-    name: "system:authenticated:engineering"
-    apiGroup: rbac.authorization.k8s.io
-```
+**Flow Description**:
+1. Developer creates RepoBinding resource
+2. Kubernetes API notifies Onboarding Controller
+3. Controller validates request (org, namespace pattern, permission profile)
+4. Controller generates cryptographically secure webhook secret
+5. Controller creates tenant namespace with labels
+6. Controller creates webhook Secret in tenant namespace
+7. Controller creates ServiceAccount for pipeline execution
+8. Controller creates Role and RoleBinding based on permission profile
+9. Controller creates ResourceQuota and LimitRange
+10. Controller creates NetworkPolicy for tenant isolation
+11. Controller creates Terraform backend secret
+12. Controller creates EventListener for webhook handling
+13. Controller creates Ingress for webhook routing
+14. Controller updates RepoBinding status with webhook URL and secret
+15. Developer reads webhook URL and secret from RepoBinding status
+16. Developer configures webhook in GitHub repository settings
 
-### 9. Terraform State Backend
-
-**Backend Type**: Kubernetes backend (simplest for homelab)
-
-**Secret Structure**:
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: terraform-backend-config
-  namespace: ${TENANT_NAME}
-type: Opaque
-stringData:
-  backend.tf: |
-    terraform {
-      backend "kubernetes" {
-        secret_suffix    = "${TENANT_NAME}"
-        namespace        = "${TENANT_NAME}"
-        in_cluster_config = true
-      }
-    }
-```
-
-**Alternative**: MinIO for S3-compatible storage with versioning
+**Key Points**:
+- Fully automated tenant provisioning (no manual steps)
+- Webhook secret generated and stored securely
+- RBAC enforces least-privilege access
+- Resource quotas prevent resource exhaustion
+- Network policies enforce tenant isolation
+- Terraform state isolated per tenant
 
 ## Technology Stack
 
 ### Infrastructure
 - **Kubernetes**: Container orchestration platform (1.24+)
-- **Helm**: Kubernetes package manager
 - **kubectl**: Kubernetes CLI
+- **Kind**: Kubernetes in Docker (for local development)
 
-### CI/CD Platform
-- **Jenkins X**: Kubernetes-native CI/CD platform
-- **Lighthouse**: Git event handler
+### GitOps Platform
+- **ArgoCD**: GitOps continuous delivery tool
 - **Tekton Pipelines**: Pipeline execution engine
 - **Tekton Triggers**: Event-driven triggering
-
-### Authentication
-- **Dex**: Self-hosted OIDC provider
-- **OIDC**: OpenID Connect authentication
 
 ### Development Tools
 - **Go**: Onboarding controller implementation
@@ -476,54 +625,34 @@ stringData:
 
 ## Architectural Patterns
 
-### 1. Event-Driven Architecture
-Lighthouse listens for GitHub webhooks and triggers Tekton Workflows, enabling automated deployments on code changes.
+### 1. GitOps
+All configuration is stored in Git. ArgoCD syncs changes automatically, enabling declarative infrastructure management and self-upgrade capabilities.
 
-### 2. Multi-Tenancy with Isolation
+### 2. App of Apps
+Root ArgoCD Application manages child Applications for each component layer, providing better separation of concerns and independent lifecycle management.
+
+### 3. Event-Driven Architecture
+Tekton EventListeners receive GitHub webhooks and trigger pipelines, enabling automated deployments on code changes.
+
+### 4. Multi-Tenancy with Isolation
 Multiple tenants share the cluster but are isolated through:
 - Kubernetes namespaces (one per tenant)
 - Network policies (restrict inter-namespace traffic)
 - Resource quotas (prevent resource exhaustion)
 - RBAC (separate service accounts and roles)
 
-### 3. Operator Pattern
+### 5. Operator Pattern
 The onboarding controller follows the Kubernetes operator pattern, reconciling RepoBinding resources to provision tenant infrastructure.
 
-### 4. Immutable Infrastructure
+### 6. Immutable Infrastructure
 Container images are versioned and immutable. Infrastructure changes are deployed through GitOps, not manual modifications.
 
-### 5. GitOps
-All configuration is stored in Git. Changes are applied by merging to main, triggering automated pipelines.
-
-## Component Interaction Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant GitHub
-    participant Lighthouse
-    participant Tekton
-    participant Tenant Pod
-    participant Terraform
-    
-    User->>GitHub: Merge to main
-    GitHub->>Lighthouse: Push event (via GitHub App)
-    Lighthouse->>Lighthouse: Check allowlist
-    Lighthouse->>Tekton: Create PipelineRun
-    Tekton->>Tenant Pod: Start pipeline (as tenant SA)
-    Tenant Pod->>GitHub: Clone repo at commit SHA
-    Tenant Pod->>Tenant Pod: cdktf synth
-    Tenant Pod->>Terraform: cdktf deploy (remote state)
-    Terraform-->>Tenant Pod: Deployment result
-    Tenant Pod-->>Tekton: Pipeline complete
-```
-
 **Source**
-- `.kiro/specs/jenkinsx-platform/design.md`
-- `.kiro/specs/jenkinsx-platform/requirements.md`
-- `platform/bootstrap/README.md`
-- `platform/crds/README.md`
-- `platform/onboarding/README.md`
-- `platform/catalog/README.md`
-- `platform/tenancy/README.md`
-- `platform/lighthouse/README.md`
+- `.kiro/specs/argocd-tekton-platform/design.md`
+- `.kiro/specs/argocd-tekton-platform/requirements.md`
+- `platform/bootstrap/bootstrap.sh`
+- `platform/argocd/apps/`
+- `platform/crds/repobinding-crd.yaml`
+- `platform/onboarding/controller/`
+- `platform/catalog/`
+- `platform/tenancy/templates/`

@@ -1,0 +1,30 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    tekton.dev/categories: GitHub
+    tekton.dev/tags: github, webhook, git
+    tekton.dev/displayName: "GitHub Push Event Binding"
+spec:
+  params:
+    - name: repo-url
+      value: $(body.repository.clone_url)
+    - name: commit-sha
+      value: $(body.after)
+    - name: branch
+      value: $(body.ref)
+    - name: repo-name
+      value: $(body.repository.name)
+    - name: repo-owner
+      value: $(body.repository.owner.login)
+    - name: commit-message
+      value: $(body.head_commit.message)
+    - name: commit-author
+      value: $(body.head_commit.author.name)
+    - name: commit-timestamp
+      value: $(body.head_commit.timestamp)

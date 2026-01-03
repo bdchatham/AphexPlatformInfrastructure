@@ -282,9 +282,78 @@ func (r *RepoBindingReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Update allowlist
+	// Provision EventListener
+	if !repoBinding.Status.EventListenerCreated {
+		log.Info("Provisioning EventListener")
+		if err := r.provisionEventListener(ctx, repoBinding); err != nil {
+			log.Error(err, "Failed to provision EventListener")
+			repoBinding.Status.Phase = "Failed"
+			repoBinding.Status.Message = fmt.Sprintf("Failed to provision EventListener: %s", err.Error())
+			repoBinding.Status.LastReconcileTime = metav1.Now()
+			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
+				log.Error(updateErr, "Failed to update RepoBinding status")
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{}, err
+		}
+		repoBinding.Status.EventListenerCreated = true
+		if err := r.Status().Update(ctx, repoBinding); err != nil {
+			log.Error(err, "Failed to update RepoBinding status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Provision Ingress
+	if !repoBinding.Status.IngressCreated {
+		log.Info("Provisioning Ingress")
+		if err := r.provisionIngress(ctx, repoBinding); err != nil {
+			log.Error(err, "Failed to provision Ingress")
+			repoBinding.Status.Phase = "Failed"
+			repoBinding.Status.Message = fmt.Sprintf("Failed to provision Ingress: %s", err.Error())
+			repoBinding.Status.LastReconcileTime = metav1.Now()
+			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
+				log.Error(updateErr, "Failed to update RepoBinding status")
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{}, err
+		}
+		repoBinding.Status.IngressCreated = true
+		if err := r.Status().Update(ctx, repoBinding); err != nil {
+			log.Error(err, "Failed to update RepoBinding status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Update allowlist (keeping this for backward compatibility, but may be removed)
 	if !repoBinding.Status.AllowlistUpdated {
 		log.Info("Updating allowlist")
+		// Skip allowlist update if ConfigMap doesn't exist (new architecture doesn't need it)
+		configMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, client.ObjectKey{Name: "repo-allowlist", Namespace: "pipeline-system"}, configMap)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("Allowlist ConfigMap not found, skipping (new architecture)")
+				repoBinding.Status.AllowlistUpdated = true
+				if err := r.Status().Update(ctx, repoBinding); err != nil {
+					log.Error(err, "Failed to update RepoBinding status")
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{Requeue: true}, nil
+			}
+			log.Error(err, "Failed to get allowlist ConfigMap")
+			repoBinding.Status.Phase = "Failed"
+			repoBinding.Status.Message = fmt.Sprintf("Failed to get allowlist: %s", err.Error())
+			repoBinding.Status.LastReconcileTime = metav1.Now()
+			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
+				log.Error(updateErr, "Failed to update RepoBinding status")
+				return ctrl.Result{}, updateErr
+			}
+			return ctrl.Result{}, err
+		}
+		
+		// ConfigMap exists, update it
 		if err := r.provisionAllowlistEntry(ctx, repoBinding); err != nil {
 			log.Error(err, "Failed to update allowlist")
 			repoBinding.Status.Phase = "Failed"

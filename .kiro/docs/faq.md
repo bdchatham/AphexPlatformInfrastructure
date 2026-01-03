@@ -4,25 +4,11 @@
 
 ### What is this repository for?
 
-The Arbiter Pipeline Infrastructure provides a shared CI/CD platform cluster for multiple product teams using Jenkins X, Lighthouse, and Tekton. It enables self-service repository onboarding with strong tenant isolation through Kubernetes namespaces, RBAC, and network policies.
+The Arbiter Pipeline Infrastructure provides a lightweight GitOps platform using ArgoCD and Tekton for homelab Kubernetes clusters. It enables self-service repository registration with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through ArgoCD-based GitOps.
 
 ### How does this fit into the larger system?
 
 This platform provides shared CI/CD infrastructure for the Arbiter agent suite and product teams. Teams can onboard their repositories, which automatically provisions isolated tenant resources and enables automated CDKTF deployments on merge to main.
-
-### What is the difference between Jenkins X and this platform?
-
-Jenkins X is the underlying CI/CD framework. This platform is a complete solution built on Jenkins X that adds:
-- Self-service onboarding via RepoBinding CRD
-- Automated tenant provisioning
-- OIDC authentication
-- Repository allowlist security
-- Golden pipeline catalog
-- Terraform state management
-
-### Can I use this platform for non-CDKTF projects?
-
-Yes! While the platform includes a CDKTF pipeline in the catalog, you can define custom pipelines in your repository for any build/deploy workflow. The platform provides the infrastructure and isolation; you define the pipeline steps.
 
 ### What is a tenant?
 
@@ -31,7 +17,13 @@ A tenant is a product team with an isolated namespace and dedicated pipeline res
 - Service account with least-privilege RBAC
 - Resource quotas to prevent exhaustion
 - Network policies for isolation
+- EventListener for webhook handling
+- Ingress for webhook routing
 - Terraform backend configuration
+
+### Can I use this platform for non-CDKTF projects?
+
+Yes! While the platform includes a CDKTF pipeline in the catalog, you can define custom pipelines in your repository for any build/deploy workflow. The platform provides the infrastructure and isolation; you define the pipeline steps.
 
 ## Development Questions
 
@@ -41,66 +33,57 @@ Create a RepoBinding resource:
 
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "your-github-org"
   repoName: "your-repo"
   tenantName: "my-tenant"
   permissionProfile: "standard"
+  ingressHost: "webhooks.example.com"
 EOF
 ```
 
 Then verify onboarding:
 
 ```bash
-kubectl get repobinding my-repo-binding -n pipeline-system
+kubectl get repobinding my-repo-binding -n platform-system
 kubectl get namespace my-tenant
 ```
 
-### How do I define a pipeline in my repository?
+### How do I configure the GitHub webhook?
 
-Create a `.lighthouse/jenkins-x/` directory in your repository with pipeline definitions:
+After onboarding, get the webhook URL and secret from the RepoBinding status:
 
-```yaml
-# .lighthouse/jenkins-x/triggers.yaml
-apiVersion: config.lighthouse.jenkins-x.io/v1alpha1
-kind: TriggerConfig
-spec:
-  presubmits:
-    - name: pr-build
-      context: pr-build
-      always_run: true
-      pipeline_run_spec:
-        pipelineRef:
-          name: cdktf-deploy-pipeline
-          namespace: pipeline-catalog
-        params:
-          - name: repo-url
-            value: $(body.repository.clone_url)
-          - name: commit-sha
-            value: $(body.pull_request.head.sha)
-          - name: tenant-name
-            value: my-tenant
-  postsubmits:
-    - name: deploy
-      context: deploy
-      branches:
-        - main
-      pipeline_run_spec:
-        pipelineRef:
-          name: cdktf-deploy-pipeline
-          namespace: pipeline-catalog
-        params:
-          - name: repo-url
-            value: $(body.repository.clone_url)
-          - name: commit-sha
-            value: $(body.after)
-          - name: tenant-name
-            value: my-tenant
+```bash
+kubectl get repobinding my-repo-binding -n platform-system -o yaml
+```
+
+Then configure in GitHub:
+1. Go to repository Settings → Webhooks → Add webhook
+2. Payload URL: (from RepoBinding status.webhookURL)
+3. Content type: application/json
+4. Secret: (from RepoBinding status.webhookSecret)
+5. Events: Push events
+6. Active: ✓
+
+### How do I view pipeline logs?
+
+```bash
+# List PipelineRuns
+kubectl get pipelineruns -n my-tenant
+
+# Get PipelineRun details
+kubectl describe pipelinerun <name> -n my-tenant
+
+# View logs
+kubectl logs -n my-tenant -l tekton.dev/pipelineRun=<name>
+
+# Stream logs
+kubectl logs -n my-tenant -l tekton.dev/pipelineRun=<name> -f
 ```
 
 ### How do I test my pipeline locally?
@@ -117,7 +100,7 @@ metadata:
 spec:
   pipelineRef:
     name: cdktf-deploy-pipeline
-    namespace: pipeline-catalog
+    namespace: platform-system
   params:
     - name: repo-url
       value: "https://github.com/your-github-org/your-repo"
@@ -129,78 +112,31 @@ spec:
 EOF
 ```
 
-### How do I view pipeline logs?
-
-```bash
-# List PipelineRuns
-kubectl get pipelineruns -n my-tenant
-
-# Get PipelineRun details
-kubectl describe pipelinerun <name> -n my-tenant
-
-# View logs
-kubectl logs <pod-name> -n my-tenant
-
-# Stream logs
-kubectl logs -f <pod-name> -n my-tenant
-```
-
-### How do I add custom Tekton Tasks?
-
-You can define custom Tasks in your repository and reference them in your pipeline:
-
-```yaml
-# my-repo/.lighthouse/jenkins-x/tasks/my-custom-task.yaml
-apiVersion: tekton.dev/v1beta1
-kind: Task
-metadata:
-  name: my-custom-task
-spec:
-  steps:
-    - name: custom-step
-      image: alpine:latest
-      script: |
-        #!/bin/sh
-        echo "Running custom task"
-```
-
-Then reference it in your pipeline definition.
-
 ## Operational Questions
-
-### How do I check if my repository is allowlisted?
-
-```bash
-# View allowlist
-kubectl get configmap repo-allowlist -n pipeline-system -o yaml | grep "your-repo"
-
-# Or check RepoBinding status
-kubectl get repobinding <name> -n pipeline-system
-```
 
 ### What should I do if my repository isn't triggering pipelines?
 
 **Diagnosis**:
 
 ```bash
-# Check if repository is in allowlist
-kubectl get configmap repo-allowlist -n pipeline-system -o yaml | grep "your-repo"
+# Check if EventListener exists
+kubectl get eventlistener -n <tenant-namespace>
 
-# Check Lighthouse logs for webhook events
-kubectl logs -n pipeline-system -l app=lighthouse | grep "your-repo"
+# Check EventListener logs for webhook events
+kubectl logs -n <tenant-namespace> -l eventlistener=github-listener | grep "webhook"
 
-# Check if tenant namespace exists
-kubectl get namespace <tenant-name>
+# Check if Ingress exists
+kubectl get ingress -n <tenant-namespace>
 
 # Check RepoBinding status
-kubectl describe repobinding <name> -n pipeline-system
+kubectl describe repobinding <name> -n platform-system
 ```
 
 **Common Issues**:
-1. Repository not in allowlist (check RepoBinding status)
-2. GitHub App not delivering webhooks (check GitHub App settings)
-3. Tenant namespace not created (check onboarding controller logs)
-4. Invalid pipeline definition (check Lighthouse logs)
+1. EventListener not running (check onboarding controller logs)
+2. Ingress not configured correctly (check Ingress controller installation)
+3. GitHub webhook not configured (check GitHub webhook settings)
+4. Webhook secret mismatch (check RepoBinding status for correct secret)
 
 ### What should I do if my pipeline fails?
 
@@ -214,7 +150,7 @@ kubectl get pipelinerun <name> -n <tenant-namespace>
 kubectl describe pipelinerun <name> -n <tenant-namespace>
 
 # Get pod logs
-kubectl logs <pod-name> -n <tenant-namespace>
+kubectl logs -n <tenant-namespace> -l tekton.dev/pipelineRun=<name>
 
 # Check pod events
 kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
@@ -226,14 +162,22 @@ kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
 3. CDKTF deploy failure: Check Terraform state and permissions
 4. RBAC denial: Check service account permissions
 
-### How do I update my tenant's resource quota?
+### How do I update platform components?
 
-Resource quotas are managed by the onboarding controller. To update, you need to modify the tenant resource templates in `platform/tenancy/templates/resourcequota.yaml` and redeploy the controller.
-
-For immediate changes, you can manually edit:
+The platform upgrades itself via ArgoCD when manifests change in Git:
 
 ```bash
-kubectl edit resourcequota tenant-quota -n <tenant-namespace>
+# Update component manifests in Git
+vi platform/onboarding/controller-deployment.yaml  # Update image tag
+
+# Commit changes
+git add .
+git commit -m "Update onboarding controller to v1.1.0"
+git push
+
+# ArgoCD will automatically sync and update the controller
+# Watch sync status
+kubectl get application -n argocd -w
 ```
 
 ### How do I grant my tenant elevated permissions?
@@ -241,17 +185,17 @@ kubectl edit resourcequota tenant-quota -n <tenant-namespace>
 Update your RepoBinding to use the elevated profile:
 
 ```bash
-kubectl patch repobinding <name> -n pipeline-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
+kubectl patch repobinding <name> -n platform-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
 ```
 
 The onboarding controller will reconcile and update the Role.
 
 ### How do I delete a tenant?
 
-Delete the RepoBinding (this will trigger cleanup):
+Delete the RepoBinding:
 
 ```bash
-kubectl delete repobinding <name> -n pipeline-system
+kubectl delete repobinding <name> -n platform-system
 ```
 
 Or manually delete the namespace:
@@ -262,23 +206,23 @@ kubectl delete namespace <tenant-namespace>
 
 ## Architecture Questions
 
-### Why use Jenkins X instead of GitHub Actions?
+### Why use ArgoCD instead of Flux?
 
-Jenkins X provides several advantages for homelab deployment:
-1. Self-hosted (no GitHub Actions minutes costs)
-2. Runs on Kubernetes (same environment as deployment target)
-3. Better integration with Kubernetes resources
-4. More flexible pipeline definitions
-5. Supports multiple Git providers
+ArgoCD provides several advantages:
+1. Better UI for visualizing sync status
+2. More mature and widely adopted
+3. Better support for App of Apps pattern
+4. Easier to troubleshoot sync issues
+5. Strong community support
 
 ### Why use Tekton instead of Argo Workflows?
 
-Tekton is the standard pipeline engine for Jenkins X and provides:
+Tekton is the standard pipeline engine for Kubernetes-native CI/CD and provides:
 1. Native Kubernetes integration
 2. Reusable Tasks and Pipelines
 3. Strong community support
 4. Cloud-native design
-5. Better integration with Lighthouse
+5. Better integration with Tekton Triggers for webhooks
 
 ### How does tenant isolation work?
 
@@ -289,14 +233,16 @@ Isolation is achieved through multiple layers:
 4. **Resource Quotas**: Prevent resource exhaustion
 5. **Terraform State**: Isolated per tenant
 
-### Why use OIDC authentication?
+### How does the App of Apps pattern work?
 
-OIDC provides:
-1. No long-lived credentials
-2. Integration with existing identity providers
-3. Group-based authorization
-4. Standard protocol
-5. Self-service onboarding without cluster admin access
+The platform uses a root ArgoCD Application that manages child Applications for each component layer:
+- **platform-root**: Manages all child Applications
+- **platform-crds**: CRDs and foundational resources
+- **platform-infrastructure**: Namespaces and RBAC
+- **platform-controllers**: Onboarding controller
+- **platform-catalog**: Tekton tasks, pipelines, triggers
+
+This provides better separation of concerns, independent lifecycle management, and clearer troubleshooting.
 
 ### Can multiple clusters be deployed?
 
@@ -305,27 +251,17 @@ Yes! You can deploy separate clusters for different environments:
 - Staging cluster (production-like)
 - Production cluster (larger, more resources)
 
-Each cluster is independent with its own tenants and allowlist.
-
-### How does the allowlist work?
-
-The allowlist is a ConfigMap that defines which repositories can trigger pipelines. When Lighthouse receives a webhook:
-1. Check if repository is in allowlist
-2. If yes, lookup tenant namespace from allowlist
-3. Create PipelineRun in tenant namespace
-4. If no, reject event and log rejection
-
-The onboarding controller automatically updates the allowlist when RepoBinding resources are created.
+Each cluster is independent with its own tenants and ArgoCD Applications.
 
 ## Security Questions
 
-### How are GitHub App credentials stored?
+### How are webhook secrets stored?
 
-GitHub App private key is stored in a Kubernetes Secret in the `pipeline-system` namespace. Lighthouse reads the secret to authenticate with GitHub.
+Webhook secrets are generated by the Onboarding Controller using cryptographic randomness and stored in Kubernetes Secrets in the tenant namespace. EventListeners reference these secrets for webhook signature validation.
 
 ### How are Terraform credentials managed?
 
-Terraform backend credentials are stored in per-tenant Secrets. For Kubernetes backend, no external credentials are needed. For MinIO/S3 backend, credentials are stored in tenant namespace secrets.
+Terraform backend credentials are stored in per-tenant Secrets. For Kubernetes backend, no external credentials are needed. The platform uses the Kubernetes backend by default for simplicity.
 
 ### Can tenants access other tenants' resources?
 
@@ -333,21 +269,22 @@ No. RBAC ensures service accounts can only access resources in their own namespa
 
 ### Can tenants access platform namespaces?
 
-No. RBAC denies access to platform namespaces (pipeline-system, tekton-pipelines, etc.). Only the onboarding controller has permissions to create resources in platform namespaces.
+No. RBAC denies access to platform namespaces (platform-system, argocd, tekton-pipelines, etc.). Only the onboarding controller has permissions to create resources in platform namespaces.
 
-### How do I rotate GitHub App credentials?
+### How do I rotate webhook secrets?
 
 ```bash
-# Generate new private key in GitHub App settings
+# Delete existing secret
+kubectl delete secret webhook-<tenant-name> -n <tenant-namespace>
 
-# Update secret
-kubectl create secret generic github-app-secret \
-  --from-file=private-key=path/to/new-private-key.pem \
-  -n pipeline-system \
-  --dry-run=client -o yaml | kubectl apply -f -
+# Delete and recreate RepoBinding to regenerate secret
+kubectl delete repobinding <name> -n platform-system
+kubectl apply -f repobinding.yaml
 
-# Restart Lighthouse
-kubectl rollout restart deployment lighthouse -n pipeline-system
+# Get new webhook secret from RepoBinding status
+kubectl get repobinding <name> -n platform-system -o yaml
+
+# Update GitHub webhook with new secret
 ```
 
 ### How do I audit tenant activity?
@@ -359,62 +296,70 @@ kubectl get pipelineruns -n <tenant-namespace>
 # View events for a tenant
 kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
 
-# View Lighthouse logs for a repository
-kubectl logs -n pipeline-system -l app=lighthouse | grep "repo-name"
+# View EventListener logs for a tenant
+kubectl logs -n <tenant-namespace> -l eventlistener=github-listener
 ```
 
-## Testing Questions
+## Troubleshooting Questions
 
-### How do I test the onboarding process?
+### Why is ArgoCD not syncing my changes?
 
-Create a test RepoBinding and verify resources are created:
+**Common Issues**:
+1. ArgoCD cannot access Git repository (check repo-server logs)
+2. Sync policy not configured (check Application spec)
+3. Manifest errors in Git (check Application status)
+4. ArgoCD controller not running (check argocd namespace)
 
+**Resolution**:
 ```bash
-# Create test RepoBinding
-kubectl apply -f test-repobinding.yaml
+# Check Application sync status
+kubectl get application platform-root -n argocd
 
-# Verify namespace
-kubectl get namespace test-tenant
+# Check ArgoCD controller logs
+kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
 
-# Verify service account
-kubectl get serviceaccount pipeline-runner -n test-tenant
-
-# Verify RBAC
-kubectl get role,rolebinding -n test-tenant
-
-# Verify resource limits
-kubectl get resourcequota,limitrange -n test-tenant
-
-# Verify network policy
-kubectl get networkpolicy -n test-tenant
-
-# Clean up
-kubectl delete repobinding test-binding -n pipeline-system
-kubectl delete namespace test-tenant
+# Manually trigger sync
+kubectl patch application platform-root -n argocd --type merge -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{"revision":"HEAD"}}}'
 ```
 
-### How do I test pipeline execution?
+### Why is the onboarding controller not reconciling?
 
-Create a test PipelineRun manually:
+**Common Issues**:
+1. Controller not running (check pod status)
+2. Controller lacks RBAC permissions (check controller logs)
+3. RepoBinding validation failed (check RepoBinding status)
+4. Tekton Triggers not installed (check tekton-pipelines namespace)
 
+**Resolution**:
 ```bash
-kubectl create -f test-pipelinerun.yaml
+# Check controller logs
+kubectl logs -n platform-system -l app=onboarding-controller --tail=100
 
-# Watch status
-kubectl get pipelinerun test-run -n test-tenant -w
+# Check controller pod status
+kubectl get pods -n platform-system -l app=onboarding-controller
 
-# View logs
-kubectl logs <pod-name> -n test-tenant
+# Restart controller if needed
+kubectl rollout restart deployment onboarding-controller -n platform-system
 ```
 
-### How do I test network isolation?
+### Why is my webhook not being delivered?
 
+**Common Issues**:
+1. Ingress not accessible from GitHub (check Ingress configuration)
+2. Webhook secret mismatch (check RepoBinding status)
+3. EventListener not running (check pod status)
+4. GitHub webhook not configured (check GitHub webhook settings)
+
+**Resolution**:
 ```bash
-# Try to access another tenant's service
-kubectl run -it --rm debug --image=busybox --restart=Never -n tenant1 -- \
-  wget -O- http://service.tenant2.svc.cluster.local
+# Check EventListener logs
+kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=100
 
-# Should fail with connection timeout or refused
+# Check Ingress configuration
+kubectl get ingress -n <tenant-namespace> -o yaml
+
+# Check GitHub webhook delivery logs
+# Go to GitHub repository Settings → Webhooks → Recent Deliveries
 ```
 
 ## Archon-Specific Questions
@@ -441,7 +386,7 @@ Follow the Archon documentation contract in `CLAUDE.md`:
 - `CLAUDE.md`
 - `.kiro/steering/archon-docs.md`
 - `README.md`
-- `.kiro/specs/jenkinsx-platform/design.md`
-- `.kiro/specs/jenkinsx-platform/requirements.md`
+- `.kiro/specs/argocd-tekton-platform/design.md`
+- `.kiro/specs/argocd-tekton-platform/requirements.md`
 - `.kiro/docs/operations.md`
 - `.kiro/docs/api.md`

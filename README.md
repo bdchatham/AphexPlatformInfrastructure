@@ -1,18 +1,19 @@
 # Arbiter Pipeline Infrastructure
 
-Jenkins X-based CI/CD platform for homelab deployment providing shared pipeline infrastructure with tenant isolation.
+ArgoCD + Tekton GitOps platform for homelab deployment providing shared pipeline infrastructure with tenant isolation.
 
 ## Overview
 
-This repository defines and operates a shared CI/CD platform cluster using Jenkins X, Lighthouse, and Tekton. Product teams can run pipelines on shared infrastructure with logical separation through namespaces, RBAC, and policies.
+This repository defines and operates a shared CI/CD platform cluster using ArgoCD for GitOps and Tekton for pipeline execution. Product teams can run pipelines on shared infrastructure with logical separation through namespaces, RBAC, and policies. The platform is self-managing through ArgoCD, which automatically syncs all platform components from Git.
 
 ## Key Features
 
-- **Jenkins X Platform**: Kubernetes-native CI/CD with Tekton pipelines
-- **Self-Service Onboarding**: OIDC-authenticated users can provision tenant resources
+- **GitOps Native**: ArgoCD manages all platform components declaratively from Git
+- **Self-Service Onboarding**: Kubernetes controller provisions tenant resources automatically
 - **Tenant Isolation**: Namespace-per-team with RBAC and network policies
-- **Golden Pipeline Catalog**: Shared, versioned Tekton tasks and pipelines
+- **Pipeline Catalog**: Shared, versioned Tekton tasks and pipelines
 - **CDKTF Support**: Built-in support for infrastructure-as-code deployments
+- **Self-Upgrading**: Platform upgrades itself via ArgoCD when changes are committed to Git
 - **Agent-Friendly**: Highly inspectable for automated reasoning and remediation
 
 ## Documentation

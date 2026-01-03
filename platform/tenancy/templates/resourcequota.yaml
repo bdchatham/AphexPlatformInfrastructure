@@ -2,19 +2,28 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: tenant-quota
-  namespace: ${TENANT_NAME}
+  namespace: {{TENANT_NAME}}
+  labels:
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
 spec:
   hard:
-    # CPU limits
+    # Compute resources
     requests.cpu: "4"
-    limits.cpu: "8"
-    
-    # Memory limits
     requests.memory: "8Gi"
+    limits.cpu: "8"
     limits.memory: "16Gi"
     
-    # Storage limits
-    persistentvolumeclaims: "5"
+    # Storage resources
+    requests.storage: "50Gi"
+    persistentvolumeclaims: "10"
     
-    # Pod limits
+    # Object counts
     pods: "20"
+    services: "10"
+    configmaps: "50"
+    secrets: "50"
+    
+    # Tekton resources
+    count/pipelineruns.tekton.dev: "100"
+    count/taskruns.tekton.dev: "200"

@@ -1,8 +1,9 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: ${TENANT_NAME}
+  name: {{TENANT_NAME}}
   labels:
-    platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/repo: "${REPO_ORG}/${REPO_NAME}"
-    platform.arbiter.io/managed-by: "onboarding-controller"
+    arbiter.io/tenant: "{{TENANT_NAME}}"
+    arbiter.io/managed-by: "onboarding-controller"
+    arbiter.io/repo-org: "{{REPO_ORG}}"
+    arbiter.io/repo-name: "{{REPO_NAME}}"
