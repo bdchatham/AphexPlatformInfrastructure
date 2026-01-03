@@ -1,4 +1,4 @@
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: test-tenant-binding
