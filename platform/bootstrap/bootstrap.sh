@@ -671,7 +671,7 @@ create_platform_application() {
     # Wait for child Applications to be created
     echo ""
     echo "  Waiting for child Applications to be created..."
-    local child_apps=("platform-crds" "platform-infrastructure" "platform-controllers" "platform-catalog")
+    local child_apps=("platform-crds" "platform-controllers" "platform-catalog")
     local all_created=false
     elapsed=0
     max_wait=120
@@ -788,7 +788,6 @@ echo "   kubectl get all -n platform-system"
 echo ""
 echo "3. Check child Application sync status:"
 echo "   kubectl get application platform-crds -n argocd"
-echo "   kubectl get application platform-infrastructure -n argocd"
 echo "   kubectl get application platform-controllers -n argocd"
 echo "   kubectl get application platform-catalog -n argocd"
 echo ""
