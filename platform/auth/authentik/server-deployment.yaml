@@ -36,11 +36,6 @@ spec:
                 secretKeyRef:
                   name: authentik-secrets
                   key: admin-password
-            - name: AUTHENTIK_BOOTSTRAP_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: authentik-secrets
-                  key: bootstrap-token
             - name: AUTHENTIK_POSTGRESQL__HOST
               value: postgresql.auth-system.svc.cluster.local
             - name: AUTHENTIK_POSTGRESQL__NAME
@@ -58,11 +53,6 @@ spec:
               value: info
             - name: AUTHENTIK_BLUEPRINTS__ENABLED
               value: "true"
-            - name: DEX_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: dex-secrets
-                  key: authentik-client-secret
           ports:
             - name: http
               containerPort: 9000

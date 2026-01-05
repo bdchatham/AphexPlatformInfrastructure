@@ -11,7 +11,7 @@ AUTHENTIK_URL="http://authentik.auth-system.svc.cluster.local:9000"
 DEX_NAMESPACE="auth-system"
 DEX_DEPLOYMENT="dex"
 EXPECTED_REDIRECT_URI="https://dex.home.local/callback"
-EXPECTED_ISSUER_AUTHENTIK="https://auth.home.local/application/o/dex/"
+EXPECTED_ISSUER_AUTHENTIK="https://auth.home.local/application/o/platform-services/"
 EXPECTED_ISSUER_DEX="https://dex.home.local"
 
 # Read secrets from mounted volumes
@@ -168,7 +168,7 @@ echo ""
 
 # Verify Authentik OIDC discovery endpoint
 echo "[5/9] Verifying Authentik OIDC discovery endpoint..."
-DISCOVERY_URL="${AUTHENTIK_URL}/application/o/dex/.well-known/openid-configuration"
+DISCOVERY_URL="${AUTHENTIK_URL}/application/o/platform-services/.well-known/openid-configuration"
 DISCOVERY_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Accept: application/json" "$DISCOVERY_URL")
 
 HTTP_CODE=$(echo "$DISCOVERY_RESPONSE" | tail -n1)

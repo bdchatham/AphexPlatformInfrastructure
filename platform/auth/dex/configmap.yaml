@@ -37,7 +37,7 @@ data:
         id: authentik
         name: Authentik
         config:
-          issuer: https://auth.home.local/application/o/dex/
+          issuer: https://auth.home.local/application/o/platform-services/
           clientID: dex-client
           clientSecret: $AUTHENTIK_CLIENT_SECRET
           redirectURI: https://dex.home.local/callback
