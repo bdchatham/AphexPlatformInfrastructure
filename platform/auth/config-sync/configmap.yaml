@@ -246,100 +246,15 @@ data:
     fi
     echo ""
 
-    # Scale Dex deployment from 0 to 1 replica
-    echo "[6/9] Scaling Dex deployment to 1 replica..."
-    CURRENT_REPLICAS=$(kubectl get deployment "${DEX_DEPLOYMENT}" -n "${DEX_NAMESPACE}" -o jsonpath='{.spec.replicas}')
-    echo "  Current replicas: ${CURRENT_REPLICAS}"
-
-    if [ "$CURRENT_REPLICAS" -eq 1 ]; then
-      echo "  Dex is already scaled to 1 replica (idempotent operation)"
-    else
-      kubectl scale deployment/"${DEX_DEPLOYMENT}" --replicas=1 -n "${DEX_NAMESPACE}"
-      if [ $? -ne 0 ]; then
-        echo "ERROR: Failed to scale Dex deployment"
-        exit 1
-      fi
-      echo "✓ Dex deployment scaled to 1 replica"
-    fi
-    echo ""
-
-    # Wait for Dex to be ready
-    echo "[7/9] Waiting for Dex to be ready..."
-    DEX_URL="http://dex.auth-system.svc.cluster.local:5556"
-    MAX_ATTEMPTS=60
-    ATTEMPT=0
-    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-      if curl -f -s "${DEX_URL}/healthz" > /dev/null 2>&1; then
-        echo "✓ Dex is ready"
-        break
-      fi
-      ATTEMPT=$((ATTEMPT + 1))
-      if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-        echo "ERROR: Dex did not become ready after ${MAX_ATTEMPTS} attempts"
-        echo "  Check Dex pod logs for errors:"
-        echo "  kubectl logs -n ${DEX_NAMESPACE} deployment/${DEX_DEPLOYMENT}"
-        exit 1
-      fi
-      echo "  Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: Dex not ready, waiting 5 seconds..."
-      sleep 5
-    done
-    echo ""
-
-    # Verify Dex OIDC discovery endpoint
-    echo "[8/9] Verifying Dex OIDC discovery endpoint..."
-    DEX_DISCOVERY_URL="${DEX_URL}/.well-known/openid-configuration"
-    DEX_DISCOVERY_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Accept: application/json" "$DEX_DISCOVERY_URL")
-
-    HTTP_CODE=$(echo "$DEX_DISCOVERY_RESPONSE" | tail -n1)
-    DEX_DISCOVERY_JSON=$(echo "$DEX_DISCOVERY_RESPONSE" | sed '$d')
-
-    if [ "$HTTP_CODE" -ne 200 ]; then
-      echo "ERROR: Dex OIDC discovery endpoint returned HTTP ${HTTP_CODE}"
-      echo "  URL: ${DEX_DISCOVERY_URL}"
-      echo "  Check Dex configuration and logs"
-      echo "Response: ${DEX_DISCOVERY_JSON}"
-      exit 1
-    fi
-
-    # Check if response is HTML
-    if echo "$DEX_DISCOVERY_JSON" | grep -q "<!DOCTYPE\|<html"; then
-      echo "ERROR: Received HTML response instead of JSON from Dex OIDC discovery"
-      echo "Response preview:"
-      echo "$DEX_DISCOVERY_JSON" | head -20
-      exit 1
-    fi
-
-    # Verify issuer in Dex discovery JSON using jq
-    DEX_DISCOVERED_ISSUER=$(echo "$DEX_DISCOVERY_JSON" | jq -r '.issuer // empty')
-
-    if [ -z "$DEX_DISCOVERED_ISSUER" ]; then
-      echo "ERROR: Dex OIDC discovery response missing 'issuer' field"
-      echo "Response: ${DEX_DISCOVERY_JSON}"
-      exit 1
-    fi
-
-    if [ "$DEX_DISCOVERED_ISSUER" != "$EXPECTED_ISSUER_DEX" ]; then
-      echo "WARNING: Dex OIDC discovery issuer mismatch"
-      echo "  Expected: ${EXPECTED_ISSUER_DEX}"
-      echo "  Got:      ${DEX_DISCOVERED_ISSUER}"
-      echo "  Continuing anyway (issuer depends on Dex external URL config)"
-    else
-      echo "✓ Dex OIDC discovery endpoint is valid"
-      echo "  Issuer: ${DEX_DISCOVERED_ISSUER}"
-    fi
-    echo ""
-
     # Final success message
-    echo "[9/9] Configuration sync complete!"
+    echo "[6/6] Configuration sync complete!"
     echo ""
     echo "========================================="
     echo "Summary:"
     echo "  ✓ Authentik is ready and configured"
     echo "  ✓ OIDC provider updated with Dex client secret"
     echo "  ✓ Authentik OIDC discovery endpoint verified"
-    echo "  ✓ Dex scaled to 1 replica"
-    echo "  ✓ Dex is ready and healthy"
-    echo "  ✓ Dex OIDC discovery endpoint verified"
     echo ""
+    echo "Dex will start automatically once Authentik is ready (via initContainer)."
     echo "The authentication system is now fully operational."
     echo "========================================="

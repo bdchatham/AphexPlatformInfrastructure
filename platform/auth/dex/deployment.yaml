@@ -5,11 +5,8 @@ metadata:
   namespace: auth-system
   labels:
     app: dex
-  annotations:
-    argocd.argoproj.io/sync-options: "Prune=false"
-    argocd.argoproj.io/compare-options: "IgnoreExtraneous"
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: dex
@@ -19,6 +16,31 @@ spec:
         app: dex
     spec:
       serviceAccountName: dex
+      initContainers:
+        - name: wait-for-authentik-oidc
+          image: curlimages/curl:8.6.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AUTHENTIK_URL
+              value: http://authentik.auth-system.svc.cluster.local:9000
+            - name: AUTHENTIK_APP_SLUG
+              value: platform-services
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              DISCOVERY="${AUTHENTIK_URL}/application/o/${AUTHENTIK_APP_SLUG}/.well-known/openid-configuration"
+              echo "Waiting for Authentik OIDC discovery: ${DISCOVERY}"
+              for i in $(seq 1 120); do
+                if curl -fsS -H "Accept: application/json" "${DISCOVERY}" >/dev/null; then
+                  echo "Authentik OIDC discovery is available"
+                  exit 0
+                fi
+                echo "Attempt ${i}/120: not ready yet; sleeping 2s"
+                sleep 2
+              done
+              echo "Timed out waiting for Authentik OIDC discovery"
+              exit 1
       containers:
         - name: dex
           image: ghcr.io/dexidp/dex:v2.37.0
