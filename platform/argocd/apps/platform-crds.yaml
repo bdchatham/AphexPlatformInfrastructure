@@ -10,7 +10,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/brandon-schabel/ArbiterPipelineInfrastructure.git
+    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
     path: platform/crds
   destination:
