@@ -244,7 +244,10 @@ create_auth_system_secrets() {
   else
     kubectl create secret generic dex-secrets \
       -n "$AUTH_NAMESPACE" \
-      --from-literal=client-secret="$DEX_CLIENT_SECRET"
+      --from-literal=client-secret="$DEX_CLIENT_SECRET" \
+      --from-literal=authentik-client-secret="$DEX_CLIENT_SECRET" \
+      --from-literal=argocd-client-secret="$ARGOCD_CLIENT_SECRET" \
+      --from-literal=tekton-client-secret="$TEKTON_CLIENT_SECRET"
     log_success "Created secret: dex-secrets (in $AUTH_NAMESPACE)"
   fi
   
