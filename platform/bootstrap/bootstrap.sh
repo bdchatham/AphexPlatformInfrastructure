@@ -161,6 +161,7 @@ generate_secrets() {
   # Generate Authentik secrets
   AUTHENTIK_SECRET_KEY=$(openssl rand -base64 50)
   AUTHENTIK_ADMIN_PASSWORD=$(openssl rand -base64 32)
+  AUTHENTIK_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)
   
   # Generate Dex client secret
   DEX_CLIENT_SECRET=$(openssl rand -base64 32)
@@ -232,7 +233,8 @@ create_auth_system_secrets() {
     kubectl create secret generic authentik-secrets \
       -n "$AUTH_NAMESPACE" \
       --from-literal=secret-key="$AUTHENTIK_SECRET_KEY" \
-      --from-literal=admin-password="$AUTHENTIK_ADMIN_PASSWORD"
+      --from-literal=admin-password="$AUTHENTIK_ADMIN_PASSWORD" \
+      --from-literal=bootstrap-token="$AUTHENTIK_BOOTSTRAP_TOKEN"
     log_success "Created secret: authentik-secrets (in $AUTH_NAMESPACE)"
   fi
   
@@ -322,187 +324,6 @@ create_root_application() {
   log_info "ArgoCD will now sync all platform Applications automatically"
 }
 
-wait_for_authentik() {
-  log_info "Waiting for Authentik to be deployed by ArgoCD..."
-  log_info "This is the ONLY bootstrap → application interaction (documented exception)"
-  
-  # Wait for Authentik deployment to exist (ArgoCD creates it)
-  local max_wait=300
-  local elapsed=0
-  while ! kubectl get deployment authentik-server -n "$AUTH_NAMESPACE" &> /dev/null; do
-    if [[ $elapsed -ge $max_wait ]]; then
-      log_error "Timeout waiting for Authentik deployment to be created by ArgoCD"
-      exit 1
-    fi
-    sleep 5
-    elapsed=$((elapsed + 5))
-    echo -n "."
-  done
-  echo ""
-  
-  log_info "Authentik deployment found, waiting for pods to be ready..."
-  
-  # Wait for Authentik pods to be ready
-  kubectl wait --for=condition=ready --timeout=300s \
-    pod -l app=authentik-server \
-    -n "$AUTH_NAMESPACE" || true
-  
-  # Wait for health endpoint to return 200
-  log_info "Waiting for Authentik health endpoint..."
-  max_wait=300
-  elapsed=0
-  while true; do
-    if kubectl exec -n "$AUTH_NAMESPACE" \
-      deployment/authentik-server \
-      -c authentik -- \
-      curl -sf http://localhost:9000/api/v3/root/config/ &> /dev/null; then
-      break
-    fi
-    
-    if [[ $elapsed -ge $max_wait ]]; then
-      log_error "Timeout waiting for Authentik health endpoint"
-      exit 1
-    fi
-    
-    sleep 5
-    elapsed=$((elapsed + 5))
-    echo -n "."
-  done
-  echo ""
-  
-  log_success "Authentik is ready"
-}
-
-start_authentik_port_forward() {
-  log_info "Setting up port-forward to Authentik API..."
-  
-  kubectl port-forward -n "$AUTH_NAMESPACE" svc/authentik 9000:9000 &> /dev/null &
-  local port_forward_pid=$!
-  
-  trap "kill $port_forward_pid 2>/dev/null || true" EXIT
-  
-  log_info "Waiting for port-forward to be ready..."
-  local max_wait=30
-  local elapsed=0
-  while ! curl -sf http://localhost:9000/api/v3/root/config/ &> /dev/null; do
-    if [[ $elapsed -ge $max_wait ]]; then
-      log_error "Timeout waiting for port-forward to be ready"
-      kill $port_forward_pid 2>/dev/null || true
-      exit 1
-    fi
-    sleep 1
-    elapsed=$((elapsed + 1))
-  done
-  
-  log_success "Port-forward is ready"
-  echo "$port_forward_pid"
-}
-
-authenticate_to_authentik() {
-  log_info "Authenticating to Authentik API with admin credentials..."
-  
-  local auth_response
-  auth_response=$(curl -sf -X POST \
-    -H "Content-Type: application/json" \
-    -d "{\"uid\": \"admin\", \"password\": \"$AUTHENTIK_ADMIN_PASSWORD\"}" \
-    http://localhost:9000/api/v3/flows/executor/default-authentication-flow/ 2>/dev/null || echo "")
-  
-  if [[ -z "$auth_response" ]]; then
-    log_error "Failed to authenticate to Authentik API"
-    log_error "Authentik may not be fully ready or credentials are incorrect"
-    return 1
-  fi
-  
-  local session_token
-  session_token=$(echo "$auth_response" | jq -r '.token // empty')
-  
-  if [[ -z "$session_token" ]]; then
-    log_error "Failed to extract session token from Authentik response"
-    log_error "Response: $auth_response"
-    return 1
-  fi
-  
-  log_success "Authenticated successfully"
-  echo "$session_token"
-}
-
-create_api_token_in_authentik() {
-  local session_token="$1"
-  
-  log_info "Creating API token with minimal permissions..."
-  
-  local token_response
-  token_response=$(curl -sf -X POST \
-    -H "Authorization: Bearer $session_token" \
-    -H "Content-Type: application/json" \
-    -d '{"identifier": "config-sync-job", "intent": "api", "description": "Token for Config Sync Job (OAuth2 provider update only)"}' \
-    http://localhost:9000/api/v3/core/tokens/ 2>/dev/null || echo "")
-  
-  if [[ -z "$token_response" ]]; then
-    log_error "Failed to create API token"
-    log_error "This may indicate insufficient permissions or API changes"
-    return 1
-  fi
-  
-  local api_token
-  api_token=$(echo "$token_response" | jq -r '.key // empty')
-  
-  if [[ -z "$api_token" ]]; then
-    log_error "Failed to extract API token from response"
-    log_error "Response: $token_response"
-    return 1
-  fi
-  
-  echo "$api_token"
-}
-
-store_api_token_secret() {
-  local api_token="$1"
-  
-  kubectl create secret generic authentik-api-token \
-    -n "$AUTH_NAMESPACE" \
-    --from-literal=token="$api_token"
-  
-  log_success "Created Authentik API token (scoped to OAuth2 provider update only)"
-  log_success "Stored token in authentik-api-token Secret"
-  
-  if [[ "$SHOW_SECRETS" == true ]]; then
-    echo "Authentik API token: $api_token"
-    echo ""
-  fi
-}
-
-create_authentik_api_token() {
-  log_info "Creating Authentik API token..."
-  
-  if kubectl get secret authentik-api-token -n "$AUTH_NAMESPACE" &> /dev/null; then
-    log_info "Secret authentik-api-token already exists (skipping automated token creation)"
-    log_info "Using existing token (production override mode)"
-    return
-  fi
-  
-  local port_forward_pid
-  port_forward_pid=$(start_authentik_port_forward)
-  
-  local session_token
-  session_token=$(authenticate_to_authentik)
-  if [[ $? -ne 0 ]]; then
-    kill "$port_forward_pid" 2>/dev/null || true
-    exit 1
-  fi
-  
-  local api_token
-  api_token=$(create_api_token_in_authentik "$session_token")
-  if [[ $? -ne 0 ]]; then
-    kill "$port_forward_pid" 2>/dev/null || true
-    exit 1
-  fi
-  
-  kill "$port_forward_pid" 2>/dev/null || true
-  
-  store_api_token_secret "$api_token"
-}
-
 wait_for_config_sync_job() {
   log_info "Config Sync Job will be created by ArgoCD (GitOps-managed)"
   log_info "Monitor with: kubectl logs -n auth-system job/auth-config-sync -f"
@@ -559,8 +380,8 @@ print_access_instructions() {
   echo "Tekton Dashboard OIDC client secret:"
   echo "  kubectl get secret tekton-dashboard-oidc -n tekton-pipelines -o jsonpath='{.data.client-secret}' | base64 -d"
   echo ""
-  echo "Authentik API token:"
-  echo "  kubectl get secret authentik-api-token -n auth-system -o jsonpath='{.data.token}' | base64 -d"
+  echo "Authentik bootstrap token:"
+  echo "  kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.bootstrap-token}' | base64 -d"
   echo ""
   echo "PostgreSQL password:"
   echo "  kubectl get secret authentik-postgresql -n auth-system -o jsonpath='{.data.postgresql-password}' | base64 -d"
@@ -584,8 +405,6 @@ main() {
   install_argocd
   create_argocd_and_tekton_secrets
   create_root_application
-  wait_for_authentik
-  create_authentik_api_token
   wait_for_config_sync_job
   print_access_instructions
 }

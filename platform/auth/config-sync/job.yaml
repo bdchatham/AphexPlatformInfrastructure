@@ -65,7 +65,6 @@ spec:
             defaultMode: 0555  # Make script executable
         
         # Projected volume combining multiple secrets
-        # This allows the Job to read secrets without kubectl get secret permissions
         - name: secrets
           projected:
             sources:
@@ -76,9 +75,9 @@ spec:
                     - key: client-secret
                       path: dex-client-secret
               
-              # Authentik API token (created during bootstrap)
+              # Authentik bootstrap token (created during bootstrap)
               - secret:
-                  name: authentik-api-token
+                  name: authentik-secrets
                   items:
-                    - key: token
+                    - key: bootstrap-token
                       path: authentik-token
