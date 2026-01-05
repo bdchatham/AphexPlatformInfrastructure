@@ -13,6 +13,8 @@ spec:
     repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
     path: platform/auth
+    directory:
+      recurse: true
   destination:
     server: https://kubernetes.default.svc
     namespace: auth-system

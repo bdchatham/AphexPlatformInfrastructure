@@ -206,8 +206,8 @@ create_namespaces() {
   fi
 }
 
-create_kubernetes_secrets() {
-  log_info "Creating Kubernetes secrets..."
+create_auth_system_secrets() {
+  log_info "Creating auth-system secrets..."
   
   # Check if secrets already exist (production override support)
   local secrets_exist=false
@@ -245,6 +245,14 @@ create_kubernetes_secrets() {
     log_success "Created secret: dex-secrets (in $AUTH_NAMESPACE)"
   fi
   
+  if [[ "$secrets_exist" == true ]]; then
+    log_warning "Some secrets already existed (production override mode)"
+  fi
+}
+
+create_argocd_and_tekton_secrets() {
+  log_info "Creating ArgoCD and Tekton secrets..."
+  
   # ArgoCD namespace secret (must be in argocd namespace)
   # ArgoCD references $oidc.dex.clientSecret which looks for oidc.dex.clientSecret key in argocd-secret
   if kubectl get secret argocd-secret -n "$ARGOCD_NAMESPACE" &> /dev/null; then
@@ -270,10 +278,6 @@ create_kubernetes_secrets() {
       -n "tekton-pipelines" \
       --from-literal=client-secret="$TEKTON_CLIENT_SECRET"
     log_success "Created secret: tekton-dashboard-oidc (in tekton-pipelines)"
-  fi
-  
-  if [[ "$secrets_exist" == true ]]; then
-    log_warning "Some secrets already existed (production override mode)"
   fi
 }
 
@@ -521,8 +525,9 @@ main() {
   create_or_select_cluster
   generate_secrets
   create_namespaces
-  create_kubernetes_secrets
+  create_auth_system_secrets
   install_argocd
+  create_argocd_and_tekton_secrets
   create_root_application
   wait_for_authentik
   create_authentik_api_token
