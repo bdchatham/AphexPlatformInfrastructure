@@ -30,15 +30,21 @@ cd platform/bootstrap
 **Bootstrap Script Actions**:
 1. Detects and cleans up existing JenkinsX installations (if present)
 2. Creates Kubernetes cluster (Kind for local, configurable for others)
-3. Installs Tekton Pipelines v0.65.0
-4. Installs Tekton Triggers v0.29.0
-5. Installs Tekton Triggers Core Interceptors v0.29.0
-6. Installs ArgoCD
-7. Creates platform namespaces (argocd, tekton-pipelines, platform-system)
-8. Creates platform root ArgoCD Application
-9. Displays ArgoCD credentials and access instructions
+3. **Generates and creates ALL secrets (PostgreSQL, Authentik, Dex)**
+4. **Creates auth-system namespace**
+5. Installs Tekton Pipelines v0.65.0
+6. Installs Tekton Triggers v0.29.0
+7. Installs Tekton Triggers Core Interceptors v0.29.0
+8. Installs ArgoCD
+9. Creates platform namespaces (argocd, tekton-pipelines, platform-system)
+10. Creates platform root ArgoCD Application
+11. **Waits for Authentik to be ready (deployed by ArgoCD)**
+12. **Creates Authentik API token via Authentik API**
+13. **Stores API token in Kubernetes Secret**
+14. Displays ArgoCD credentials and access instructions
+15. **Prints commands to retrieve secrets (NOT the secrets themselves)**
 
-**Note**: After bootstrap, Tekton is managed by ArgoCD via the `platform-tekton` Application. Updates to Tekton versions are made by updating `platform/tekton/kustomization.yaml` in Git.
+**Note**: After bootstrap, all platform components (Tekton, auth-system, etc.) are managed by ArgoCD via GitOps. Bootstrap handles cluster setup, secret generation, and ArgoCD installation. ArgoCD handles everything else.
 
 **Step 2: Verify Bootstrap**
 
@@ -160,6 +166,464 @@ kubectl get repobinding my-repo-binding -n platform-system -o yaml
 **Source**
 - `platform/crds/repobinding-crd.yaml`
 - `platform/onboarding/controller/`
+
+## Authentication System Operations
+
+The authentication system provides centralized identity management through Authentik with Dex as an OIDC connector layer. All authentication components are managed by ArgoCD via GitOps.
+
+### Accessing Authentik UI
+
+After bootstrap completes and ArgoCD syncs the auth system:
+
+**Step 1: Ensure DNS is configured**
+
+Configure DNS so that `*.home.local` resolves to your Ingress controller's IP address.
+
+```bash
+# Find Ingress controller IP
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# Add DNS records (router/Pi-hole) or /etc/hosts entries:
+# 192.168.1.100 auth.home.local
+# 192.168.1.100 dex.home.local
+# 192.168.1.100 argocd.home.local
+# 192.168.1.100 tekton.home.local
+```
+
+**Step 2: Retrieve admin password**
+
+```bash
+kubectl get secret authentik-secrets -n auth-system \
+  -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+**Step 3: Access Authentik UI**
+
+- Open `https://auth.home.local` in browser
+- Accept certificate warning (if using self-signed certificates)
+- Login with username `admin` and password from Step 2
+
+### User Management
+
+#### Creating Users
+
+1. Navigate to **Directory** → **Users**
+2. Click **Create**
+3. Fill in user details:
+   - Username (required, unique)
+   - Email (required, unique)
+   - Name (display name)
+   - Password (or send password reset email)
+4. Assign user to groups:
+   - `admins`: Full access to all platform services
+   - `engineering`: Read-only access to platform services
+5. Click **Create**
+
+Users can authenticate immediately - no pod restarts or configuration changes required.
+
+#### Managing Groups
+
+1. Navigate to **Directory** → **Groups**
+2. View existing groups (`admins`, `engineering`)
+3. Create new groups as needed
+4. Assign users to groups
+5. Groups are automatically included in OIDC tokens
+
+#### Changing Admin Password
+
+1. Navigate to **Directory** → **Users**
+2. Click on `admin` user
+3. Click **Set password**
+4. Enter new password
+5. Click **Update**
+
+### DNS Configuration
+
+DNS configuration is required for user browsers to reach services via hostnames. OIDC authentication requires redirect URIs that browsers can reach.
+
+**Option 1: Router/Pi-hole DNS (Recommended)**
+
+Add A records in your home router or Pi-hole:
+
+```
+auth.home.local     → 192.168.1.100
+dex.home.local      → 192.168.1.100
+argocd.home.local   → 192.168.1.100
+tekton.home.local   → 192.168.1.100
+```
+
+Replace `192.168.1.100` with your Ingress controller's LoadBalancer IP or NodePort IP.
+
+**Option 2: Hosts File**
+
+Add entries to `/etc/hosts` on each device:
+
+```bash
+# Linux/macOS
+sudo nano /etc/hosts
+
+# Add these lines:
+192.168.1.100 auth.home.local
+192.168.1.100 dex.home.local
+192.168.1.100 argocd.home.local
+192.168.1.100 tekton.home.local
+```
+
+**Verify DNS configuration**:
+
+```bash
+nslookup auth.home.local
+nslookup dex.home.local
+curl -k https://auth.home.local
+```
+
+### TLS Certificate Setup
+
+All services use HTTPS with TLS certificates. Choose between self-signed (simplest) or Let's Encrypt (trusted certificates).
+
+#### Self-Signed Certificates (Simplest)
+
+1. **Install cert-manager**:
+   ```bash
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+   
+   kubectl wait --for=condition=ready pod \
+     -l app.kubernetes.io/instance=cert-manager \
+     -n cert-manager \
+     --timeout=90s
+   ```
+
+2. **Create self-signed ClusterIssuer**:
+   ```bash
+   cat <<EOF | kubectl apply -f -
+   apiVersion: cert-manager.io/v1
+   kind: ClusterIssuer
+   metadata:
+     name: selfsigned-issuer
+   spec:
+     selfSigned: {}
+   EOF
+   ```
+
+3. **Accept certificate warnings in browser**:
+   - Chrome: Click "Advanced" → "Proceed to auth.home.local (unsafe)"
+   - Firefox: Click "Advanced" → "Accept the Risk and Continue"
+
+#### Let's Encrypt with DNS-01 Challenge
+
+Provides trusted certificates without browser warnings. Requires DNS provider API access.
+
+1. **Install cert-manager** (same as above)
+
+2. **Create DNS provider API token secret** (Cloudflare example):
+   ```bash
+   kubectl create secret generic cloudflare-api-token \
+     -n cert-manager \
+     --from-literal=api-token=YOUR_TOKEN_HERE
+   ```
+
+3. **Create Let's Encrypt ClusterIssuer**:
+   ```bash
+   cat <<EOF | kubectl apply -f -
+   apiVersion: cert-manager.io/v1
+   kind: ClusterIssuer
+   metadata:
+     name: letsencrypt-dns
+   spec:
+     acme:
+       server: https://acme-v02.api.letsencrypt.org/directory
+       email: your-email@example.com
+       privateKeySecretRef:
+         name: letsencrypt-dns-key
+       solvers:
+         - dns01:
+             cloudflare:
+               apiTokenSecretRef:
+                 name: cloudflare-api-token
+                 key: api-token
+   EOF
+   ```
+
+4. **Update Ingress resources** to use Let's Encrypt issuer and your domain
+
+5. **Commit and push to Git** - ArgoCD syncs changes automatically
+
+**Verify certificates**:
+
+```bash
+kubectl get certificate -n auth-system
+kubectl describe certificate authentik-tls -n auth-system
+```
+
+### Secret Rotation
+
+Secrets should be rotated periodically for security. The authentication system supports secret rotation without downtime.
+
+#### Rotating Authentik Admin Password
+
+**Via Authentik UI (Recommended)**:
+
+1. Login to Authentik UI
+2. Navigate to **Directory** → **Users** → `admin`
+3. Click **Set password**
+4. Enter new password
+5. Click **Update**
+6. Update Kubernetes Secret:
+   ```bash
+   kubectl create secret generic authentik-secrets \
+     -n auth-system \
+     --from-literal=secret-key="$(kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.secret-key}' | base64 -d)" \
+     --from-literal=admin-password="NEW_PASSWORD" \
+     --dry-run=client -o yaml | kubectl apply -f -
+   ```
+
+#### Rotating Dex Client Secret
+
+1. **Generate new secret**:
+   ```bash
+   NEW_SECRET=$(openssl rand -base64 32)
+   ```
+
+2. **Update Kubernetes Secret**:
+   ```bash
+   kubectl create secret generic dex-secrets \
+     -n auth-system \
+     --from-literal=client-secret="$NEW_SECRET" \
+     --dry-run=client -o yaml | kubectl apply -f -
+   ```
+
+3. **Update Authentik OIDC provider**:
+   - Login to Authentik UI
+   - Navigate to **Applications** → **Providers** → **Dex OIDC Provider**
+   - Update **Client Secret** field
+   - Click **Update**
+
+4. **Restart Dex**:
+   ```bash
+   kubectl rollout restart deployment/dex -n auth-system
+   ```
+
+#### Rotating Authentik API Token
+
+1. **Create new token via Authentik UI**:
+   - Navigate to **Directory** → **Tokens** → **Create**
+   - Set identifier: "config-sync-job-new"
+   - Set intent: "API"
+   - Copy token value
+
+2. **Update Kubernetes Secret**:
+   ```bash
+   kubectl create secret generic authentik-api-token \
+     -n auth-system \
+     --from-literal=token="NEW_TOKEN_HERE" \
+     --dry-run=client -o yaml | kubectl apply -f -
+   ```
+
+3. **Revoke old token**:
+   - Navigate to **Directory** → **Tokens**
+   - Find old token → **Delete**
+
+### Config Sync Job Management
+
+The Config Sync Job orchestrates Authentik-Dex integration. It runs automatically during bootstrap but can be manually triggered.
+
+#### Check Job Status
+
+```bash
+# Check Job status
+kubectl get job auth-config-sync -n auth-system
+
+# Check Job pod status
+kubectl get pods -n auth-system -l app=auth-config-sync
+
+# View Job logs
+kubectl logs -n auth-system -l app=auth-config-sync
+```
+
+#### Manually Trigger Job
+
+To re-run the Job (e.g., after fixing a configuration issue):
+
+```bash
+# Delete existing Job
+kubectl delete job auth-config-sync -n auth-system
+
+# ArgoCD will recreate the Job automatically
+# Or manually apply:
+kubectl apply -f platform/auth/config-sync/job.yaml
+
+# Watch Job progress
+kubectl logs -n auth-system -l app=auth-config-sync -f
+```
+
+#### Verify Job Completion
+
+```bash
+# Check if Job completed successfully
+kubectl get job auth-config-sync -n auth-system -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}'
+# Should output: True
+
+# Get detailed Job status
+kubectl describe job auth-config-sync -n auth-system
+```
+
+### GitOps Workflow for Authentication Changes
+
+All authentication system components are managed by ArgoCD. To make changes:
+
+**Step 1: Update manifests in Git**
+
+```bash
+# Clone repository
+git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
+cd ArbiterPipelineInfrastructure
+
+# Update authentication manifests
+# Example: Update Authentik image version
+vi platform/auth/authentik/server-deployment.yaml
+
+# Commit changes
+git add .
+git commit -m "Update Authentik to v2024.1.0"
+git push
+```
+
+**Step 2: ArgoCD detects and syncs changes**
+
+ArgoCD polls Git every 3 minutes and detects changes automatically.
+
+```bash
+# Watch ArgoCD sync status
+kubectl get application platform-auth -n argocd -w
+
+# Or view in ArgoCD UI
+# https://argocd.home.local
+```
+
+**Step 3: Verify changes**
+
+```bash
+# Check pod status
+kubectl get pods -n auth-system
+
+# Check ArgoCD sync status
+kubectl get application platform-auth -n argocd
+
+# View sync details
+kubectl describe application platform-auth -n argocd
+```
+
+**No manual kubectl apply required** - ArgoCD handles all deployments and updates.
+
+### Authentication Troubleshooting
+
+#### Authentication Fails
+
+**Symptom**: User cannot log in to ArgoCD or Tekton Dashboard
+
+**Diagnosis**:
+
+```bash
+# Check DNS resolution
+nslookup auth.home.local
+nslookup dex.home.local
+
+# Check Authentik OIDC discovery
+curl https://auth.home.local/application/o/dex/.well-known/openid-configuration
+
+# Check Dex OIDC discovery
+curl https://dex.home.local/.well-known/openid-configuration
+
+# Check user groups in Authentik UI
+# Login → Directory → Users → Select user → Groups tab
+```
+
+**Resolution**:
+- Configure DNS if resolution fails
+- Verify redirect URI configuration in Dex and Authentik
+- Verify user is in correct group (`admins` or `engineering`)
+
+#### Dex Pod CrashLoopBackOff
+
+**Symptom**: Dex pod fails to start repeatedly
+
+**Diagnosis**:
+
+```bash
+# Check Dex logs
+kubectl logs -n auth-system deployment/dex
+
+# Verify Dex starts with replicas=0
+kubectl get deployment dex -n auth-system -o jsonpath='{.spec.replicas}'
+
+# Check Config Sync Job status
+kubectl get job auth-config-sync -n auth-system
+kubectl logs -n auth-system job/auth-config-sync
+```
+
+**Resolution**:
+- Verify Authentik is running and healthy
+- Check Dex ConfigMap for syntax errors
+- Verify Config Sync Job completed successfully
+- Re-run Config Sync Job if needed
+
+#### ArgoCD Not Syncing Auth Changes
+
+**Symptom**: Changes to Git are not applied to cluster
+
+**Diagnosis**:
+
+```bash
+# Check Application status
+kubectl get application platform-auth -n argocd
+
+# Check Application details
+kubectl describe application platform-auth -n argocd
+
+# Check for sync errors
+kubectl get application platform-auth -n argocd -o json | \
+  jq '.status.conditions[] | select(.type=="SyncError")'
+```
+
+**Resolution**:
+- Verify ArgoCD auto-sync is enabled
+- Check for invalid YAML syntax in manifests
+- Manually trigger sync:
+  ```bash
+  kubectl patch application platform-auth -n argocd \
+    --type merge -p '{"operation":{"initiatedBy":{"username":"admin"},"sync":{}}}'
+  ```
+
+#### Secrets Not Found
+
+**Symptom**: Pods fail to start with "secret not found" errors
+
+**Diagnosis**:
+
+```bash
+# Check if secrets exist
+kubectl get secrets -n auth-system
+
+# Expected secrets:
+# - authentik-postgresql
+# - authentik-secrets
+# - dex-secrets
+# - authentik-api-token
+```
+
+**Resolution**:
+- Re-run bootstrap to regenerate secrets:
+  ```bash
+  ./platform/bootstrap/bootstrap.sh
+  ```
+- Or manually create missing secrets (see `platform/auth/secrets/README.md`)
+
+**Source**
+- `platform/auth/README.md`
+- `platform/auth/secrets/README.md`
+- `platform/auth/ingress/README.md`
+- `platform/auth/config-sync/README.md`
+- `platform/bootstrap/bootstrap.sh`
 
 ## ArgoCD-Based Upgrade Workflow
 

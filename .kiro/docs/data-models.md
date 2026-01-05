@@ -566,6 +566,562 @@ ArgoCD updates Application status
 - `commitSha`: Must be valid Git commit hash (40 hex characters)
 - `tenantName`: Must be existing namespace
 
+## Authentication Data Models
+
+### Authentik User Schema
+
+```typescript
+interface AuthentikUser {
+  pk: number;                   // Primary key (unique user ID)
+  username: string;             // Username (unique, lowercase)
+  name: string;                 // Display name
+  email: string;                // Email address (unique)
+  is_active: boolean;           // Whether user is active
+  is_superuser: boolean;        // Whether user has superuser permissions
+  last_login: string;           // ISO 8601 timestamp of last login
+  groups: string[];             // Array of group names
+  attributes: {                 // Custom user attributes
+    [key: string]: any;
+  };
+}
+```
+
+**Example**:
+```json
+{
+  "pk": 1,
+  "username": "admin",
+  "name": "Admin User",
+  "email": "admin@example.com",
+  "is_active": true,
+  "is_superuser": true,
+  "last_login": "2024-01-05T10:00:00Z",
+  "groups": ["admins"],
+  "attributes": {}
+}
+```
+
+### Authentik Group Schema
+
+```typescript
+interface AuthentikGroup {
+  pk: string;                   // Primary key (UUID)
+  name: string;                 // Group name (unique)
+  is_superuser: boolean;        // Whether group has superuser permissions
+  parent: string | null;        // Parent group UUID (null if top-level)
+  users: number[];              // Array of user PKs
+  attributes: {                 // Custom group attributes
+    [key: string]: any;
+  };
+}
+```
+
+**Example**:
+```json
+{
+  "pk": "abc123-def456-ghi789",
+  "name": "admins",
+  "is_superuser": false,
+  "parent": null,
+  "users": [1, 2],
+  "attributes": {}
+}
+```
+
+### Authentik OAuth2 Provider Schema
+
+```typescript
+interface AuthentikOAuth2Provider {
+  pk: number;                   // Primary key
+  name: string;                 // Provider name
+  authorization_flow: string;   // Authorization flow UUID
+  client_type: "confidential" | "public";
+  client_id: string;            // OAuth2 client ID
+  client_secret: string;        // OAuth2 client secret (masked in responses)
+  redirect_uris: string;        // Newline-separated redirect URIs
+  signing_key: string;          // Signing key UUID
+  access_code_validity: string; // Access code validity duration (e.g., "minutes=1")
+  access_token_validity: string;// Access token validity duration (e.g., "minutes=5")
+  refresh_token_validity: string;// Refresh token validity duration (e.g., "days=30")
+  include_claims_in_id_token: boolean;
+  issuer_mode: "global" | "per_provider";
+  sub_mode: "hashed_user_id" | "user_id" | "user_username" | "user_email";
+}
+```
+
+**Example**:
+```json
+{
+  "pk": 1,
+  "name": "Dex OIDC Provider",
+  "authorization_flow": "abc123-def456",
+  "client_type": "confidential",
+  "client_id": "dex-client",
+  "client_secret": "***",
+  "redirect_uris": "https://dex.home.local/callback",
+  "signing_key": "ghi789-jkl012",
+  "access_code_validity": "minutes=1",
+  "access_token_validity": "minutes=5",
+  "refresh_token_validity": "days=30",
+  "include_claims_in_id_token": true,
+  "issuer_mode": "per_provider",
+  "sub_mode": "hashed_user_id"
+}
+```
+
+### Dex Configuration Schema
+
+```typescript
+interface DexConfig {
+  issuer: string;               // Dex issuer URL (e.g., "https://dex.home.local")
+  storage: {
+    type: "kubernetes";
+    config: {
+      inCluster: boolean;       // Use in-cluster Kubernetes credentials
+    };
+  };
+  web: {
+    http: string;               // HTTP listen address (e.g., "0.0.0.0:5556")
+  };
+  logger: {
+    level: "debug" | "info" | "warn" | "error";
+    format: "json" | "text";
+  };
+  staticClients: Array<{
+    id: string;                 // Client ID
+    name: string;               // Client display name
+    secretEnv: string;          // Environment variable containing client secret
+    redirectURIs: string[];     // Allowed redirect URIs
+  }>;
+  connectors: Array<{
+    type: "oidc";
+    id: string;                 // Connector ID
+    name: string;               // Connector display name
+    config: {
+      issuer: string;           // Upstream OIDC issuer URL
+      clientID: string;         // Client ID for upstream provider
+      clientSecret: string;     // Client secret for upstream provider
+      redirectURI: string;      // Dex callback URL
+      scopes: string[];         // Requested scopes
+      getUserInfo: boolean;     // Fetch user info from userinfo endpoint
+      insecureSkipEmailVerified: boolean;
+      insecureEnableGroups: boolean;
+      claimMapping: {
+        groups: string;         // Claim name for groups
+      };
+    };
+  }>;
+  expiry: {
+    signingKeys: string;        // Signing key rotation interval (e.g., "6h")
+    idTokens: string;           // ID token validity (e.g., "24h")
+    refreshTokens: {
+      validIfNotUsedFor: string;// Refresh token idle timeout (e.g., "2160h")
+      absoluteLifetime: string; // Refresh token absolute lifetime (e.g., "3960h")
+    };
+  };
+}
+```
+
+**Example**:
+```yaml
+issuer: https://dex.home.local
+storage:
+  type: kubernetes
+  config:
+    inCluster: true
+web:
+  http: 0.0.0.0:5556
+logger:
+  level: info
+  format: json
+staticClients:
+  - id: argocd
+    name: ArgoCD
+    secretEnv: ARGOCD_CLIENT_SECRET
+    redirectURIs:
+      - https://argocd.home.local/auth/callback
+  - id: tekton-dashboard
+    name: Tekton Dashboard
+    secretEnv: TEKTON_CLIENT_SECRET
+    redirectURIs:
+      - https://tekton.home.local/auth/callback
+connectors:
+  - type: oidc
+    id: authentik
+    name: Authentik
+    config:
+      issuer: http://authentik.auth-system.svc.cluster.local:9000/application/o/platform-services/
+      clientID: dex-client
+      clientSecret: $AUTHENTIK_CLIENT_SECRET
+      redirectURI: https://dex.home.local/callback
+      scopes:
+        - openid
+        - profile
+        - email
+        - groups
+      getUserInfo: true
+      insecureSkipEmailVerified: true
+      insecureEnableGroups: true
+      claimMapping:
+        groups: groups
+expiry:
+  signingKeys: "6h"
+  idTokens: "24h"
+  refreshTokens:
+    validIfNotUsedFor: "2160h"
+    absoluteLifetime: "3960h"
+```
+
+### OIDC Token Claims Schema
+
+```typescript
+interface OIDCTokenClaims {
+  iss: string;                  // Issuer (Dex URL)
+  sub: string;                  // Subject (unique user ID)
+  aud: string;                  // Audience (client ID)
+  exp: number;                  // Expiration time (Unix timestamp)
+  iat: number;                  // Issued at time (Unix timestamp)
+  name: string;                 // User's display name
+  email: string;                // User's email address
+  groups: string[];             // User's group memberships
+  email_verified: boolean;      // Whether email is verified
+}
+```
+
+**Example**:
+```json
+{
+  "iss": "https://dex.home.local",
+  "sub": "abc123",
+  "aud": "argocd",
+  "exp": 1704542400,
+  "iat": 1704456000,
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "groups": ["admins"],
+  "email_verified": true
+}
+```
+
+### ArgoCD RBAC Policy Model
+
+```typescript
+interface ArgoCDRBACPolicy {
+  policy: {
+    csv: string;                // CSV-formatted RBAC policy
+  };
+  scopes: string;               // RBAC scopes (e.g., "[groups]")
+}
+```
+
+**Policy CSV Format**:
+```
+p, role:admin, applications, *, */*, allow
+p, role:admin, clusters, *, *, allow
+p, role:admin, repositories, *, *, allow
+p, role:readonly, applications, get, */*, allow
+p, role:readonly, clusters, get, *, allow
+p, role:readonly, repositories, get, *, allow
+g, admins, role:admin
+g, engineering, role:readonly
+```
+
+**Policy Rules**:
+- `p`: Permission rule (role, resource, action, object, effect)
+- `g`: Group mapping (group, role)
+
+**Example**:
+```yaml
+policy.csv: |
+  p, role:admin, applications, *, */*, allow
+  p, role:admin, clusters, *, *, allow
+  p, role:admin, repositories, *, *, allow
+  p, role:readonly, applications, get, */*, allow
+  p, role:readonly, clusters, get, *, allow
+  p, role:readonly, repositories, get, *, allow
+  g, admins, role:admin
+  g, engineering, role:readonly
+scopes: "[groups]"
+```
+
+### Tekton RBAC Model
+
+```typescript
+interface TektonRBACModel {
+  clusterRole: {
+    rules: Array<{
+      apiGroups: string[];
+      resources: string[];
+      verbs: string[];
+    }>;
+  };
+  clusterRoleBinding: {
+    subjects: Array<{
+      kind: "Group";
+      name: string;             // Group name from OIDC token
+      apiGroup: "rbac.authorization.k8s.io";
+    }>;
+    roleRef: {
+      kind: "ClusterRole";
+      name: string;
+      apiGroup: "rbac.authorization.k8s.io";
+    };
+  };
+}
+```
+
+**Admin Role Example**:
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-admin
+rules:
+  - apiGroups: ["tekton.dev"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-admin-binding
+subjects:
+  - kind: Group
+    name: admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: tekton-admin
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**Read-Only Role Example**:
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-readonly
+rules:
+  - apiGroups: ["tekton.dev"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-readonly-binding
+subjects:
+  - kind: Group
+    name: engineering
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: tekton-readonly
+  apiGroup: rbac.authorization.k8s.io
+```
+
+### Authentication Secrets Schema
+
+```typescript
+interface AuthenticationSecrets {
+  "authentik-postgresql": {
+    "postgresql-password": string;        // Database password (base64)
+    "postgresql-postgres-password": string;// Superuser password (base64)
+  };
+  "authentik-secrets": {
+    "secret-key": string;                 // Authentik secret key (base64)
+    "admin-password": string;             // Admin password (base64)
+  };
+  "dex-secrets": {
+    "client-secret": string;              // Dex client secret (base64)
+  };
+  "authentik-api-token": {
+    "token": string;                      // API token (base64)
+  };
+}
+```
+
+**Example**:
+```yaml
+# authentik-postgresql Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: authentik-postgresql
+  namespace: auth-system
+type: Opaque
+data:
+  postgresql-password: YWJjMTIzZGVmNDU2  # base64 encoded
+  postgresql-postgres-password: eHl6Nzg5Z2hpMDEy  # base64 encoded
+
+---
+# authentik-secrets Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: authentik-secrets
+  namespace: auth-system
+type: Opaque
+data:
+  secret-key: ZGVmNDU2amtsNzg5bW5vMzQ1cHFyOTAxc3R1MjM0dnd4NTY3eXphYjY3OGNkZTkwMQ==  # base64 encoded
+  admin-password: Z2hpNzg5bW5vMzQ1  # base64 encoded
+
+---
+# dex-secrets Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex-secrets
+  namespace: auth-system
+type: Opaque
+data:
+  client-secret: amtsMTIzbW5vNDU2  # base64 encoded
+
+---
+# authentik-api-token Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: authentik-api-token
+  namespace: auth-system
+type: Opaque
+data:
+  token: cHFyOTAxc3R1MjM0dnd4NTY3  # base64 encoded
+```
+
+## Authentication Data Flow
+
+### User Authentication Flow
+
+```
+User accesses ArgoCD/Tekton Dashboard
+    ↓
+Service redirects to Dex authorization endpoint
+    ↓
+Dex redirects to Authentik login page
+    ↓
+User enters credentials in Authentik
+    ↓
+Authentik validates credentials against PostgreSQL
+    ↓
+Authentik returns authorization code to Dex
+    ↓
+Dex exchanges code for tokens from Authentik
+    ↓
+Dex returns authorization code to service
+    ↓
+Service exchanges code for tokens from Dex
+    ↓
+Service validates ID token and extracts claims
+    ↓
+Service grants access based on groups claim
+```
+
+### Config Sync Job Data Flow
+
+```
+Bootstrap creates Authentik API token
+    ↓
+Bootstrap stores token in authentik-api-token Secret
+    ↓
+Config Sync Job reads token from Secret
+    ↓
+Job waits for Authentik to be ready
+    ↓
+Job fetches OAuth2 providers from Authentik API
+    ↓
+Job finds Dex OIDC provider by name/client_id/redirect_uris
+    ↓
+Job reads Dex client secret from dex-secrets Secret
+    ↓
+Job updates Dex OIDC provider with client secret via API
+    ↓
+Job verifies Authentik OIDC discovery endpoint
+    ↓
+Job scales Dex deployment to 1 replica
+    ↓
+Job waits for Dex to be ready
+    ↓
+Job verifies Dex OIDC discovery endpoint
+    ↓
+Authentication system is operational
+```
+
+### Secret Generation Flow
+
+```
+Bootstrap script starts
+    ↓
+Generate PostgreSQL password (32 bytes random)
+    ↓
+Generate Authentik secret key (50 bytes random)
+    ↓
+Generate Authentik admin password (32 bytes random)
+    ↓
+Generate Dex client secret (32 bytes random)
+    ↓
+Create Kubernetes Secrets in auth-system namespace
+    ↓
+ArgoCD deploys Authentik with secrets
+    ↓
+Bootstrap waits for Authentik to be ready
+    ↓
+Bootstrap authenticates to Authentik API
+    ↓
+Bootstrap creates API token via Authentik API
+    ↓
+Bootstrap stores API token in authentik-api-token Secret
+    ↓
+Config Sync Job uses API token to configure Authentik
+```
+
+## Validation Rules
+
+### Authentik User Validation
+
+- `username`: Must be unique, lowercase, alphanumeric and hyphens
+- `email`: Must be unique, valid email format
+- `name`: Required, non-empty string
+- `groups`: Must reference existing group names
+
+### Authentik Group Validation
+
+- `name`: Must be unique, non-empty string
+- `parent`: Must reference existing group UUID (if not null)
+
+### Dex Configuration Validation
+
+- `issuer`: Must be valid HTTPS URL (or HTTP for internal)
+- `staticClients[].id`: Must be unique across all clients
+- `staticClients[].redirectURIs`: Must be valid HTTPS URLs
+- `connectors[].config.issuer`: Must be valid URL
+- `connectors[].config.clientID`: Required, non-empty string
+- `connectors[].config.clientSecret`: Required, non-empty string
+
+### OIDC Token Claims Validation
+
+- `iss`: Must match Dex issuer URL
+- `aud`: Must match client ID
+- `exp`: Must be future timestamp
+- `iat`: Must be past timestamp
+- `email`: Must be valid email format
+- `groups`: Must be array of strings
+
+**Source**
+- `.kiro/specs/dex-authentication-platform/design.md`
+- `.kiro/specs/dex-authentication-platform/requirements.md`
+- `platform/auth/authentik/blueprints-configmap.yaml`
+- `platform/auth/dex/configmap.yaml`
+- `platform/integrations/argocd-rbac-policy.yaml`
+- `platform/integrations/tekton-rbac.yaml`
+- `platform/auth/secrets/README.md`
+
 **Source**
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`

@@ -486,26 +486,7 @@ This implementation plan follows a clean separation between three domains:
     - **Document home network access requirements**
     - _Requirements: 15.5_
 
-- [ ] 14. Create troubleshooting documentation
-  - Document common authentication issues
-  - **Document redirect URI mismatch issues (`.svc.cluster.local` vs external URLs)**
-  - **Document DNS resolution issues for home network**
-  - **Document TLS certificate issues**
-  - **Document Ingress controller issues**
-  - **Document ArgoCD sync issues**
-  - Document how to check Authentik logs
-  - Document how to check Dex logs
-  - Document how to verify OIDC configuration
-  - **Document how to verify OIDC discovery endpoints (200 response)**
-  - Document how to reset admin password if locked out
-  - Document how to check Configuration Sync Job status
-  - Document how to manually re-run Configuration Sync Job
-  - **Document how to verify Dex scaled from 0 to 1 replica**
-  - **Document how to retrieve secrets securely**
-  - **Document how to manually sync ArgoCD Applications**
-  - _Requirements: 15.5, 17.5_
-
-- [ ] 15. Final checkpoint - End-to-end validation
+- [x] 15. Final checkpoint - End-to-end validation
   - Review all manifests for consistency
   - **Verify all browser-facing URLs use external hostnames (not `.svc.cluster.local`)**
   - **Verify all Ingress resources are configured correctly**
@@ -520,7 +501,7 @@ This implementation plan follows a clean separation between three domains:
   - Ensure documentation is complete
   - Ask user if questions arise
 
-- [ ] 16. Deploy and test complete platform with GitOps
+- [x] 16. Deploy and test complete platform with GitOps
   - Create fresh Kind cluster for testing
   - **Deploy Ingress controller (nginx-ingress or traefik):**
     - For Kind: `kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml`
@@ -598,8 +579,8 @@ This implementation plan follows a clean separation between three domains:
   - Validate complete end-to-end authentication flow
   - _Requirements: All requirements (complete platform validation)_
 
-- [ ] 17. Update Archon documentation to reflect authentication system
-  - [ ] 17.1 Update .kiro/docs/overview.md
+- [x] 17. Update Archon documentation to reflect authentication system
+  - [x] 17.1 Update .kiro/docs/overview.md
     - Add authentication system to platform overview
     - Document Authentik as IdP with Dex as OIDC connector
     - Explain role-based access control (admin vs engineering)
@@ -608,7 +589,7 @@ This implementation plan follows a clean separation between three domains:
     - Add links to auth-specific documentation
     - _Requirements: 17.1_
   
-  - [ ] 17.2 Update .kiro/docs/architecture.md
+  - [x] 17.2 Update .kiro/docs/architecture.md
     - Add authentication system architecture section
     - Document component relationships (Authentik, Dex, PostgreSQL, services)
     - Add system diagram showing authentication flow
@@ -620,7 +601,7 @@ This implementation plan follows a clean separation between three domains:
     - **Source**: `platform/auth/`, `.kiro/specs/dex-authentication-platform/design.md`
     - _Requirements: 17.1_
   
-  - [ ] 17.3 Update .kiro/docs/operations.md
+  - [x] 17.3 Update .kiro/docs/operations.md
     - Add authentication system operations section
     - **Document minimal bootstrap process (cluster + ArgoCD + root app)**
     - **Document ArgoCD Application management**
@@ -635,7 +616,7 @@ This implementation plan follows a clean separation between three domains:
     - **Source**: `platform/auth/README.md`, `platform/auth/secrets/README.md`, `platform/bootstrap/bootstrap.sh`
     - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5_
   
-  - [ ] 17.4 Update .kiro/docs/api.md
+  - [x] 17.4 Update .kiro/docs/api.md
     - Document Authentik API endpoints used by Config Sync Job
     - Document Dex OIDC endpoints
     - Document ArgoCD OIDC configuration
@@ -643,7 +624,7 @@ This implementation plan follows a clean separation between three domains:
     - **Source**: `platform/auth/config-sync/`, `platform/integrations/`
     - _Requirements: 17.4_
   
-  - [ ] 17.5 Update .kiro/docs/data-models.md
+  - [x] 17.5 Update .kiro/docs/data-models.md
     - Add Authentik user and group schemas
     - Add OIDC token claim structure
     - Add Dex configuration schema
@@ -651,7 +632,7 @@ This implementation plan follows a clean separation between three domains:
     - **Source**: `.kiro/specs/dex-authentication-platform/design.md`
     - _Requirements: 17.1_
   
-  - [ ] 17.6 Update .kiro/docs/faq.md
+  - [x] 17.6 Update .kiro/docs/faq.md
     - Add authentication system FAQ section
     - Document common questions about user management
     - Document common OIDC issues and solutions
@@ -662,7 +643,7 @@ This implementation plan follows a clean separation between three domains:
     - **Source**: `platform/auth/README.md`, troubleshooting documentation
     - _Requirements: 17.5_
   
-  - [ ] 17.7 Verify Archon documentation consistency
+  - [x] 17.7 Verify Archon documentation consistency
     - Ensure terminology is consistent across all 6 files
     - Verify component names match across files
     - Verify all cross-references are accurate

@@ -4,7 +4,7 @@
 
 The Arbiter Pipeline Infrastructure is an ArgoCD + Tekton-based GitOps platform designed for homelab deployment. The system provides self-service repository onboarding with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through ArgoCD.
 
-The platform follows a **"Bootstrap Once, GitOps Forever"** pattern: a one-time bootstrap script sets up the cluster and installs core components, then ArgoCD takes over and manages all platform components declaratively from Git.
+The platform follows a **"Bootstrap Once, GitOps Forever"** pattern: a one-time bootstrap script sets up the cluster, generates all secrets, installs core components, and creates the Authentik API token for zero-touch convergence. Then ArgoCD takes over and manages all platform components declaratively from Git.
 
 ## High-Level Architecture
 
@@ -74,8 +74,298 @@ The platform is organized into four layers:
 
 1. **Bootstrap Layer**: One-time initialization script
 2. **GitOps Layer**: ArgoCD manages all platform components
-3. **Platform Services Layer**: Core services (Tekton, Onboarding Controller, Catalog)
+3. **Platform Services Layer**: Core services (Tekton, Onboarding Controller, Catalog, Authentication)
 4. **Tenant Layer**: User namespaces with EventListeners and Pipelines
+
+## Authentication System Architecture
+
+The authentication system provides centralized authentication and authorization for all platform services using Authentik as the Identity Provider (IdP) with Dex as an OIDC connector layer.
+
+### Authentication Components
+
+```mermaid
+graph TB
+    Users[Platform Users]
+    
+    subgraph Platform Services
+        ArgoCD[ArgoCD UI<br/>OIDC Client]
+        Tekton[Tekton Dashboard<br/>OIDC Client]
+    end
+    
+    subgraph auth-system namespace
+        subgraph Dex OIDC Connector Layer
+            Dex[Dex Server<br/>- OIDC Proxy/Connector<br/>- Token Translation<br/>- Service Integration]
+        end
+        
+        subgraph Authentik Identity Provider
+            Authentik[Authentik Server<br/>- User Management UI<br/>- Group Management<br/>- OIDC Provider<br/>- Blueprint Auto-Config]
+            
+            subgraph Identity Sources
+                Internal[Internal Users]
+                GitHub[GitHub OAuth]
+                LDAP[LDAP/SAML]
+            end
+            
+            PostgreSQL[(PostgreSQL<br/>User Data)]
+            Blueprints[Blueprints ConfigMap<br/>Declarative Config]
+        end
+        
+        ConfigSyncJob[Config Sync Job<br/>Orchestrates Authentik-Dex Integration]
+    end
+    
+    subgraph Kubernetes RBAC
+        RBAC[ClusterRoles<br/>ClusterRoleBindings<br/>Group-based Access]
+    end
+    
+    subgraph Ingress Layer
+        Ingress[Ingress Resources<br/>auth.home.local<br/>dex.home.local<br/>argocd.home.local<br/>tekton.home.local]
+    end
+    
+    Users -->|HTTPS| Ingress
+    Ingress -->|Routes| ArgoCD
+    Ingress -->|Routes| Tekton
+    Ingress -->|Routes| Authentik
+    Ingress -->|Routes| Dex
+    ArgoCD -->|OIDC Auth| Dex
+    Tekton -->|OIDC Auth| Dex
+    Dex -->|OIDC Connector| Authentik
+    Authentik --> Internal
+    Authentik --> GitHub
+    Authentik --> LDAP
+    Authentik --> PostgreSQL
+    Blueprints -.->|Auto-apply on startup| Authentik
+    ConfigSyncJob -.->|Updates OIDC provider| Authentik
+    ConfigSyncJob -.->|Scales deployment| Dex
+    ArgoCD -.->|Group Claims| RBAC
+    Tekton -.->|Group Claims| RBAC
+    
+    style auth-system fill:#fff4e1
+    style Ingress Layer fill:#e1f5ff
+```
+
+### Component Responsibilities
+
+**Authentik Server:**
+- Provides web UI for user and group management
+- Manages user authentication and sessions
+- Issues OIDC tokens for authenticated users
+- Integrates with external identity providers (GitHub, LDAP, SAML)
+- Stores user data in PostgreSQL database
+- Auto-applies Blueprint configurations on startup
+
+**Authentik Blueprints:**
+- Declarative YAML configuration for Authentik
+- Defines initial users, groups, OIDC providers, and applications
+- Mounted as Kubernetes ConfigMap
+- Auto-applied by Authentik on startup
+- Enables fully automated bootstrap without manual UI steps
+
+**PostgreSQL Database:**
+- Stores Authentik user accounts and groups
+- Stores authentication sessions and tokens
+- Deployed as StatefulSet with persistent storage
+
+**Dex OIDC Connector:**
+- Acts as OIDC proxy between Authentik and platform services
+- Translates Authentik OIDC tokens to service-specific tokens
+- Provides stable OIDC endpoint for platform services
+- Simplifies service integration (services only configure Dex)
+- Stores minimal state in Kubernetes resources (Secrets/ConfigMaps)
+
+**Config Sync Job:**
+- Kubernetes Job that orchestrates Authentik-Dex integration
+- Waits for Authentik to be ready (health check endpoint)
+- Reads Dex client secret from Kubernetes Secret
+- Updates Authentik OIDC provider with client secret via Authentik API
+- Verifies Authentik OIDC discovery endpoint
+- Scales Dex deployment from 0 to 1 replica
+- Verifies Dex OIDC discovery endpoint
+- Provides deterministic convergence without timing-based hacks
+
+**Ingress Resources:**
+- Expose Authentik, Dex, ArgoCD, and Tekton Dashboard to home network
+- Use real hostnames (e.g., `https://auth.home.local`, `https://dex.home.local`)
+- Enable browser-reachable URLs for OIDC redirect flows
+- Support TLS with self-signed certificates or Let's Encrypt
+
+### GitOps Ownership Boundaries
+
+The authentication system follows a clean separation between three domains:
+
+1. **Host Bootstrap (Out-of-Cluster):**
+   - Creates or selects Kubernetes cluster
+   - Generates and creates ALL secrets (PostgreSQL, Authentik, Dex)
+   - Installs ArgoCD (the only kubectl apply in bootstrap)
+   - Creates root ArgoCD Application pointing to Git
+   - **Exception: Waits for Authentik (deployed by ArgoCD) to create API token**
+   - Provides developer UX (printing access instructions)
+   - **Does NOT** deploy application workloads directly
+
+2. **GitOps (ArgoCD-Managed):**
+   - Owns ALL declarative infrastructure after bootstrap
+   - Manages auth-system components (PostgreSQL, Authentik, Dex, Ingress, Config Sync Job)
+   - Manages Tekton Pipelines, Triggers, and Dashboard
+   - Manages namespaces, RBAC policies, and service integrations
+   - Provides idempotent, drift-correcting, repeatable deployments
+
+3. **In-Cluster Jobs (Imperative API Configuration):**
+   - Config Sync Job orchestrates Authentik ↔ Dex integration
+   - Reads secrets from Kubernetes (never leaves cluster)
+   - Updates Authentik OIDC provider via API
+   - Scales Dex deployment after Authentik is configured
+   - **Only used for imperative mutation against non-Kubernetes APIs**
+
+**Key Principle:** Bootstrap gets you from zero → ArgoCD running. ArgoCD gets you from ArgoCD → complete platform. Jobs handle one-time API-driven configuration that can't be expressed as Kubernetes manifests.
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Service as ArgoCD/Tekton
+    participant Dex
+    participant Authentik
+    participant PG as PostgreSQL
+    
+    User->>Service: Access UI
+    Service->>Dex: Redirect to OIDC auth
+    Dex->>Authentik: Redirect to Authentik login
+    Authentik->>User: Show login page
+    User->>Authentik: Submit credentials
+    Authentik->>PG: Validate credentials
+    PG->>Authentik: User data + groups
+    Authentik->>Authentik: Generate OIDC token
+    Authentik->>Dex: Redirect with auth code
+    Dex->>Authentik: Exchange code for token
+    Authentik->>Dex: Return ID token + groups
+    Dex->>Dex: Generate service token
+    Dex->>Service: Redirect with auth code
+    Service->>Dex: Exchange code for token
+    Dex->>Service: Return ID token + groups
+    Service->>Service: Apply RBAC based on groups
+    Service->>User: Grant access with permissions
+```
+
+### Bootstrap and Configuration Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Bootstrap as Bootstrap Script
+    participant K8s as Kubernetes
+    participant ArgoCD
+    participant PG as PostgreSQL
+    participant Authentik
+    participant Job as Config Sync Job
+    participant Dex
+    
+    User->>Bootstrap: Run bootstrap.sh
+    Bootstrap->>K8s: Create cluster
+    Bootstrap->>K8s: Generate and create secrets
+    Note over Bootstrap,K8s: PostgreSQL, Authentik, Dex secrets
+    Bootstrap->>K8s: kubectl apply ArgoCD install
+    K8s->>ArgoCD: Start ArgoCD
+    Bootstrap->>K8s: kubectl apply platform-root.yaml
+    Note over ArgoCD: Root app points to Git repo
+    
+    ArgoCD->>K8s: Sync platform-auth Application
+    ArgoCD->>K8s: Deploy PostgreSQL StatefulSet
+    K8s->>PG: Start PostgreSQL
+    ArgoCD->>K8s: Create Blueprints ConfigMap
+    ArgoCD->>K8s: Deploy Authentik with Blueprints
+    K8s->>Authentik: Start Authentik Server
+    Authentik->>PG: Connect to database
+    Authentik->>K8s: Read Blueprints ConfigMap
+    Authentik->>Authentik: Auto-apply Blueprints
+    Note over Authentik: Creates admin user,<br/>groups, OIDC provider
+    
+    Bootstrap->>Authentik: Wait for health check (200)
+    Authentik->>Bootstrap: Ready
+    Bootstrap->>Authentik: Create API token via API
+    Authentik->>Bootstrap: Return API token
+    Bootstrap->>K8s: Store API token in Secret
+    
+    ArgoCD->>K8s: Deploy Dex with replicas=0
+    Note over Dex: Dex does NOT start yet
+    ArgoCD->>K8s: Deploy Ingress resources
+    ArgoCD->>K8s: Deploy Config Sync Job
+    K8s->>Job: Start Job pod
+    Job->>Authentik: Wait for health check (200)
+    Job->>K8s: Read Dex client secret
+    Job->>Authentik: Update OIDC provider with secret
+    Job->>Authentik: Verify OIDC discovery (200)
+    Job->>K8s: Scale Dex to replicas=1
+    K8s->>Dex: Start Dex
+    Job->>Dex: Wait for health check (200)
+    Job->>Dex: Verify OIDC discovery (200)
+    Job->>K8s: Job completes successfully
+    
+    Bootstrap->>User: Print access instructions
+    Note over User: Platform fully functional
+```
+
+### External URL Requirements
+
+**Critical OIDC Requirement:**
+Redirect URIs must be reachable by the user's browser, not just by pods. Internal Kubernetes DNS names like `*.svc.cluster.local` are NOT reachable from user browsers and will cause authentication failures.
+
+**Homelab Deployment Strategy:**
+
+This design targets homelab environments where services are accessed from the home network. The system uses real hostnames with Ingress resources:
+
+**Hostname Configuration:**
+- Authentik: `https://auth.home.local`
+- Dex: `https://dex.home.local`
+- ArgoCD: `https://argocd.home.local`
+- Tekton Dashboard: `https://tekton.home.local`
+
+**DNS Setup Options:**
+1. **Local DNS Server**: Configure router or Pi-hole to resolve `*.home.local` to Ingress IP
+2. **Hosts File**: Add entries to `/etc/hosts` on each device
+3. **mDNS/Avahi**: Use `.local` domain with mDNS for automatic discovery
+
+**URL Configuration Rules:**
+- **Issuer URLs**: Must use external hostname (e.g., `https://dex.home.local`)
+- **Redirect URIs**: Must use external hostname (e.g., `https://argocd.home.local/auth/callback`)
+- **Internal pod-to-pod communication**: Can use `*.svc.cluster.local` for token validation
+- **Browser-facing URLs**: Must NEVER use `*.svc.cluster.local`
+
+### Secret Management
+
+**Zero-Touch Bootstrap Philosophy:**
+
+Bootstrap generates ALL required secrets automatically and stores them in Kubernetes Secrets:
+
+1. **PostgreSQL Credentials**: Database password, postgres superuser password
+2. **Authentik Secrets**: `AUTHENTIK_SECRET_KEY`, admin password
+3. **Dex Client Secret**: Random 32-character string for OIDC client
+4. **Authentik API Token**: Created via Authentik API after Authentik is ready
+
+**Secret Output (Default Behavior):**
+
+Bootstrap NEVER prints secret values to stdout/logs by default. Instead, it prints commands to retrieve secrets:
+
+```bash
+✓ Generated PostgreSQL credentials
+✓ Generated Authentik secrets
+✓ Generated Dex client secret
+✓ Created Authentik API token
+✓ All secrets stored in Kubernetes
+
+To retrieve secrets (requires RBAC permissions):
+  kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+**Debug Mode (Optional `--show-secrets` Flag):**
+
+For local debugging, bootstrap accepts `--show-secrets` flag to display actual secret values with a warning.
+
+**Source**
+- `.kiro/specs/dex-authentication-platform/design.md`
+- `.kiro/specs/dex-authentication-platform/requirements.md`
+- `platform/auth/`
+- `platform/auth/config-sync/`
+- `platform/auth/ingress/`
 
 ## Components
 
@@ -688,8 +978,13 @@ Container images are versioned and immutable. Infrastructure changes are deploye
 **Source**
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`
+- `.kiro/specs/dex-authentication-platform/design.md`
+- `.kiro/specs/dex-authentication-platform/requirements.md`
 - `platform/bootstrap/bootstrap.sh`
 - `platform/argocd/apps/`
+- `platform/auth/`
+- `platform/auth/config-sync/`
+- `platform/auth/ingress/`
 - `platform/crds/repobinding-crd.yaml`
 - `platform/onboarding/controller/`
 - `platform/catalog/`

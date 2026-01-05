@@ -572,6 +572,486 @@ status:
 }
 ```
 
+## Authentication API
+
+The authentication system provides OIDC-based authentication for platform services through Authentik (IdP) and Dex (OIDC connector).
+
+### Authentik API
+
+Authentik provides a REST API for managing users, groups, and OIDC providers.
+
+#### Base URL
+
+**Internal (pod-to-pod)**: `http://authentik.auth-system.svc.cluster.local:9000`  
+**External (browser)**: `https://auth.home.local`
+
+#### Authentication
+
+All API requests require authentication via Bearer token:
+
+```
+Authorization: Bearer <api-token>
+```
+
+API tokens are created via Authentik UI or API and stored in Kubernetes Secrets.
+
+#### Core Endpoints
+
+**Health Check**
+
+```
+GET /api/v3/root/config/
+```
+
+Returns Authentik configuration and health status.
+
+**Response (200 OK)**:
+```json
+{
+  "branding_logo": "/static/dist/assets/icons/icon_left_brand.svg",
+  "branding_title": "authentik",
+  "ui_footer_links": [],
+  "ui_theme": "automatic",
+  "cache_timeout": 300,
+  "cache_timeout_flows": 300,
+  "cache_timeout_policies": 300,
+  "cache_timeout_reputation": 300
+}
+```
+
+**List Users**
+
+```
+GET /api/v3/core/users/
+```
+
+Returns list of all users.
+
+**Response (200 OK)**:
+```json
+{
+  "pagination": {
+    "next": 0,
+    "previous": 0,
+    "count": 2,
+    "current": 1,
+    "total_pages": 1,
+    "start_index": 1,
+    "end_index": 2
+  },
+  "results": [
+    {
+      "pk": 1,
+      "username": "admin",
+      "name": "Admin User",
+      "is_active": true,
+      "last_login": "2024-01-05T10:00:00Z",
+      "email": "admin@example.com",
+      "groups": ["admins"]
+    }
+  ]
+}
+```
+
+**List Groups**
+
+```
+GET /api/v3/core/groups/
+```
+
+Returns list of all groups.
+
+**Response (200 OK)**:
+```json
+{
+  "pagination": {
+    "next": 0,
+    "previous": 0,
+    "count": 2,
+    "current": 1,
+    "total_pages": 1,
+    "start_index": 1,
+    "end_index": 2
+  },
+  "results": [
+    {
+      "pk": "abc123",
+      "name": "admins",
+      "is_superuser": false,
+      "parent": null,
+      "users": [1],
+      "attributes": {}
+    },
+    {
+      "pk": "def456",
+      "name": "engineering",
+      "is_superuser": false,
+      "parent": null,
+      "users": [],
+      "attributes": {}
+    }
+  ]
+}
+```
+
+**List OAuth2 Providers**
+
+```
+GET /api/v3/providers/oauth2/
+```
+
+Returns list of all OAuth2/OIDC providers.
+
+**Response (200 OK)**:
+```json
+{
+  "pagination": {
+    "next": 0,
+    "previous": 0,
+    "count": 1,
+    "current": 1,
+    "total_pages": 1,
+    "start_index": 1,
+    "end_index": 1
+  },
+  "results": [
+    {
+      "pk": 1,
+      "name": "Dex OIDC Provider",
+      "authorization_flow": "abc123",
+      "client_type": "confidential",
+      "client_id": "dex-client",
+      "client_secret": "***",
+      "redirect_uris": "https://dex.home.local/callback",
+      "signing_key": "def456"
+    }
+  ]
+}
+```
+
+**Update OAuth2 Provider**
+
+```
+PATCH /api/v3/providers/oauth2/{id}/
+Content-Type: application/json
+```
+
+**Request Body**:
+```json
+{
+  "client_secret": "new-secret-value"
+}
+```
+
+**Response (200 OK)**:
+```json
+{
+  "pk": 1,
+  "name": "Dex OIDC Provider",
+  "authorization_flow": "abc123",
+  "client_type": "confidential",
+  "client_id": "dex-client",
+  "client_secret": "***",
+  "redirect_uris": "https://dex.home.local/callback",
+  "signing_key": "def456"
+}
+```
+
+#### OIDC Discovery Endpoint
+
+**Authentik OIDC Discovery**
+
+```
+GET /application/o/dex/.well-known/openid-configuration
+```
+
+Returns OIDC discovery metadata for the Dex application.
+
+**Response (200 OK)**:
+```json
+{
+  "issuer": "https://auth.home.local/application/o/dex/",
+  "authorization_endpoint": "https://auth.home.local/application/o/authorize/",
+  "token_endpoint": "https://auth.home.local/application/o/token/",
+  "userinfo_endpoint": "https://auth.home.local/application/o/userinfo/",
+  "end_session_endpoint": "https://auth.home.local/application/o/dex/end-session/",
+  "jwks_uri": "https://auth.home.local/application/o/dex/jwks/",
+  "response_types_supported": ["code", "id_token", "id_token token", "code token"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["RS256"],
+  "scopes_supported": ["openid", "profile", "email", "groups"],
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "claims_supported": ["sub", "iss", "aud", "exp", "iat", "name", "email", "groups"]
+}
+```
+
+### Dex API
+
+Dex provides OIDC connector functionality between Authentik and platform services.
+
+#### Base URL
+
+**Internal (pod-to-pod)**: `http://dex.auth-system.svc.cluster.local:5556`  
+**External (browser)**: `https://dex.home.local`
+
+#### Health Check
+
+```
+GET /healthz
+```
+
+Returns Dex health status.
+
+**Response (200 OK)**:
+```
+OK
+```
+
+#### OIDC Discovery Endpoint
+
+```
+GET /.well-known/openid-configuration
+```
+
+Returns OIDC discovery metadata for Dex.
+
+**Response (200 OK)**:
+```json
+{
+  "issuer": "https://dex.home.local",
+  "authorization_endpoint": "https://dex.home.local/auth",
+  "token_endpoint": "https://dex.home.local/token",
+  "userinfo_endpoint": "https://dex.home.local/userinfo",
+  "jwks_uri": "https://dex.home.local/keys",
+  "response_types_supported": ["code"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["RS256"],
+  "scopes_supported": ["openid", "profile", "email", "groups", "offline_access"],
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "claims_supported": ["sub", "iss", "aud", "exp", "iat", "name", "email", "groups"]
+}
+```
+
+#### Authorization Endpoint
+
+```
+GET /auth?client_id=<client_id>&redirect_uri=<redirect_uri>&response_type=code&scope=<scopes>&state=<state>
+```
+
+Initiates OIDC authorization flow. Redirects to Authentik for authentication.
+
+**Query Parameters**:
+- `client_id`: Client ID (e.g., "argocd", "tekton-dashboard")
+- `redirect_uri`: Callback URL (e.g., "https://argocd.home.local/auth/callback")
+- `response_type`: Must be "code"
+- `scope`: Space-separated scopes (e.g., "openid profile email groups")
+- `state`: Random state value for CSRF protection
+
+**Response**: HTTP 302 redirect to Authentik login page
+
+#### Token Endpoint
+
+```
+POST /token
+Content-Type: application/x-www-form-urlencoded
+```
+
+Exchanges authorization code for access token and ID token.
+
+**Request Body**:
+```
+grant_type=authorization_code
+&code=<authorization_code>
+&redirect_uri=<redirect_uri>
+&client_id=<client_id>
+&client_secret=<client_secret>
+```
+
+**Response (200 OK)**:
+```json
+{
+  "access_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEyMyJ9...",
+  "token_type": "Bearer",
+  "expires_in": 86400,
+  "refresh_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjQ1NiJ9...",
+  "id_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6Ijc4OSJ9..."
+}
+```
+
+#### UserInfo Endpoint
+
+```
+GET /userinfo
+Authorization: Bearer <access_token>
+```
+
+Returns user information for the authenticated user.
+
+**Response (200 OK)**:
+```json
+{
+  "sub": "abc123",
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "groups": ["admins"]
+}
+```
+
+### ArgoCD OIDC Configuration
+
+ArgoCD is configured to use Dex as its OIDC provider.
+
+#### OIDC Settings
+
+**Issuer**: `https://dex.home.local`  
+**Client ID**: `argocd`  
+**Client Secret**: Stored in `argocd-secret` Secret  
+**Redirect URI**: `https://argocd.home.local/auth/callback`  
+**Scopes**: `openid`, `profile`, `email`, `groups`
+
+#### Group Mapping
+
+ArgoCD maps OIDC groups to ArgoCD roles:
+
+- `admins` group → `role:admin` (full access)
+- `engineering` group → `role:readonly` (read-only access)
+
+#### Login Flow
+
+1. User accesses ArgoCD UI at `https://argocd.home.local`
+2. User clicks "Login via Dex"
+3. ArgoCD redirects to Dex authorization endpoint
+4. Dex redirects to Authentik login page
+5. User logs in to Authentik
+6. Authentik redirects back to Dex with authorization code
+7. Dex exchanges code for tokens
+8. Dex redirects back to ArgoCD with authorization code
+9. ArgoCD exchanges code for tokens
+10. ArgoCD validates ID token and extracts user info and groups
+11. User is logged in to ArgoCD with appropriate role
+
+### Tekton Dashboard OIDC Configuration
+
+Tekton Dashboard is configured to use Dex as its OIDC provider.
+
+#### OIDC Settings
+
+**Issuer**: `https://dex.home.local`  
+**Client ID**: `tekton-dashboard`  
+**Client Secret**: Stored in `tekton-dashboard-oidc` Secret  
+**Redirect URI**: `https://tekton.home.local/auth/callback`  
+**Scopes**: `openid`, `profile`, `email`, `groups`
+
+#### Group Mapping
+
+Tekton Dashboard uses Kubernetes RBAC for authorization:
+
+- `admins` group → ClusterRole with full access
+- `engineering` group → ClusterRole with read-only access
+
+#### Login Flow
+
+1. User accesses Tekton Dashboard at `https://tekton.home.local`
+2. Tekton Dashboard redirects to Dex authorization endpoint
+3. Dex redirects to Authentik login page (if not already logged in)
+4. User logs in to Authentik
+5. Authentik redirects back to Dex with authorization code
+6. Dex exchanges code for tokens
+7. Dex redirects back to Tekton Dashboard with authorization code
+8. Tekton Dashboard exchanges code for tokens
+9. Tekton Dashboard validates ID token and extracts user info and groups
+10. User is logged in to Tekton Dashboard with appropriate permissions
+
+### OIDC Token Claims
+
+ID tokens issued by Dex contain the following claims:
+
+```json
+{
+  "iss": "https://dex.home.local",
+  "sub": "abc123",
+  "aud": "argocd",
+  "exp": 1704542400,
+  "iat": 1704456000,
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "groups": ["admins"],
+  "email_verified": true
+}
+```
+
+**Claim Descriptions**:
+
+| Claim | Type | Description |
+|-------|------|-------------|
+| `iss` | string | Issuer (Dex URL) |
+| `sub` | string | Subject (unique user ID) |
+| `aud` | string | Audience (client ID) |
+| `exp` | number | Expiration time (Unix timestamp) |
+| `iat` | number | Issued at time (Unix timestamp) |
+| `name` | string | User's display name |
+| `email` | string | User's email address |
+| `groups` | array | User's group memberships |
+| `email_verified` | boolean | Whether email is verified |
+
+### Authentication Error Responses
+
+#### Authentik API Errors
+
+**Unauthorized (401)**:
+```json
+{
+  "detail": "Authentication credentials were not provided."
+}
+```
+
+**Forbidden (403)**:
+```json
+{
+  "detail": "You do not have permission to perform this action."
+}
+```
+
+**Not Found (404)**:
+```json
+{
+  "detail": "Not found."
+}
+```
+
+#### Dex OIDC Errors
+
+**Invalid Client (401)**:
+```json
+{
+  "error": "invalid_client",
+  "error_description": "Invalid client credentials."
+}
+```
+
+**Invalid Grant (400)**:
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "The provided authorization grant is invalid, expired, or revoked."
+}
+```
+
+**Invalid Scope (400)**:
+```json
+{
+  "error": "invalid_scope",
+  "error_description": "The requested scope is invalid, unknown, or malformed."
+}
+```
+
+**Source**
+- `platform/auth/authentik/README.md`
+- `platform/auth/dex/README.md`
+- `platform/integrations/argocd-oidc-config.yaml`
+- `platform/integrations/tekton-dashboard-oidc.yaml`
+- `platform/auth/dex/configmap.yaml`
+
 **Source**
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`
