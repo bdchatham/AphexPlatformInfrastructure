@@ -5,6 +5,9 @@ metadata:
   namespace: auth-system
   labels:
     app: dex
+  annotations:
+    argocd.argoproj.io/sync-options: "Prune=false"
+    argocd.argoproj.io/compare-options: "IgnoreExtraneous"
 spec:
   replicas: 0
   selector:
