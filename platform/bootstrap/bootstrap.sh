@@ -179,6 +179,7 @@ generate_secrets() {
     echo "PostgreSQL superuser password: $POSTGRES_SUPERUSER_PASSWORD"
     echo "Authentik secret key: $AUTHENTIK_SECRET_KEY"
     echo "Authentik admin password: $AUTHENTIK_ADMIN_PASSWORD"
+    echo "Authentik bootstrap token: $AUTHENTIK_BOOTSTRAP_TOKEN"
     echo "Dex client secret (for Authentik): $DEX_CLIENT_SECRET"
     echo "ArgoCD OIDC client secret: $ARGOCD_CLIENT_SECRET"
     echo "Tekton Dashboard OIDC client secret: $TEKTON_CLIENT_SECRET"
@@ -386,7 +387,6 @@ create_authentik_api_token() {
   
   # Note: We use kubectl exec to curl from inside the cluster because bootstrap runs
   # on the host machine which cannot resolve *.svc.cluster.local DNS names.
-  # This is Option B: run curl inside the cluster via kubectl exec.
   
   # Authenticate with admin credentials to get session token
   local auth_response
@@ -451,6 +451,34 @@ create_authentik_api_token() {
     echo "Authentik API token: $api_token"
     echo ""
   fi
+}
+
+create_config_sync_job() {
+  log_info "Creating Config Sync Job..."
+  
+  # Check if Job already exists
+  if kubectl get job auth-config-sync -n "$AUTH_NAMESPACE" &> /dev/null; then
+    log_info "Config Sync Job already exists"
+    log_info "Checking Job status..."
+    
+    job_status=$(kubectl get job auth-config-sync -n "$AUTH_NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || echo "")
+    
+    if [[ "$job_status" == "True" ]]; then
+      log_success "Config Sync Job already completed successfully"
+      return
+    else
+      log_warning "Config Sync Job exists but has not completed"
+      log_info "Deleting existing Job to retry..."
+      kubectl delete job auth-config-sync -n "$AUTH_NAMESPACE"
+    fi
+  fi
+  
+  # Apply the Job manifest
+  kubectl apply -f platform/bootstrap/auth-config-sync-job.yaml
+  
+  log_success "Created Config Sync Job"
+  log_info "Job will orchestrate Authentik-Dex configuration automatically"
+  log_info "Monitor with: kubectl logs -n auth-system job/auth-config-sync -f"
 }
 
 print_access_instructions() {
@@ -531,6 +559,7 @@ main() {
   create_root_application
   wait_for_authentik
   create_authentik_api_token
+  create_config_sync_job
   print_access_instructions
 }
 
