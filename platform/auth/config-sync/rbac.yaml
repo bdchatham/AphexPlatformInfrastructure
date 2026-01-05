@@ -1,0 +1,41 @@
+---
+# Role with minimal permissions: only scale Deployments in auth-system namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: auth-config-sync
+  namespace: auth-system
+  labels:
+    app: auth-config-sync
+    component: configuration
+rules:
+  # Permission to scale the Dex deployment
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    resourceNames: ["dex"]
+    verbs: ["get", "patch", "update"]
+  
+  # Permission to get deployment status (for checking current replicas)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["dex"]
+    verbs: ["get"]
+
+---
+# RoleBinding to bind the Role to the ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: auth-config-sync
+  namespace: auth-system
+  labels:
+    app: auth-config-sync
+    component: configuration
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: auth-config-sync
+subjects:
+  - kind: ServiceAccount
+    name: auth-config-sync
+    namespace: auth-system

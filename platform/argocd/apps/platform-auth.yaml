@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-catalog
+  name: platform-auth
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "20"
+    argocd.argoproj.io/sync-wave: "10"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -12,10 +12,10 @@ spec:
   source:
     repoURL: https://github.com/brandon-schabel/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
-    path: platform/catalog
+    path: platform/auth
   destination:
     server: https://kubernetes.default.svc
-    namespace: platform-system
+    namespace: auth-system
   syncPolicy:
     automated:
       prune: true

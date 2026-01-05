@@ -10,8 +10,8 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
-    targetRevision: mainline
+    repoURL: https://github.com/brandon-schabel/ArbiterPipelineInfrastructure.git
+    targetRevision: HEAD
     path: platform/tekton
   destination:
     server: https://kubernetes.default.svc

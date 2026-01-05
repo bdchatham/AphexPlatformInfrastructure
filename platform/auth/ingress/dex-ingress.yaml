@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dex
+  namespace: auth-system
+  annotations:
+    # Use cert-manager to generate TLS certificates
+    # For self-signed certificates (homelab):
+    cert-manager.io/cluster-issuer: "selfsigned-issuer"
+    # For Let's Encrypt with DNS-01 challenge (requires DNS provider API):
+    # cert-manager.io/cluster-issuer: "letsencrypt-dns"
+    
+    # Optional: Additional annotations for specific ingress controllers
+    # For nginx-ingress:
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    
+    # For traefik:
+    # traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  # Set the ingress controller class
+  # Common options: nginx, traefik
+  # Adjust based on your ingress controller deployment
+  ingressClassName: nginx
+  
+  tls:
+    - hosts:
+        - dex.home.local
+      # Secret name where cert-manager will store the TLS certificate
+      secretName: dex-tls
+  
+  rules:
+    - host: dex.home.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dex
+                port:
+                  number: 5556

@@ -1,0 +1,692 @@
+# Implementation Plan: Dex Authentication Platform
+
+## Overview
+
+This implementation plan follows a clean separation between three domains:
+
+1. **Host Bootstrap (Out-of-Cluster):** Minimal script that creates cluster, installs ArgoCD, and creates root Application
+2. **GitOps (ArgoCD-Managed):** ALL declarative infrastructure (Tekton, namespaces, auth-system components)
+3. **In-Cluster Jobs:** ONLY the Config Sync Job for imperative Authentik API configuration
+
+**Key Design Decisions:**
+- Bootstrap script is minimal: cluster → ArgoCD → root app → done
+- **Bootstrap Exception:** Bootstrap waits for Authentik (deployed by ArgoCD) to create API token
+  - This is the ONLY bootstrap → application interaction
+  - Explicitly documented as an exception to enable zero-touch convergence
+  - Without this, manual UI steps would be required
+- ArgoCD owns all application manifests (no kubectl apply in bootstrap for apps)
+- Config Sync Job is the only imperative component (deployed BY ArgoCD, runs as Job)
+- Services exposed via Ingress with real hostnames for home network access
+- External URLs (e.g., `https://dex.home.local`) used for all browser-facing configurations
+- Dex starts with replicas=0 to avoid CrashLoopBackOff, scaled by Job after Authentik is ready
+- Bootstrap never prints secrets by default (optional `--show-secrets` flag)
+- GHCR image building removed from bootstrap (belongs in CI/dev workflow)
+- **Dex RBAC permissions allow write access to Secrets/ConfigMaps in auth-system (required for Kubernetes storage backend)**
+- **Authentik API token is scoped to OAuth2 provider update ONLY (minimal permissions)**
+
+## Tasks
+
+- [x] 1. Create ArgoCD Application structure for auth system
+  - Create platform-auth.yaml Application manifest:
+    - `apiVersion: argoproj.io/v1alpha1`
+    - `kind: Application`
+    - `metadata.name: platform-auth`
+    - `metadata.namespace: argocd`
+  - Configure source repository and path (platform/auth/)
+  - Configure destination namespace (auth-system)
+  - Configure sync policy (automated with prune and self-heal):
+    - `automated.prune: true` (removes resources deleted from Git)
+    - `automated.selfHeal: true` (corrects manual changes)
+    - `syncOptions: ["CreateNamespace=true"]` (creates auth-system namespace)
+  - Update platform-root.yaml to include platform-auth
+  - **ArgoCD will deploy all auth-system components, not bootstrap script**
+  - **Rationale: GitOps-first - all declarative infrastructure managed by ArgoCD**
+  - **Bootstrap only creates ArgoCD and root Application, then ArgoCD takes over**
+  - _Requirements: 8.1, 8.2, 8.5_
+
+- [x] 2. Set up PostgreSQL database for Authentik (GitOps-managed)
+  - Create PostgreSQL StatefulSet manifest with persistent storage:
+    - Image: `postgres:15-alpine`
+    - Replicas: 1 (sufficient for homelab)
+    - Resource requests: `250m CPU, 256Mi memory`
+    - Resource limits: `1000m CPU, 512Mi memory`
+    - Health checks: `pg_isready` command
+  - Create PostgreSQL Service for cluster-internal access:
+    - Type: ClusterIP
+    - Port: 5432
+    - DNS: `postgresql.auth-system.svc.cluster.local`
+  - Create PersistentVolumeClaim for database storage (10Gi)
+  - Create example secret template for PostgreSQL credentials:
+    - `postgresql-password` (for authentik user)
+    - `postgresql-postgres-password` (for postgres superuser)
+    - **Template only - actual secrets created by bootstrap**
+  - **Place in platform/auth/postgresql/ (ArgoCD will apply)**
+  - _Requirements: 1.2, 14.1, 14.2, 14.4_
+
+- [x] 3. Create Authentik Blueprints for automated configuration (GitOps-managed)
+  - Create Blueprints ConfigMap with initial setup configuration
+  - **Define admin user in blueprint:**
+    - `username: admin`
+    - `name: Platform Administrator`
+    - `email: admin@platform.local`
+    - `is_active: true`
+    - Assign to admins group
+  - **Define admin and engineering groups in blueprint:**
+    - `admins` group: `is_superuser: true`
+    - `engineering` group: `is_superuser: false`
+  - **Define OIDC provider for Dex in blueprint (structure only, no client secret):**
+    - `name: "Dex OIDC Provider"`
+    - `client_id: "dex-client"`
+    - `client_type: confidential`
+    - `redirect_uris: "https://dex.home.local/callback"`
+    - **Do NOT include client_secret (set by Config Sync Job)**
+  - **Define platform services application in blueprint:**
+    - `slug: platform-services`
+    - `name: Platform Services`
+    - Link to Dex OIDC provider
+  - **Use external hostname in redirect_uris: `https://dex.home.local/callback`**
+  - **Mount blueprints at `/blueprints/custom/` in Authentik pods**
+  - **Place in platform/auth/authentik/ (ArgoCD will apply)**
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [x] 4. Deploy Authentik server and worker (GitOps-managed)
+  - [x] 4.1 Create Authentik server deployment manifest
+    - Image: `ghcr.io/goauthentik/server:2024.2.2`
+    - Replicas: 1 (can scale for production)
+    - Resource requests: `500m CPU, 512Mi memory`
+    - Resource limits: `2000m CPU, 2Gi memory`
+    - Configure environment variables for PostgreSQL connection:
+      - `AUTHENTIK_POSTGRESQL__HOST: postgresql.auth-system.svc.cluster.local`
+      - `AUTHENTIK_POSTGRESQL__NAME: authentik`
+      - `AUTHENTIK_POSTGRESQL__USER: authentik`
+      - `AUTHENTIK_POSTGRESQL__PASSWORD` (from Secret)
+    - Configure environment variable for blueprints:
+      - `AUTHENTIK_BLUEPRINTS__ENABLED: "true"`
+    - Mount blueprints ConfigMap as volume at `/blueprints/custom/`
+    - Configure health checks (liveness and readiness probes):
+      - `HTTP GET /api/v3/root/config/` on port 9000
+    - **Place in platform/auth/authentik/ (ArgoCD will apply)**
+    - _Requirements: 1.1, 1.3, 1.4_
+  
+  - [x] 4.2 Create Authentik worker deployment manifest
+    - Same image as server: `ghcr.io/goauthentik/server:2024.2.2`
+    - Set worker-specific command: `worker`
+    - Configure same environment as server
+    - Resource requests: `250m CPU, 256Mi memory`
+    - Resource limits: `1000m CPU, 512Mi memory`
+    - **Place in platform/auth/authentik/ (ArgoCD will apply)**
+    - _Requirements: 1.1_
+  
+  - [x] 4.3 Create Authentik Service
+    - Type: ClusterIP
+    - Expose port 9000 for HTTP
+    - DNS: `authentik.auth-system.svc.cluster.local`
+    - **Place in platform/auth/authentik/ (ArgoCD will apply)**
+    - _Requirements: 1.5, 12.1_
+  
+  - [x] 4.4 Create example secret template for Authentik
+    - Template for AUTHENTIK_SECRET_KEY (50-character random string)
+    - Template for admin password (32-character random string)
+    - Document secret generation in README:
+      - `openssl rand -base64 50` for secret key
+      - `openssl rand -base64 32` for admin password
+    - **Secrets created out-of-band by bootstrap, not by ArgoCD**
+    - **Place template in platform/auth/authentik/secret.yaml.example**
+    - _Requirements: 11.2, 11.4_
+
+- [x] 5. Configure Dex OIDC connector (GitOps-managed)
+  - [x] 5.1 Create Dex ConfigMap with Authentik connector
+    - **Configure Dex issuer URL with external hostname: `https://dex.home.local`**
+    - **CRITICAL: Issuer must be browser-reachable, NOT `*.svc.cluster.local`**
+    - Configure Kubernetes storage backend:
+      - `type: kubernetes`
+      - `config.inCluster: true`
+    - **Configure Authentik OIDC connector with external issuer: `https://auth.home.local/application/o/dex/`**
+    - **Configure Authentik connector redirectURI: `https://dex.home.local/callback`**
+    - **Configure static clients with external redirect URIs:**
+      - ArgoCD: `id: argocd`, `redirectURIs: ["https://argocd.home.local/auth/callback"]`
+      - Tekton: `id: tekton-dashboard`, `redirectURIs: ["https://tekton.home.local/auth/callback"]`
+    - Configure token expiry settings:
+      - `signingKeys: "6h"`
+      - `idTokens: "24h"`
+      - `refreshTokens.validIfNotUsedFor: "2160h"` (90 days)
+      - `refreshTokens.absoluteLifetime: "3960h"` (165 days)
+    - **Configure connector scopes: `[openid, profile, email, groups]`**
+    - **Configure claim mapping: `groups: groups`**
+    - **Remove any internal/localhost URLs from final config**
+    - **Place in platform/auth/dex/ (ArgoCD will apply)**
+    - _Requirements: 2.2, 2.3_
+  
+  - [x] 5.2 Create Dex deployment manifest
+    - **Set initial replicas to 0 (Job will scale to 1 after Authentik is ready)**
+    - **This prevents CrashLoopBackOff while waiting for Authentik configuration**
+    - Configure health checks:
+      - Liveness: `HTTP GET /healthz` on port 5556
+      - Readiness: `HTTP GET /healthz` on port 5556
+    - Set resource requests and limits:
+      - Requests: `100m CPU, 128Mi memory`
+      - Limits: `500m CPU, 256Mi memory`
+    - Mount Dex ConfigMap at `/etc/dex/config.yaml`
+    - **Use image: `ghcr.io/dexidp/dex:v2.37.0`**
+    - **Place in platform/auth/dex/ (ArgoCD will apply)**
+    - _Requirements: 2.1, 2.4_
+  
+  - [x] 5.3 Create Dex Service
+    - Expose port 5556
+    - Configure ClusterIP service type
+    - **Place in platform/auth/dex/ (ArgoCD will apply)**
+    - _Requirements: 2.5, 12.2_
+  
+  - [x] 5.4 Create Dex ServiceAccount and RBAC
+    - Create ServiceAccount for Dex in auth-system namespace
+    - **Create Role (not ClusterRole) with minimal permissions for Kubernetes storage backend:**
+      - `apiGroups: [""]`
+      - `resources: ["secrets", "configmaps"]`
+      - `verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]`
+      - **Scoped to auth-system namespace only**
+    - Create RoleBinding (not ClusterRoleBinding) in auth-system namespace
+    - **Rationale: Dex uses Kubernetes storage backend to persist OIDC state (auth codes, refresh tokens)**
+    - **Needs write access to create/update Secrets for session state**
+    - **Still minimal: namespace-scoped, no cluster-wide access**
+    - **Place in platform/auth/dex/ (ArgoCD will apply)**
+    - _Requirements: 2.3_
+
+- [x] 6. Create Ingress resources for home network access (GitOps-managed)
+  - [x] 6.1 Create Authentik Ingress manifest
+    - Configure hostname: `auth.home.local` (or user's chosen domain)
+    - Configure TLS with cert-manager annotation:
+      - `cert-manager.io/cluster-issuer: "selfsigned-issuer"` (or `letsencrypt-dns`)
+    - Configure backend service: `authentik:9000`
+    - Set ingressClassName: `nginx` (or `traefik`)
+    - **Rationale: Authentik must be browser-accessible for login UI**
+    - **Place in platform/auth/ingress/ (ArgoCD will apply)**
+    - _Requirements: 12.4_
+  
+  - [x] 6.2 Create Dex Ingress manifest
+    - Configure hostname: `dex.home.local` (or user's chosen domain)
+    - Configure TLS with cert-manager annotation
+    - Configure backend service: `dex:5556`
+    - Set ingressClassName: `nginx` (or `traefik`)
+    - **Rationale: Dex callback URL must be browser-reachable for OIDC flow**
+    - **Place in platform/auth/ingress/ (ArgoCD will apply)**
+    - _Requirements: 12.4_
+  
+  - [x] 6.3 Create ArgoCD Ingress manifest
+    - Configure hostname: `argocd.home.local` (or user's chosen domain)
+    - Configure TLS with cert-manager annotation
+    - Configure backend service: `argocd-server:443`
+    - Set ingressClassName: `nginx` (or `traefik`)
+    - **Add annotation for SSL passthrough if using nginx:**
+      - `nginx.ingress.kubernetes.io/ssl-passthrough: "true"`
+    - **Place in platform/auth/ingress/ (ArgoCD will apply)**
+    - _Requirements: 12.4_
+  
+  - [x] 6.4 Create Tekton Dashboard Ingress manifest
+    - Configure hostname: `tekton.home.local` (or user's chosen domain)
+    - Configure TLS with cert-manager annotation
+    - Configure backend service: `tekton-dashboard:9097`
+    - Set ingressClassName: `nginx` (or `traefik`)
+    - **Place in platform/auth/ingress/ (ArgoCD will apply)**
+    - _Requirements: 12.4_
+  
+  - [x] 6.5 Create Ingress documentation
+    - Document DNS configuration options (router/Pi-hole, hosts file, mDNS)
+    - Document TLS certificate options (self-signed vs Let's Encrypt)
+    - Provide example `/etc/hosts` entries:
+      ```
+      192.168.1.100 auth.home.local
+      192.168.1.100 dex.home.local
+      192.168.1.100 argocd.home.local
+      192.168.1.100 tekton.home.local
+      ```
+    - Document Ingress controller requirements:
+      - Must be deployed before auth system
+      - Must have LoadBalancer or NodePort accessible from home network
+    - Document how to find Ingress controller IP:
+      - `kubectl get svc -n ingress-nginx` (or appropriate namespace)
+    - **Place in platform/auth/ingress/README.md**
+    - _Requirements: 12.4, 17.5_
+
+- [x] 7. Create Configuration Sync Job for Authentik-Dex orchestration (GitOps-managed)
+  - [x] 7.1 Create Job sync script
+    - **Use `bitnami/kubectl:latest` image (includes kubectl, curl, jq, and sh)**
+    - Write bash script to wait for Authentik health check endpoint (200)
+    - Add logic to read Dex client secret from Kubernetes Secret
+    - Add logic to read Authentik API token from Secret (not admin password)
+    - **Add deterministic provider lookup logic:**
+      - Query `/api/v3/providers/oauth2/` endpoint
+      - Filter by: `name == "Dex OIDC Provider"` AND `client_id == "dex-client"` AND `redirect_uris` contains `https://dex.home.local/callback`
+      - Fail with explicit error if provider not found (0 matches)
+      - Fail with explicit error if multiple providers match (>1 matches)
+      - Only proceed if exactly 1 provider matches
+    - Add logic to update OIDC provider with client secret via PATCH
+    - **Add logic to verify Authentik OIDC discovery endpoint (200)**
+    - **Add logic to scale Dex deployment from 0 to 1 replica**
+    - Add logic to wait for Dex health check endpoint (200)
+    - **Add logic to verify Dex OIDC discovery endpoint (200)**
+    - Make script idempotent and safe to re-run
+    - **Place script in ConfigMap in platform/auth/config-sync/ (ArgoCD will apply)**
+    - _Requirements: 16.1, 16.2, 16.3, 16.4, 16.5_
+  
+  - [x] 7.2 Create Job ServiceAccount and RBAC
+    - Create ServiceAccount for config-sync Job
+    - **Create Role (not ClusterRole) with ONLY permissions to scale Deployments in auth-system:**
+      - `apiGroups: ["apps"]`
+      - `resources: ["deployments/scale"]`
+      - `resourceNames: ["dex"]`
+      - `verbs: ["get", "patch", "update"]`
+    - **No kubectl get secret permissions (secrets mounted via projected volume)**
+    - Create RoleBinding (not ClusterRoleBinding) in auth-system namespace
+    - **Minimal permissions: Job only scales Dex, reads nothing else**
+    - **Place in platform/auth/config-sync/ (ArgoCD will apply)**
+    - _Requirements: 16.1, 16.2, 16.4_
+  
+  - [x] 7.3 Create Job manifest
+    - **Configure Job with bitnami/kubectl:latest image**
+    - **Mount secrets via projected volume (NOT environment variables):**
+      - `dex-secrets` → `/secrets/dex-client-secret`
+      - `authentik-api-token` → `/secrets/authentik-token`
+    - Mount script ConfigMap at `/scripts/sync.sh`
+    - Configure ServiceAccount: `auth-config-sync`
+    - Set RestartPolicy to OnFailure
+    - Set BackoffLimit to 3 (allows retries on transient failures)
+    - **Place in platform/auth/config-sync/ (ArgoCD will apply)**
+    - _Requirements: 16.1, 16.5_
+  
+  - [x] 7.4 Create platform/auth/config-sync/README.md
+    - Document Config Sync Job purpose and workflow
+    - Document deterministic convergence approach (no timing hacks)
+    - **Document that Authentik API token is scoped to OAuth2 provider update ONLY**
+    - Document how to manually trigger Job
+    - Document how to check Job status and logs
+    - Document troubleshooting steps
+    - Document idempotency guarantees
+    - _Requirements: 16.1, 17.5_
+
+- [x] 8. Create ArgoCD OIDC integration (GitOps-managed)
+  - [x] 8.1 Create ArgoCD OIDC ConfigMap patch
+    - **Configure ArgoCD URL with external hostname: `https://argocd.home.local`**
+    - **Configure OIDC issuer with external hostname: `https://dex.home.local`**
+    - Configure OIDC client ID: `argocd`
+    - Configure OIDC client secret reference: `$oidc.dex.clientSecret`
+    - Configure requested scopes: `[openid, profile, email, groups]`
+    - **Rationale: ArgoCD needs groups claim for RBAC policy enforcement**
+    - **Place in platform/integrations/ (ArgoCD will apply)**
+    - _Requirements: 6.1, 6.5_
+  
+  - [x] 8.2 Create ArgoCD RBAC policy ConfigMap
+    - Define admin group with full access:
+      - `g, admins, role:admin`
+    - Define engineering group with read-only access:
+      - `g, engineering, role:readonly`
+    - Configure default policy: `role:readonly`
+    - Define readonly role permissions:
+      - `p, role:readonly, applications, get, */*, allow`
+      - `p, role:readonly, applications, list, */*, allow`
+      - `p, role:readonly, repositories, get, *, allow`
+      - `p, role:readonly, repositories, list, *, allow`
+      - `p, role:readonly, clusters, get, *, allow`
+      - `p, role:readonly, clusters, list, *, allow`
+    - **Rationale: Least privilege - engineers can view but not modify**
+    - **Place in platform/integrations/ (ArgoCD will apply)**
+    - _Requirements: 6.2, 6.3, 6.4, 10.1, 10.4_
+
+- [x] 9. Create Tekton Dashboard OIDC integration (GitOps-managed)
+  - [x] 9.1 Create Tekton Dashboard deployment patch
+    - **Configure OIDC issuer with external hostname: `https://dex.home.local`**
+    - **Configure redirect URI with external hostname: `https://tekton.home.local/auth/callback`**
+    - Add OIDC configuration arguments:
+      - `--oidc-issuer=https://dex.home.local`
+      - `--oidc-client-id=tekton-dashboard`
+      - `--oidc-client-secret=$(OIDC_CLIENT_SECRET)`
+      - `--oidc-redirect-uri=https://tekton.home.local/auth/callback`
+      - `--oidc-scopes=openid,profile,email,groups`
+    - Add OIDC client secret environment variable (from Secret)
+    - **Place in platform/integrations/ (ArgoCD will apply)**
+    - _Requirements: 7.1, 7.5_
+  
+  - [x] 9.2 Create Tekton RBAC policies
+    - Create ClusterRole for admin access (full Tekton permissions):
+      - `apiGroups: ["tekton.dev"]`
+      - `resources: ["*"]`
+      - `verbs: ["*"]`
+      - Plus pods/logs access
+    - Create ClusterRole for viewer access (read-only Tekton permissions):
+      - `apiGroups: ["tekton.dev"]`
+      - `resources: ["*"]`
+      - `verbs: ["get", "list", "watch"]`
+      - Plus pods/logs read access
+    - Create ClusterRoleBinding for admins group → tekton-admin
+    - Create ClusterRoleBinding for engineering group → tekton-viewer
+    - **Rationale: Cluster-scoped because Tekton resources span namespaces**
+    - **Place in platform/integrations/ (ArgoCD will apply)**
+    - _Requirements: 7.2, 7.3, 7.4, 7.5, 10.2, 10.4_
+
+- [x] 10. Checkpoint - Verify GitOps manifests
+  - Ensure all manifests are valid YAML
+  - Verify ConfigMaps reference correct external URLs (not `.svc.cluster.local`)
+  - Verify Service DNS names are correct for internal pod-to-pod communication
+  - Verify Ingress hostnames match Dex/Authentik configuration
+  - Verify Dex deployment starts with replicas=0
+  - **Verify all manifests are in platform/ directories (not bootstrap/)**
+  - **Verify platform-auth.yaml Application points to correct Git path**
+  - Ask user if questions arise
+
+- [x] 11. Create minimal bootstrap script with zero-touch secret generation
+  - [x] 11.1 Create bootstrap.sh with automated secret generation
+    - Add cluster selection/creation logic (Kind or existing)
+    - Add kubecontext switching and verification
+    - **Add secret generation for PostgreSQL, Authentik, Dex (BEFORE ArgoCD):**
+      - PostgreSQL password: `openssl rand -base64 32`
+      - Authentik secret key: `openssl rand -base64 50`
+      - Authentik admin password: `openssl rand -base64 32`
+      - Dex client secret: `openssl rand -base64 32`
+    - **Create all Kubernetes Secrets in auth-system namespace**
+    - **Create auth-system namespace BEFORE creating secrets**
+    - Add ArgoCD installation (kubectl apply ArgoCD YAML)
+    - Add wait for ArgoCD to be ready
+    - Add platform-root.yaml Application creation (kubectl apply)
+    - **Add wait for Authentik to be ready (deployed by ArgoCD):**
+      - Wait for pod with label `app=authentik` to be ready
+      - Wait for health endpoint `/api/v3/root/config/` to return 200
+    - **This is the ONLY bootstrap → app interaction (explicitly documented exception)**
+    - **Add automated Authentik API token creation via API:**
+      - Authenticate with admin credentials to get session token
+      - Create API token with `intent: "api"` and `identifier: "config-sync-job"`
+      - **Token is scoped to OAuth2 provider update ONLY (minimal permissions)**
+    - **Store API token in authentik-api-token Secret**
+    - Add developer UX (print ArgoCD UI access instructions)
+    - **Add commands to retrieve secrets (NOT the secrets themselves)**
+    - **Add optional `--show-secrets` flag for debugging**
+    - **Remove all kubectl apply for application manifests (ArgoCD does this)**
+    - **Remove Tekton installation (ArgoCD does this)**
+    - **Remove namespace creation except auth-system (ArgoCD does this)**
+    - **Remove auth-system component deployment (ArgoCD does this)**
+    - **Remove GHCR image building (belongs in CI/dev workflow)**
+    - **Zero-touch convergence: run once and walk away**
+    - _Requirements: 9.1, 9.2, 9.5, 11.1, 11.2, 11.3, 16.2_
+  
+  - [x] 11.2 Add production secret override support (optional)
+    - Check if secrets already exist before generating
+    - Skip automated token creation if `authentik-api-token` Secret exists
+    - Document manual secret creation for production environments
+    - **Default behavior is zero-touch (automated)**
+    - **Manual override is optional for tighter scoping/rotation**
+    - _Requirements: 11.1, 11.2, 11.3, 16.2_
+
+- [x] 12. Checkpoint - Verify bootstrap is minimal
+  - Verify bootstrap script ONLY handles out-of-cluster concerns
+  - **Verify bootstrap creates ONLY:**
+    - Kubernetes cluster (or selects existing)
+    - auth-system namespace (required for secrets)
+    - All secrets in auth-system namespace
+    - ArgoCD installation
+    - Root ArgoCD Application
+    - Authentik API token (after waiting for Authentik)
+  - Verify bootstrap does NOT kubectl apply application manifests
+  - **Verify bootstrap does NOT create namespaces other than auth-system**
+  - Verify bootstrap does NOT wait for application pods (except Authentik for token creation)
+  - Verify bootstrap does NOT build or push images
+  - **Verify secrets are NOT printed to stdout by default**
+  - **Verify `--show-secrets` flag works correctly with warning**
+  - Ask user if questions arise
+
+- [x] 13. Create documentation
+  - [x] 13.1 Create platform/auth/README.md
+    - Document authentication system architecture
+    - **Document GitOps ownership (ArgoCD manages all manifests)**
+    - **Document zero-touch bootstrap (automated secret generation)**
+    - **Document bootstrap responsibilities (cluster + secrets + ArgoCD + root app)**
+    - **Document homelab network access strategy**
+    - **Document external URL requirements (browser-reachable hostnames)**
+    - Document how to access Authentik UI via Ingress
+    - Document how to add users via UI
+    - Document how to configure external identity providers
+    - **Document DNS configuration for home network**
+    - **Document TLS certificate options**
+    - _Requirements: 15.1, 15.2, 15.3_
+  
+  - [x] 13.2 Create platform/auth/secrets/README.md
+    - **Document zero-touch secret generation (automated by default)**
+    - Document secret generation procedures
+    - **Document that bootstrap generates ALL secrets automatically**
+    - **Document that secrets are never printed by default**
+    - **Document `--show-secrets` flag for debugging**
+    - **Document optional production override (manual secret creation)**
+    - **Document that Authentik API token is scoped to OAuth2 provider update ONLY**
+    - Document secret rotation procedures
+    - **Document automated Authentik API token creation**
+    - Provide example commands for secret generation
+    - Provide example commands for secret retrieval
+    - _Requirements: 11.5_
+  
+  - [x] 13.3 Create platform/auth/authentik/README.md
+    - Document Authentik Blueprint structure
+    - Document how to modify blueprints
+    - Document how to add new OIDC applications
+    - **Document external URL requirements in blueprints**
+    - _Requirements: 15.1, 15.4_
+  
+  - [x] 13.4 Create platform/auth/ingress/README.md
+    - Document Ingress controller requirements
+    - Document DNS configuration options (router/Pi-hole, hosts file, mDNS)
+    - Document TLS certificate options (self-signed vs Let's Encrypt)
+    - Provide example `/etc/hosts` entries for all services
+    - Document how to find Ingress controller IP
+    - Document common Ingress troubleshooting
+    - _Requirements: 12.4, 17.5_
+  
+  - [x] 13.5 Update main README.md
+    - Add authentication system to platform features
+    - Add link to auth documentation
+    - **Document GitOps-first approach (ArgoCD owns everything after bootstrap)**
+    - **Document zero-touch bootstrap (run once and walk away)**
+    - **Document automated secret generation**
+    - Update quick start with authentication info
+    - **Document home network access requirements**
+    - _Requirements: 15.5_
+
+- [ ] 14. Create troubleshooting documentation
+  - Document common authentication issues
+  - **Document redirect URI mismatch issues (`.svc.cluster.local` vs external URLs)**
+  - **Document DNS resolution issues for home network**
+  - **Document TLS certificate issues**
+  - **Document Ingress controller issues**
+  - **Document ArgoCD sync issues**
+  - Document how to check Authentik logs
+  - Document how to check Dex logs
+  - Document how to verify OIDC configuration
+  - **Document how to verify OIDC discovery endpoints (200 response)**
+  - Document how to reset admin password if locked out
+  - Document how to check Configuration Sync Job status
+  - Document how to manually re-run Configuration Sync Job
+  - **Document how to verify Dex scaled from 0 to 1 replica**
+  - **Document how to retrieve secrets securely**
+  - **Document how to manually sync ArgoCD Applications**
+  - _Requirements: 15.5, 17.5_
+
+- [ ] 15. Final checkpoint - End-to-end validation
+  - Review all manifests for consistency
+  - **Verify all browser-facing URLs use external hostnames (not `.svc.cluster.local`)**
+  - **Verify all Ingress resources are configured correctly**
+  - **Verify all manifests are in platform/ directories (GitOps-managed)**
+  - **Verify bootstrap script is minimal (cluster + ArgoCD + root app)**
+  - Verify all secrets are documented
+  - Verify all services have correct DNS names
+  - Verify RBAC policies match requirements
+  - **Verify Job orchestration includes Dex scaling from 0 to 1**
+  - **Verify bootstrap never prints secrets by default**
+  - **Verify ArgoCD Applications reference correct Git paths**
+  - Ensure documentation is complete
+  - Ask user if questions arise
+
+- [ ] 16. Deploy and test complete platform with GitOps
+  - Create fresh Kind cluster for testing
+  - **Deploy Ingress controller (nginx-ingress or traefik):**
+    - For Kind: `kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml`
+    - Wait for ingress controller to be ready
+  - **Configure DNS (add entries to /etc/hosts for testing):**
+    - Get Ingress controller IP: `kubectl get svc -n ingress-nginx`
+    - Add entries for auth.home.local, dex.home.local, argocd.home.local, tekton.home.local
+  - Run minimal bootstrap script (cluster + ArgoCD + root app)
+  - **Verify ArgoCD syncs all Applications automatically:**
+    - Check Application status: `kubectl get applications -n argocd`
+    - All should show "Synced" and "Healthy"
+  - Verify all platform components deploy via ArgoCD:
+    - Tekton pipelines and dashboard
+    - PostgreSQL (StatefulSet with PVC)
+    - Authentik server and worker
+    - **Ingress resources for all services**
+    - Dex OIDC connector (starts with replicas=0)
+    - Configuration Sync Job
+    - Platform controllers and CRDs
+  - **Verify Configuration Sync Job completes successfully:**
+    - Check Job status: `kubectl get job auth-config-sync -n auth-system`
+    - Check Job logs: `kubectl logs job/auth-config-sync -n auth-system`
+    - Should show "Configuration sync complete!"
+  - **Verify Dex scaled from 0 to 1 replica by Job:**
+    - `kubectl get deployment dex -n auth-system`
+    - Should show 1/1 ready
+  - **Verify OIDC discovery endpoints return 200:**
+    - Authentik: `curl -f https://auth.home.local/application/o/dex/.well-known/openid-configuration`
+    - Dex: `curl -f https://dex.home.local/.well-known/openid-configuration`
+  - **Test Authentik UI access via Ingress (https://auth.home.local):**
+    - Open in browser (accept self-signed cert if needed)
+    - Should show Authentik login page
+  - Test Authentik admin login:
+    - Retrieve admin password: `kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-password}' | base64 -d`
+    - Login with username: `admin`
+  - **Test ArgoCD OIDC authentication via Ingress (https://argocd.home.local):**
+    - Click "Login via Dex"
+    - Should redirect to Authentik
+    - Login with admin credentials
+    - Should redirect back to ArgoCD UI
+  - **Test Tekton Dashboard OIDC authentication via Ingress (https://tekton.home.local):**
+    - Should redirect to Dex → Authentik
+    - Login with admin credentials
+    - Should redirect back to Tekton Dashboard
+  - **Validate ID token claims after successful login:**
+    - Check browser dev tools → Network → token response
+    - Verify `groups` claim contains `["admins"]`
+  - Verify RBAC policies work correctly (admin vs engineering groups):
+    - Admin user should have full access to ArgoCD and Tekton
+    - Create test engineering user in Authentik UI
+    - Login as engineering user
+    - Verify read-only access in ArgoCD
+    - Verify read-only access in Tekton Dashboard
+  - Test creating users and assigning groups via Authentik UI:
+    - Create new user
+    - Assign to engineering group
+    - User should be able to login immediately (no pod restart)
+  - **Test ArgoCD drift detection and auto-sync:**
+    - Manually delete a resource: `kubectl delete configmap dex-config -n auth-system`
+    - ArgoCD should detect drift and recreate it
+  - **Make a change to Dex config in Git and verify ArgoCD syncs it:**
+    - Edit `platform/auth/dex/configmap.yaml`
+    - Commit and push
+    - ArgoCD should detect change and sync within 3 minutes
+  - **Test that secrets were not printed during bootstrap:**
+    - Review bootstrap script output
+    - Should NOT contain any secret values
+    - Should only show commands to retrieve secrets
+  - **Test `--show-secrets` flag displays secrets with warning:**
+    - Run bootstrap with `--show-secrets`
+    - Should display warning about not using in production
+    - Should display actual secret values
+  - Document any issues or unexpected behavior encountered
+  - Fix any integration issues discovered during testing
+  - Validate complete end-to-end authentication flow
+  - _Requirements: All requirements (complete platform validation)_
+
+- [ ] 17. Update Archon documentation to reflect authentication system
+  - [ ] 17.1 Update .kiro/docs/overview.md
+    - Add authentication system to platform overview
+    - Document Authentik as IdP with Dex as OIDC connector
+    - Explain role-based access control (admin vs engineering)
+    - **Document GitOps-first architecture (ArgoCD owns all manifests)**
+    - Document home network access strategy
+    - Add links to auth-specific documentation
+    - _Requirements: 17.1_
+  
+  - [ ] 17.2 Update .kiro/docs/architecture.md
+    - Add authentication system architecture section
+    - Document component relationships (Authentik, Dex, PostgreSQL, services)
+    - Add system diagram showing authentication flow
+    - **Document GitOps ownership boundaries (bootstrap vs ArgoCD vs Jobs)**
+    - Document Ingress resources for home network access
+    - Document Config Sync Job orchestration
+    - Explain external URL requirements for OIDC
+    - Document secret management approach
+    - **Source**: `platform/auth/`, `.kiro/specs/dex-authentication-platform/design.md`
+    - _Requirements: 17.1_
+  
+  - [ ] 17.3 Update .kiro/docs/operations.md
+    - Add authentication system operations section
+    - **Document minimal bootstrap process (cluster + ArgoCD + root app)**
+    - **Document ArgoCD Application management**
+    - Document how to access Authentik UI
+    - Document user management procedures
+    - Document secret rotation procedures
+    - Document Config Sync Job manual triggering
+    - Document common troubleshooting scenarios
+    - Document DNS configuration for home network
+    - Document TLS certificate setup
+    - **Document how to make changes via GitOps (commit to Git, ArgoCD syncs)**
+    - **Source**: `platform/auth/README.md`, `platform/auth/secrets/README.md`, `platform/bootstrap/bootstrap.sh`
+    - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5_
+  
+  - [ ] 17.4 Update .kiro/docs/api.md
+    - Document Authentik API endpoints used by Config Sync Job
+    - Document Dex OIDC endpoints
+    - Document ArgoCD OIDC configuration
+    - Document Tekton Dashboard OIDC configuration
+    - **Source**: `platform/auth/config-sync/`, `platform/integrations/`
+    - _Requirements: 17.4_
+  
+  - [ ] 17.5 Update .kiro/docs/data-models.md
+    - Add Authentik user and group schemas
+    - Add OIDC token claim structure
+    - Add Dex configuration schema
+    - Add RBAC policy model
+    - **Source**: `.kiro/specs/dex-authentication-platform/design.md`
+    - _Requirements: 17.1_
+  
+  - [ ] 17.6 Update .kiro/docs/faq.md
+    - Add authentication system FAQ section
+    - Document common questions about user management
+    - Document common OIDC issues and solutions
+    - Document redirect URI troubleshooting
+    - Document DNS configuration questions
+    - Document TLS certificate questions
+    - **Document ArgoCD sync troubleshooting**
+    - **Source**: `platform/auth/README.md`, troubleshooting documentation
+    - _Requirements: 17.5_
+  
+  - [ ] 17.7 Verify Archon documentation consistency
+    - Ensure terminology is consistent across all 6 files
+    - Verify component names match across files
+    - Verify all cross-references are accurate
+    - Ensure no contradictions between files
+    - Verify all "Source" references are accurate
+    - _Requirements: 17.1, 17.5_
+
+## Notes
+
+- All Kubernetes manifests should follow existing platform patterns
+- Secret templates should be `.example` files, not committed secrets
+- **Bootstrap generates ALL secrets automatically for zero-touch convergence**
+- **Bootstrap script never prints secrets by default (use `--show-secrets` for debugging)**
+- **Bootstrap script handles: cluster + secrets + ArgoCD + root app + API token**
+- **ArgoCD owns ALL application manifests (no kubectl apply in bootstrap for apps)**
+- **All browser-facing URLs must use external hostnames (e.g., `https://dex.home.local`)**
+- **Internal pod-to-pod communication can use `.svc.cluster.local` DNS**
+- **Ingress controller must be deployed before auth system**
+- **DNS must be configured for home network access (router, hosts file, or mDNS)**
+- Documentation should be clear and actionable for operators
+- Each checkpoint ensures incremental validation before proceeding
+- **Config Sync Job provides deterministic convergence (no timing hacks)**
+- **Dex starts with replicas=0 to avoid CrashLoopBackOff**
+- **GHCR image building removed from bootstrap (belongs in CI/dev workflow)**
+- **Zero-touch convergence: run bootstrap.sh once and walk away**
+- Task 16 is a collaborative testing task to validate the complete platform bootstrap including the new authentication system
+- Tasks marked with `*` are optional and can be skipped for faster MVP (none in this plan - all tasks are required)

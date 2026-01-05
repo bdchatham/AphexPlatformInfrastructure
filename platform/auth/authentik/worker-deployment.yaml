@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authentik-worker
+  namespace: auth-system
+  labels:
+    app: authentik
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authentik
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: authentik
+        component: worker
+    spec:
+      containers:
+        - name: authentik
+          image: ghcr.io/goauthentik/server:2024.2.2
+          args:
+            - worker
+          env:
+            - name: AUTHENTIK_REDIS__HOST
+              value: redis.auth-system.svc.cluster.local
+            - name: AUTHENTIK_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-secrets
+                  key: secret-key
+            - name: AUTHENTIK_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-secrets
+                  key: admin-password
+            - name: AUTHENTIK_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-secrets
+                  key: bootstrap-token
+            - name: AUTHENTIK_POSTGRESQL__HOST
+              value: postgresql.auth-system.svc.cluster.local
+            - name: AUTHENTIK_POSTGRESQL__NAME
+              value: authentik
+            - name: AUTHENTIK_POSTGRESQL__USER
+              value: authentik
+            - name: AUTHENTIK_POSTGRESQL__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: authentik-postgresql
+                  key: postgresql-password
+            - name: AUTHENTIK_ERROR_REPORTING__ENABLED
+              value: "false"
+            - name: AUTHENTIK_LOG_LEVEL
+              value: info
+            - name: AUTHENTIK_BLUEPRINTS__ENABLED
+              value: "true"
+            - name: DEX_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: dex-secrets
+                  key: authentik-client-secret
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          volumeMounts:
+            - name: blueprints
+              mountPath: /blueprints/custom
+              readOnly: true
+      volumes:
+        - name: blueprints
+          configMap:
+            name: authentik-blueprints
