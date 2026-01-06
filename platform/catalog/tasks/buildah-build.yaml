@@ -85,9 +85,8 @@ spec:
         
         echo "Build complete"
       securityContext:
-        capabilities:
-          add:
-            - SETFCAP
+        runAsNonRoot: true
+        runAsUser: 1000
       volumeMounts:
         - name: varlibcontainers
           mountPath: /var/lib/containers
@@ -114,9 +113,8 @@ spec:
         echo "Push complete"
         cat $(results.IMAGE_DIGEST.path)
       securityContext:
-        capabilities:
-          add:
-            - SETFCAP
+        runAsNonRoot: true
+        runAsUser: 1000
       volumeMounts:
         - name: varlibcontainers
           mountPath: /var/lib/containers

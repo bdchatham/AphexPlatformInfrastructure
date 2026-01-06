@@ -10,13 +10,17 @@ metadata:
     # For Let's Encrypt with DNS-01 challenge (requires DNS provider API):
     # cert-manager.io/cluster-issuer: "letsencrypt-dns"
     
-    # Optional: Additional annotations for specific ingress controllers
-    # For nginx-ingress:
-    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    # nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self';" always;
     
-    # For traefik:
-    # traefik.ingress.kubernetes.io/router.tls: "true"
+    # SSL configuration
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
   # Set the ingress controller class
   # Common options: nginx, traefik

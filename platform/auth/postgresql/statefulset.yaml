@@ -18,8 +18,21 @@ spec:
       labels:
         app: postgresql
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgresql
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
           image: postgres:15-alpine
           imagePullPolicy: IfNotPresent
           ports:
@@ -63,7 +76,6 @@ spec:
               cpu: 250m
               memory: 256Mi
             limits:
-              cpu: 1000m
               memory: 512Mi
           volumeMounts:
             - name: postgresql-data

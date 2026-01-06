@@ -37,14 +37,35 @@ spec:
     - to:
         - podSelector: {}
     
-    # Allow egress to internet (for git clone, package downloads, etc.)
+    # Allow egress to specific required services only
     - to:
-        - namespaceSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              name: pipeline-catalog
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    
+    # Allow egress to auth-system for authentication
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: auth-system
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 5556
+    
+    # Allow egress to external git repositories and registries
+    - to: []
       ports:
         - protocol: TCP
           port: 443
         - protocol: TCP
-          port: 80
+          port: 22
     
     # Allow egress to Kubernetes API server
     - to:

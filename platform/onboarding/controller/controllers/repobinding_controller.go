@@ -41,484 +41,271 @@ type RepoBindingReconciler struct {
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
 
 // Reconcile handles RepoBinding create/update/delete events
-func (r *RepoBindingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.Log.WithValues("repobinding", req.NamespacedName)
+func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
+	logger := r.Log.WithValues("repobinding", request.NamespacedName)
 
-	// Fetch the RepoBinding instance
-	repoBinding := &platformv1alpha1.RepoBinding{}
-	err := r.Get(ctx, req.NamespacedName, repoBinding)
+	repoBinding, err := r.fetchRepoBinding(ctx, request)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("RepoBinding resource not found, ignoring since object must be deleted")
-			return ctrl.Result{}, nil
-		}
-		log.Error(err, "Failed to get RepoBinding")
-		return ctrl.Result{}, err
+		return r.handleFetchError(logger, err)
 	}
 
-	// Handle deletion
-	if !repoBinding.ObjectMeta.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
-			// Perform cleanup if needed
-			log.Info("Cleaning up RepoBinding resources")
-			
-			// Remove finalizer
-			controllerutil.RemoveFinalizer(repoBinding, repoBindingFinalizer)
-			if err := r.Update(ctx, repoBinding); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
+	if r.shouldSkipReconciliation(repoBinding) {
 		return ctrl.Result{}, nil
 	}
 
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
-		controllerutil.AddFinalizer(repoBinding, repoBindingFinalizer)
-		if err := r.Update(ctx, repoBinding); err != nil {
-			return ctrl.Result{}, err
+	if err := r.handleDeletion(ctx, logger, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureFinalizer(ctx, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.initializeStatus(ctx, logger, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if r.isAlreadyReady(logger, repoBinding) {
+		return ctrl.Result{}, nil
+	}
+
+	if err := r.validateAndUpdatePhase(ctx, logger, request, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return r.executeProvisioningSteps(ctx, logger, request, repoBinding)
+}
+
+func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) (ctrl.Result, error) {
+	logger.Info("Reconciling RepoBinding", 
+		"repoOrg", repoBinding.Spec.RepoOrg,
+		"repoName", repoBinding.Spec.RepoName,
+		"tenantName", repoBinding.Spec.TenantName,
+		"permissionProfile", repoBinding.Spec.PermissionProfile)
+
+	steps := []provisioningStep{
+		{name: "namespace", statusField: &repoBinding.Status.NamespaceCreated, provisionFunc: r.provisionNamespace},
+		{name: "service account", statusField: &repoBinding.Status.ServiceAccountCreated, provisionFunc: r.provisionServiceAccount},
+		{name: "RBAC", statusField: &repoBinding.Status.RBACCreated, provisionFunc: r.provisionRBAC},
+		{name: "resource limits", statusField: &repoBinding.Status.QuotasCreated, provisionFunc: r.provisionResourceLimits},
+		{name: "network policy", statusField: &repoBinding.Status.NetworkPolicyCreated, provisionFunc: r.provisionNetworkPolicy},
+		{name: "Terraform backend secret", statusField: &repoBinding.Status.TerraformSecretCreated, provisionFunc: r.provisionTerraformBackendSecret},
+		{name: "webhook secret", statusField: &repoBinding.Status.WebhookSecretCreated, provisionFunc: r.provisionWebhookSecret},
+		{name: "EventListener", statusField: &repoBinding.Status.EventListenerCreated, provisionFunc: r.provisionEventListener},
+		{name: "Ingress", statusField: &repoBinding.Status.IngressCreated, provisionFunc: r.provisionIngress},
+	}
+
+	for _, step := range steps {
+		if !*step.statusField {
+			if err := r.executeProvisioningStep(ctx, logger, request, repoBinding, step); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
 		}
 	}
 
-	// Initialize status if needed
+	if err := r.handleAllowlistUpdate(ctx, logger, request, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.finalizeProvisioning(ctx, logger, request, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+type provisioningStep struct {
+	name           string
+	statusField    *bool
+	provisionFunc  func(context.Context, *platformv1alpha1.RepoBinding) error
+}
+
+func (r *RepoBindingReconciler) executeProvisioningStep(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding, step provisioningStep) error {
+	logger.Info("Provisioning " + step.name)
+	
+	if err := step.provisionFunc(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to provision " + step.name)
+		if refetchErr := r.Get(ctx, request.NamespacedName, repoBinding); refetchErr != nil {
+			logger.Error(refetchErr, "Failed to refetch RepoBinding")
+			return refetchErr
+		}
+		return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Failed to provision %s: %s", step.name, err.Error()))
+	}
+
+	if err := r.Get(ctx, request.NamespacedName, repoBinding); err != nil {
+		logger.Error(err, "Failed to refetch RepoBinding")
+		return err
+	}
+	
+	*step.statusField = true
+	if err := r.Status().Update(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to update RepoBinding status")
+		return err
+	}
+	
+	return nil
+}
+
+func (r *RepoBindingReconciler) handleAllowlistUpdate(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) error {
+	if repoBinding.Status.AllowlistUpdated {
+		return nil
+	}
+
+	logger.Info("Updating allowlist")
+	configMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, client.ObjectKey{Name: "repo-allowlist", Namespace: "pipeline-system"}, configMap)
+	
+	if err != nil {
+		if errors.IsNotFound(err) {
+			logger.Info("Allowlist ConfigMap not found, skipping (new architecture)")
+			return r.markAllowlistUpdated(ctx, logger, request, repoBinding)
+		}
+		logger.Error(err, "Failed to get allowlist ConfigMap")
+		if refetchErr := r.Get(ctx, request.NamespacedName, repoBinding); refetchErr != nil {
+			logger.Error(refetchErr, "Failed to refetch RepoBinding")
+			return refetchErr
+		}
+		return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Failed to get allowlist: %s", err.Error()))
+	}
+
+	if err := r.provisionAllowlistEntry(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to update allowlist")
+		if refetchErr := r.Get(ctx, request.NamespacedName, repoBinding); refetchErr != nil {
+			logger.Error(refetchErr, "Failed to refetch RepoBinding")
+			return refetchErr
+		}
+		return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Failed to update allowlist: %s", err.Error()))
+	}
+
+	return r.markAllowlistUpdated(ctx, logger, request, repoBinding)
+}
+
+func (r *RepoBindingReconciler) markAllowlistUpdated(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) error {
+	if err := r.Get(ctx, request.NamespacedName, repoBinding); err != nil {
+		logger.Error(err, "Failed to refetch RepoBinding")
+		return err
+	}
+	repoBinding.Status.AllowlistUpdated = true
+	if err := r.Status().Update(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to update RepoBinding status")
+		return err
+	}
+	return nil
+}
+
+func (r *RepoBindingReconciler) finalizeProvisioning(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) error {
+	logger.Info("Updating RepoBinding status with webhook information")
+	if err := r.updateRepoBindingStatusWithWebhookInfo(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to update RepoBinding status with webhook info")
+		if refetchErr := r.Get(ctx, request.NamespacedName, repoBinding); refetchErr != nil {
+			logger.Error(refetchErr, "Failed to refetch RepoBinding")
+			return refetchErr
+		}
+		return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Failed to update webhook info: %s", err.Error()))
+	}
+
+	if err := r.Get(ctx, request.NamespacedName, repoBinding); err != nil {
+		logger.Error(err, "Failed to refetch RepoBinding")
+		return err
+	}
+
+	repoBinding.Status.Phase = "Ready"
+	repoBinding.Status.Message = "Tenant resources provisioned successfully"
+	repoBinding.Status.LastReconcileTime = metav1.Now()
+	if err := r.Status().Update(ctx, repoBinding); err != nil {
+		logger.Error(err, "Failed to update RepoBinding status")
+		return err
+	}
+
+	return nil
+}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *RepoBindingReconciler) fetchRepoBinding(ctx context.Context, request ctrl.Request) (*platformv1alpha1.RepoBinding, error) {
+	repoBinding := &platformv1alpha1.RepoBinding{}
+	err := r.Get(ctx, request.NamespacedName, repoBinding)
+	return repoBinding, err
+}
+
+func (r *RepoBindingReconciler) handleFetchError(logger logr.Logger, err error) (ctrl.Result, error) {
+	if errors.IsNotFound(err) {
+		logger.Info("RepoBinding resource not found, ignoring since object must be deleted")
+		return ctrl.Result{}, nil
+	}
+	logger.Error(err, "Failed to get RepoBinding")
+	return ctrl.Result{}, err
+}
+
+func (r *RepoBindingReconciler) shouldSkipReconciliation(repoBinding *platformv1alpha1.RepoBinding) bool {
+	return !repoBinding.ObjectMeta.DeletionTimestamp.IsZero()
+}
+
+func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.Logger, repoBinding *platformv1alpha1.RepoBinding) error {
+	if !repoBinding.ObjectMeta.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
+			logger.Info("Cleaning up RepoBinding resources")
+			controllerutil.RemoveFinalizer(repoBinding, repoBindingFinalizer)
+			return r.Update(ctx, repoBinding)
+		}
+	}
+	return nil
+}
+
+func (r *RepoBindingReconciler) ensureFinalizer(ctx context.Context, repoBinding *platformv1alpha1.RepoBinding) error {
+	if !controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
+		controllerutil.AddFinalizer(repoBinding, repoBindingFinalizer)
+		return r.Update(ctx, repoBinding)
+	}
+	return nil
+}
+
+func (r *RepoBindingReconciler) initializeStatus(ctx context.Context, logger logr.Logger, repoBinding *platformv1alpha1.RepoBinding) error {
 	if repoBinding.Status.Phase == "" {
 		repoBinding.Status.Phase = "Pending"
 		repoBinding.Status.Message = "Starting onboarding process"
 		repoBinding.Status.LastReconcileTime = metav1.Now()
 		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{}, err
+			logger.Error(err, "Failed to update RepoBinding status")
+			return err
 		}
-		return ctrl.Result{Requeue: true}, nil
 	}
+	return nil
+}
 
-	// Skip if already in Ready state
+func (r *RepoBindingReconciler) isAlreadyReady(logger logr.Logger, repoBinding *platformv1alpha1.RepoBinding) bool {
 	if repoBinding.Status.Phase == "Ready" {
-		log.Info("RepoBinding already in Ready state, skipping reconciliation")
-		return ctrl.Result{}, nil
+		logger.Info("RepoBinding already in Ready state, skipping reconciliation")
+		return true
 	}
+	return false
+}
 
-	// Update phase to Provisioning
+func (r *RepoBindingReconciler) validateAndUpdatePhase(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) error {
 	if repoBinding.Status.Phase == "Pending" {
-		// Validate the RepoBinding spec
 		if err := ValidateRepoBinding(repoBinding); err != nil {
-			log.Error(err, "Validation failed")
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Validation failed: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, nil
+			logger.Error(err, "Validation failed")
+			return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Validation failed: %s", err.Error()))
 		}
 
 		repoBinding.Status.Phase = "Provisioning"
 		repoBinding.Status.Message = "Provisioning tenant resources"
 		repoBinding.Status.LastReconcileTime = metav1.Now()
 		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{}, err
+			logger.Error(err, "Failed to update RepoBinding status")
+			return err
 		}
 	}
+	return nil
+}
 
-	// Perform reconciliation steps (will be implemented in subsequent subtasks)
-	log.Info("Reconciling RepoBinding", 
-		"repoOrg", repoBinding.Spec.RepoOrg,
-		"repoName", repoBinding.Spec.RepoName,
-		"tenantName", repoBinding.Spec.TenantName,
-		"permissionProfile", repoBinding.Spec.PermissionProfile)
-
-	// Provision tenant namespace
-	if !repoBinding.Status.NamespaceCreated {
-		log.Info("Provisioning tenant namespace")
-		if err := r.provisionNamespace(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision namespace")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision namespace: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.NamespaceCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision service account
-	if !repoBinding.Status.ServiceAccountCreated {
-		log.Info("Provisioning service account")
-		if err := r.provisionServiceAccount(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision service account")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision service account: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.ServiceAccountCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision RBAC
-	if !repoBinding.Status.RBACCreated {
-		log.Info("Provisioning RBAC")
-		if err := r.provisionRBAC(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision RBAC")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision RBAC: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.RBACCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision resource limits (ResourceQuota and LimitRange)
-	if !repoBinding.Status.QuotasCreated {
-		log.Info("Provisioning resource limits")
-		if err := r.provisionResourceLimits(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision resource limits")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision resource limits: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.QuotasCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision network policy
-	if !repoBinding.Status.NetworkPolicyCreated {
-		log.Info("Provisioning network policy")
-		if err := r.provisionNetworkPolicy(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision network policy")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision network policy: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.NetworkPolicyCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision Terraform backend secret
-	if !repoBinding.Status.TerraformSecretCreated {
-		log.Info("Provisioning Terraform backend secret")
-		if err := r.provisionTerraformBackendSecret(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision Terraform backend secret")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision Terraform backend secret: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.TerraformSecretCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision webhook secret
-	if !repoBinding.Status.WebhookSecretCreated {
-		log.Info("Provisioning webhook secret")
-		if err := r.provisionWebhookSecret(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision webhook secret")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision webhook secret: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.WebhookSecretCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status, will retry")
-			// Don't return error on conflict, just requeue
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision EventListener
-	if !repoBinding.Status.EventListenerCreated {
-		log.Info("Provisioning EventListener")
-		if err := r.provisionEventListener(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision EventListener")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision EventListener: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.EventListenerCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Provision Ingress
-	if !repoBinding.Status.IngressCreated {
-		log.Info("Provisioning Ingress")
-		if err := r.provisionIngress(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to provision Ingress")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to provision Ingress: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.IngressCreated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Update allowlist (keeping this for backward compatibility, but may be removed)
-	if !repoBinding.Status.AllowlistUpdated {
-		log.Info("Updating allowlist")
-		// Skip allowlist update if ConfigMap doesn't exist (new architecture doesn't need it)
-		configMap := &corev1.ConfigMap{}
-		err := r.Get(ctx, client.ObjectKey{Name: "repo-allowlist", Namespace: "pipeline-system"}, configMap)
-		if err != nil {
-			if errors.IsNotFound(err) {
-				log.Info("Allowlist ConfigMap not found, skipping (new architecture)")
-				// Refetch before status update to avoid conflicts
-				if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-					log.Error(refetchErr, "Failed to refetch RepoBinding")
-					return ctrl.Result{}, refetchErr
-				}
-				repoBinding.Status.AllowlistUpdated = true
-				if err := r.Status().Update(ctx, repoBinding); err != nil {
-					log.Error(err, "Failed to update RepoBinding status")
-					return ctrl.Result{Requeue: true}, nil
-				}
-				return ctrl.Result{Requeue: true}, nil
-			}
-			log.Error(err, "Failed to get allowlist ConfigMap")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to get allowlist: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		
-		// ConfigMap exists, update it
-		if err := r.provisionAllowlistEntry(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update allowlist")
-			// Refetch before status update to avoid conflicts
-			if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-				log.Error(refetchErr, "Failed to refetch RepoBinding")
-				return ctrl.Result{}, refetchErr
-			}
-			repoBinding.Status.Phase = "Failed"
-			repoBinding.Status.Message = fmt.Sprintf("Failed to update allowlist: %s", err.Error())
-			repoBinding.Status.LastReconcileTime = metav1.Now()
-			if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-				log.Error(updateErr, "Failed to update RepoBinding status")
-				return ctrl.Result{}, updateErr
-			}
-			return ctrl.Result{}, err
-		}
-		// Refetch before status update to avoid conflicts
-		if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-			log.Error(err, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, err
-		}
-		repoBinding.Status.AllowlistUpdated = true
-		if err := r.Status().Update(ctx, repoBinding); err != nil {
-			log.Error(err, "Failed to update RepoBinding status")
-			return ctrl.Result{Requeue: true}, nil
-		}
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// Update RepoBinding status with webhook information
-	log.Info("Updating RepoBinding status with webhook information")
-	if err := r.updateRepoBindingStatusWithWebhookInfo(ctx, repoBinding); err != nil {
-		log.Error(err, "Failed to update RepoBinding status with webhook info")
-		// Refetch before status update to avoid conflicts
-		if refetchErr := r.Get(ctx, req.NamespacedName, repoBinding); refetchErr != nil {
-			log.Error(refetchErr, "Failed to refetch RepoBinding")
-			return ctrl.Result{}, refetchErr
-		}
-		repoBinding.Status.Phase = "Failed"
-		repoBinding.Status.Message = fmt.Sprintf("Failed to update webhook info: %s", err.Error())
-		repoBinding.Status.LastReconcileTime = metav1.Now()
-		if updateErr := r.Status().Update(ctx, repoBinding); updateErr != nil {
-			log.Error(updateErr, "Failed to update RepoBinding status")
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{}, err
-	}
-
-	// Refetch before final status update to avoid conflicts
-	if err := r.Get(ctx, req.NamespacedName, repoBinding); err != nil {
-		log.Error(err, "Failed to refetch RepoBinding")
-		return ctrl.Result{}, err
-	}
-
-	// Update status to Ready
-	repoBinding.Status.Phase = "Ready"
-	repoBinding.Status.Message = "Tenant resources provisioned successfully"
+func (r *RepoBindingReconciler) updateStatusToFailed(ctx context.Context, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding, message string) error {
+	repoBinding.Status.Phase = "Failed"
+	repoBinding.Status.Message = message
 	repoBinding.Status.LastReconcileTime = metav1.Now()
-	if err := r.Status().Update(ctx, repoBinding); err != nil {
-		log.Error(err, "Failed to update RepoBinding status")
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	return ctrl.Result{}, nil
+	return r.Status().Update(ctx, repoBinding)
 }
 
 // SetupWithManager sets up the controller with the Manager

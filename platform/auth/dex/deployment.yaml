@@ -16,8 +16,21 @@ spec:
         app: dex
     spec:
       serviceAccountName: dex
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: wait-for-authentik-oidc
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           image: curlimages/curl:8.6.0
           imagePullPolicy: IfNotPresent
           env:
@@ -43,6 +56,12 @@ spec:
               exit 1
       containers:
         - name: dex
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           image: ghcr.io/dexidp/dex:v2.37.0
           imagePullPolicy: IfNotPresent
           command:
@@ -94,7 +113,6 @@ spec:
               cpu: 100m
               memory: 128Mi
             limits:
-              cpu: 500m
               memory: 256Mi
       volumes:
         - name: config

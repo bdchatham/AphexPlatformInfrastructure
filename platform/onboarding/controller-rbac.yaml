@@ -73,8 +73,6 @@ rules:
   - watch
   - update
   - patch
-  - escalate
-  - bind
 # RBAC permissions (cluster-scoped)
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -88,8 +86,6 @@ rules:
   - watch
   - update
   - patch
-  - escalate
-  - bind
 # Permissions that can be granted to tenant service accounts
 - apiGroups:
   - ""
