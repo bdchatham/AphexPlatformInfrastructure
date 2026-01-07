@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Dex Authentication Platform Bootstrap Script
+# Arbiter Pipeline Infrastructure Bootstrap Script
 # 
 # This script provides zero-touch convergence for the authentication platform:
 # 1. Creates/selects Kubernetes cluster
@@ -396,7 +396,7 @@ print_access_instructions() {
 main() {
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo -e "${BLUE}Dex Authentication Platform Bootstrap${NC}"
+  echo -e "${BLUE}Arbiter Pipeline Infrastructure Bootstrap${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   
