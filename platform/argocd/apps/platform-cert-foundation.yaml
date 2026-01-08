@@ -8,7 +8,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/your-org/arbiter-pipeline-infrastructure.git
+    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
     path: platform/cert-foundation
   destination:
