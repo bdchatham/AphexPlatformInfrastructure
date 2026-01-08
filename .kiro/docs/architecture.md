@@ -2,59 +2,78 @@
 
 ## System Design
 
-The Arbiter Pipeline Infrastructure is an ArgoCD + Tekton-based GitOps platform designed for homelab deployment. The system provides self-service repository onboarding with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through ArgoCD.
+The Arbiter Pipeline Infrastructure is a production-ready GitOps platform built on ArgoCD and Tekton with a revolutionary layered cert-manager architecture. The system provides bulletproof certificate management, centralized authentication, self-service repository onboarding, and complete platform automation.
 
-The platform follows a **"Bootstrap Once, GitOps Forever"** pattern: a one-time bootstrap script sets up the cluster, generates all secrets, installs core components, and creates the Authentik API token for zero-touch convergence. Then ArgoCD takes over and manages all platform components declaratively from Git.
+The platform follows a **"Bootstrap Once, GitOps Forever"** pattern with **zero-touch convergence**: a one-time bootstrap script achieves complete platform deployment automatically, then ArgoCD manages all components declaratively with self-healing capabilities.
 
 ## High-Level Architecture
 
 ```mermaid
 graph TB
-    subgraph Git["Git Repository (Platform)"]
+    subgraph Git["Git Repository"]
         subgraph Platform_Manifests["platform/"]
-            Bootstrap["bootstrap/<br/>(Bootstrap Script)"]
+            Bootstrap["bootstrap/<br/>(Zero-touch Script)"]
             ArgoCD_Apps["argocd/apps/<br/>(App of Apps)"]
-            CRDs["crds/<br/>(RepoBinding CRD)"]
-            Infrastructure["infrastructure/<br/>(Namespaces, RBAC)"]
+            CertManager["cert-manager/<br/>(Layered Architecture)"]
+            Auth["auth/<br/>(Authentik + Dex)"]
             Onboarding["onboarding/<br/>(Controller)"]
             Catalog["catalog/<br/>(Pipeline Tasks)"]
         end
     end
     
-    Git -->|ArgoCD syncs| ArgoCD_Svc
+    Git -->|ArgoCD syncs with waves| ArgoCD_Svc
     Git -->|Webhooks trigger| EventListeners
     
     subgraph Cluster["Kubernetes Cluster"]
         subgraph ArgoCD_NS["argocd namespace"]
-            ArgoCD_Svc["ArgoCD<br/>Server"]
-            ArgoCD_Controller["ArgoCD<br/>Controller"]
+            ArgoCD_Svc["ArgoCD Server<br/>(OIDC Integration)"]
+            ArgoCD_Controller["ArgoCD Controller<br/>(GitOps Engine)"]
         end
         
-        subgraph Platform_System["platform-system namespace"]
-            Onboarding_Ctrl["Onboarding<br/>Controller"]
-            Catalog_Tasks["Shared Tasks<br/>(git-clone, cdktf-*)"]
+        subgraph CertManager_NS["cert-manager namespace"]
+            CertManager_Controller["cert-manager<br/>(Wave 10)"]
+            CertManager_Webhook["Webhook<br/>(Validated)"]
+            CertManager_CAInjector["CA Injector<br/>(Fixed RBAC)"]
+        end
+        
+        subgraph Auth_NS["auth-system namespace"]
+            Authentik["Authentik<br/>(Identity Provider)"]
+            Dex["Dex<br/>(OIDC Connector)"]
+            PostgreSQL["PostgreSQL<br/>(Authentik DB)"]
+        end
+        
+        subgraph Platform_System["pipeline-system namespace"]
+            Onboarding_Ctrl["Onboarding Controller<br/>(RepoBinding CRD)"]
+            Catalog_Tasks["Shared Pipeline Catalog<br/>(Versioned Tasks)"]
         end
         
         subgraph Tenants["Tenant Namespaces"]
             subgraph Tenant1["tenant-1"]
-                EL1["EventListener"]
-                Pipeline1["Pipelines"]
+                EL1["EventListener<br/>(Webhook Handler)"]
+                Pipeline1["Pipelines<br/>(Isolated Execution)"]
             end
             subgraph Tenant2["tenant-2"]
-                EL2["EventListener"]
-                Pipeline2["Pipelines"]
+                EL2["EventListener<br/>(Webhook Handler)"]
+                Pipeline2["Pipelines<br/>(Isolated Execution)"]
             end
         end
         
-        subgraph Ingress_Layer["Ingress"]
-            Ingress["Ingress<br/>Controller"]
+        subgraph Ingress_Layer["ingress-system namespace"]
+            Ingress["Ingress Controller<br/>(TLS Termination)"]
         end
     end
     
-    ArgoCD_Controller -->|Syncs| Platform_System
-    ArgoCD_Controller -->|Syncs| Onboarding_Ctrl
-    ArgoCD_Controller -->|Syncs| Catalog_Tasks
+    ArgoCD_Controller -->|Sync Wave 10| CertManager_Controller
+    ArgoCD_Controller -->|Sync Wave 20| Auth_NS
+    ArgoCD_Controller -->|Sync Wave 30| Ingress
+    ArgoCD_Controller -->|Manages| Platform_System
+    ArgoCD_Controller -->|Provisions| Tenants
     
+    CertManager_Controller -->|Issues certificates| Auth_NS
+    CertManager_Controller -->|Issues certificates| Ingress
+    
+    Ingress -->|TLS termination| ArgoCD_Svc
+    Ingress -->|TLS termination| Authentik
     Ingress -->|Routes webhooks| EL1
     Ingress -->|Routes webhooks| EL2
     
@@ -64,39 +83,165 @@ graph TB
     style Git fill:#e1f5ff
     style Cluster fill:#fff4e1
     style ArgoCD_NS fill:#e8f5e9
+    style CertManager_NS fill:#ffe8e8
+    style Auth_NS fill:#f0e8ff
     style Platform_System fill:#fff9c4
     style Tenants fill:#f3e5f5
 ```
 
-## Component Layers
+## Layered cert-manager Architecture
 
-The platform is organized into four layers:
+The platform implements a revolutionary **layered cert-manager architecture** that eliminates the classic "webhook chicken-and-egg" problem through proper dependency ordering and validation.
 
-1. **Bootstrap Layer**: One-time initialization script
-2. **GitOps Layer**: ArgoCD manages all platform components
-3. **Platform Services Layer**: Core services (Tekton, Onboarding Controller, Catalog, Authentication)
-4. **Tenant Layer**: User namespaces with EventListeners and Pipelines
+### cert-manager Deployment Waves
+
+```mermaid
+graph LR
+    subgraph Wave10["Wave 10: cert-manager Installation"]
+        CertManager[cert-manager Controller<br/>+ Webhook + CA Injector]
+        PostSync[PostSync Hook<br/>Webhook Validation]
+        CertManager --> PostSync
+    end
+    
+    subgraph Wave20["Wave 20: Certificate Foundation"]
+        ClusterIssuer[ClusterIssuer<br/>selfsigned-issuer]
+        Certificates[Certificates<br/>dex-tls, argocd-tls, etc.]
+        ClusterIssuer --> Certificates
+    end
+    
+    subgraph Wave30["Wave 30: Ingress Resources"]
+        Ingress[Ingress Resources<br/>TLS Configuration]
+    end
+    
+    Wave10 -->|Webhook Ready| Wave20
+    Wave20 -->|Certificates Ready| Wave30
+    
+    style Wave10 fill:#ffe8e8
+    style Wave20 fill:#fff4e1
+    style Wave30 fill:#e8f5e9
+```
+
+### PostSync Webhook Validation
+
+The PostSync hook validates cert-manager webhook functionality before allowing certificate creation:
+
+**Validation Checks:**
+- Webhook Service has ready endpoints
+- ValidatingWebhookConfiguration has non-empty caBundle
+- MutatingWebhookConfiguration has non-empty caBundle
+- CA injection process completed successfully
+
+**Benefits:**
+- Eliminates manual webhook restarts
+- Prevents timing-related certificate failures
+- Ensures deterministic deployment ordering
+- Provides clear failure diagnostics
+
+### RBAC Fix Implementation
+
+The platform fixes cert-manager's default RBAC configuration using Kustomize patches:
+
+```yaml
+# Fix leader election namespace for both components
+patchesJson6902:
+  - target:
+      kind: Deployment
+      name: cert-manager-cainjector
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args/1
+        value: --leader-election-namespace=cert-manager
+  - target:
+      kind: Deployment
+      name: cert-manager
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args/2
+        value: --leader-election-namespace=cert-manager
+```
 
 ## Authentication System Architecture
 
-The authentication system provides centralized authentication and authorization for all platform services using Authentik as the Identity Provider (IdP) with Dex as an OIDC connector layer.
+The authentication system provides centralized SSO for all platform services using Authentik as the Identity Provider with Dex as an OIDC connector layer.
+
+### Authentication Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Browser
+    participant ArgoCD
+    participant Dex
+    participant Authentik
+    participant PostgreSQL
+    
+    User->>Browser: Access https://argocd.home.local
+    Browser->>ArgoCD: GET /
+    ArgoCD->>Browser: Redirect to Dex
+    Browser->>Dex: GET /auth
+    Dex->>Browser: Redirect to Authentik
+    Browser->>Authentik: GET /auth
+    Authentik->>PostgreSQL: Validate user
+    PostgreSQL->>Authentik: User data
+    Authentik->>Browser: Login form
+    User->>Browser: Enter credentials
+    Browser->>Authentik: POST credentials
+    Authentik->>Browser: Redirect to Dex with code
+    Browser->>Dex: GET /callback?code=...
+    Dex->>Authentik: Exchange code for token
+    Authentik->>Dex: OIDC token
+    Dex->>Browser: Redirect to ArgoCD with token
+    Browser->>ArgoCD: GET /callback?token=...
+    ArgoCD->>Dex: Validate token
+    Dex->>ArgoCD: Token valid + user info
+    ArgoCD->>Browser: Authenticated session
+```
 
 ### Authentication Components
 
 ```mermaid
 graph TB
-    Users[Platform Users]
-    AphexCLI[AphexCLI<br/>kubectl + exec plugin]
+    Users[Platform Users<br/>Admin & Engineering Groups]
     
-    subgraph Platform Services
-        ArgoCD[ArgoCD UI<br/>OIDC Client]
-        Tekton[Tekton Dashboard<br/>OIDC Client]
+    subgraph Platform_Services["Platform Services"]
+        ArgoCD[ArgoCD UI<br/>GitOps Management]
+        Tekton[Tekton Dashboard<br/>Pipeline Monitoring]
+        Authentik_UI[Authentik UI<br/>User Management]
     end
     
-    subgraph Kubernetes Cluster
-        APIServer[kube-apiserver<br/>OIDC Validation]
-        RBAC[Kubernetes RBAC<br/>Group-based Authorization]
+    subgraph Auth_System["auth-system namespace"]
+        Dex[Dex<br/>OIDC Connector<br/>Port 5556]
+        Authentik[Authentik<br/>Identity Provider<br/>Port 9000]
+        PostgreSQL[PostgreSQL<br/>User Database<br/>Port 5432]
+        Redis[Redis<br/>Session Cache<br/>Port 6379]
     end
+    
+    subgraph Ingress_Layer["TLS Ingress"]
+        Ingress_Auth[auth.home.local<br/>→ Authentik]
+        Ingress_Dex[dex.home.local<br/>→ Dex]
+        Ingress_ArgoCD[argocd.home.local<br/>→ ArgoCD]
+        Ingress_Tekton[tekton.home.local<br/>→ Tekton]
+    end
+    
+    Users -->|Browser access| Ingress_Auth
+    Users -->|Browser access| Ingress_ArgoCD
+    Users -->|Browser access| Ingress_Tekton
+    
+    Ingress_Auth --> Authentik
+    Ingress_Dex --> Dex
+    Ingress_ArgoCD --> ArgoCD
+    Ingress_Tekton --> Tekton
+    
+    ArgoCD -->|OIDC auth| Dex
+    Tekton -->|OIDC auth| Dex
+    Dex -->|User validation| Authentik
+    Authentik --> PostgreSQL
+    Authentik --> Redis
+    
+    style Auth_System fill:#f0e8ff
+    style Platform_Services fill:#e8f5e9
+    style Ingress_Layer fill:#fff4e1
+```
     
     subgraph auth-system namespace
         subgraph Dex OIDC Connector Layer
