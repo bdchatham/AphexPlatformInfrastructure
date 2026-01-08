@@ -8,6 +8,14 @@ nodes:
         nodeRegistration:
           kubeletExtraArgs:
             node-labels: "ingress-ready=true"
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            oidc-issuer-url: "https://dex.home.local"
+            oidc-client-id: "kubernetes"
+            oidc-username-claim: "email"
+            oidc-groups-claim: "groups"
     extraPortMappings:
       - containerPort: 80
         hostPort: 80

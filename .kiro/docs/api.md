@@ -1052,6 +1052,46 @@ ID tokens issued by Dex contain the following claims:
 - `platform/integrations/tekton-dashboard-oidc.yaml`
 - `platform/auth/dex/configmap.yaml`
 
+## AphexCLI Integration Contract
+
+The AphexCLI provides OIDC-authenticated access to platform CRDs via the Kubernetes API.
+
+### Kubeconfig Structure
+
+After `aphex login`, kubeconfig contains:
+
+```yaml
+users:
+  - name: aphex
+    user:
+      exec:
+        apiVersion: client.authentication.k8s.io/v1beta1
+        command: kubectl
+        args:
+          - oidc-login
+          - get-token
+          - --oidc-issuer-url=https://dex.home.local
+          - --oidc-client-id=kubernetes
+contexts:
+  - name: aphex
+    context:
+      cluster: aphex
+      user: aphex
+```
+
+### Capability Matrix
+
+| Command | Resource | Verb | Namespace | Required Group |
+|---------|----------|------|-----------|----------------|
+| `aphex pipeline create` | pipelines.platform.dev | create | user-*, team-* | platform-engineering |
+| `aphex pipeline list` | pipelines.platform.dev | list | user-*, team-* | platform-engineering |
+| `aphex pipeline get` | pipelines.platform.dev | get | user-*, team-* | platform-engineering |
+| `aphex pipeline delete` | pipelines.platform.dev | delete | user-*, team-* | platform-operators |
+
+**Source**
+- `platform/auth/dex/configmap.yaml`
+- `platform/rbac/platform-rbac.yaml`
+
 **Source**
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`

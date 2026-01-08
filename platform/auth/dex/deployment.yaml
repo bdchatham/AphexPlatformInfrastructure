@@ -88,6 +88,11 @@ spec:
                 secretKeyRef:
                   name: dex-secrets
                   key: tekton-client-secret
+            - name: KUBERNETES_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: dex-secrets
+                  key: kubernetes-client-secret
           volumeMounts:
             - name: config
               mountPath: /etc/dex

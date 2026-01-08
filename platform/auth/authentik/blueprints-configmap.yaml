@@ -9,17 +9,22 @@ data:
     metadata:
       name: Initial Platform Setup
     entries:
-      # Create admin group with superuser privileges
+      # Create platform groups
       - model: authentik_core.group
         identifiers:
-          name: admins
+          name: platform-admins
         attrs:
           is_superuser: true
       
-      # Create engineering group with standard privileges
       - model: authentik_core.group
         identifiers:
-          name: engineering
+          name: platform-operators
+        attrs:
+          is_superuser: false
+      
+      - model: authentik_core.group
+        identifiers:
+          name: platform-engineering
         attrs:
           is_superuser: false
       
@@ -33,7 +38,7 @@ data:
           email: admin@platform.local
           is_active: true
           groups:
-            - !Find [authentik_core.group, [name, admins]]
+            - !Find [authentik_core.group, [name, platform-admins]]
       
       # Create OIDC provider for Dex (structure only, no client secret)
       # Client secret will be set by Config Sync Job after Authentik is ready

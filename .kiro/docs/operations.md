@@ -84,6 +84,75 @@ kubectl port-forward svc/argocd-server -n argocd 8080:443
 **Source**
 - `platform/bootstrap/bootstrap.sh`
 
+## Authentication System Validation
+
+After bootstrap completes and ArgoCD syncs the authentication system, validate OIDC functionality:
+
+### Validate OIDC Discovery
+
+```bash
+# Run OIDC discovery validation script
+platform/scripts/validate-oidc-discovery.sh
+
+# Manual validation
+curl https://dex.home.local/.well-known/openid-configuration
+curl https://dex.home.local/keys
+```
+
+### Validate RBAC Authorization
+
+```bash
+# Run RBAC validation script
+platform/scripts/validate-rbac.sh
+
+# Manual RBAC checks
+kubectl auth can-i create pipelines.platform.dev --as=admin@platform.local --as-group=platform-admins
+kubectl auth can-i create pipelines.platform.dev --as=alice@platform.local --as-group=platform-engineering -n user-alice
+kubectl auth can-i create pipelines.platform.dev --as=alice@platform.local --as-group=platform-engineering -n auth-system
+```
+
+### Test Break-Glass Access
+
+```bash
+# Verify certificate-based admin access works
+kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes
+
+# Test when OIDC is unavailable
+kubectl scale deployment/dex --replicas=0 -n auth-system
+kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n auth-system
+kubectl scale deployment/dex --replicas=1 -n auth-system
+```
+
+### Access Authentication Services
+
+**Authentik UI (User Management)**:
+```bash
+# Get admin password
+kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-password}' | base64 -d
+
+# Access at https://auth.home.local
+# Username: admin
+# Password: (from above command)
+```
+
+**ArgoCD with OIDC**:
+```bash
+# Access at https://argocd.home.local
+# Click "Login via Dex"
+# Authenticate with Authentik credentials
+```
+
+**Tekton Dashboard with OIDC**:
+```bash
+# Access at https://tekton.home.local
+# Authenticate with Authentik credentials via Dex
+```
+
+**Source**
+- `platform/scripts/validate-oidc-discovery.sh`
+- `platform/scripts/validate-rbac.sh`
+- `platform/auth/ingress/`
+
 ## Repository Registration
 
 ### Create RepoBinding

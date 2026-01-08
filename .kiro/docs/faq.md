@@ -435,17 +435,70 @@ After bootstrap completes and ArgoCD syncs the auth system:
 
 Users can authenticate immediately - no pod restarts or configuration changes required.
 
-### What's the difference between admins and engineering groups?
+### What's the difference between platform groups?
 
-**admins group**:
+**platform-admins group**:
 - Full access to ArgoCD (can create, update, delete applications)
 - Full access to Tekton Dashboard (can create, update, delete pipelines)
+- Full CRUD access to all platform CRDs in all namespaces
+- Can create and delete namespaces
 - Superuser access to Authentik UI (can manage users and groups)
 
-**engineering group**:
-- Read-only access to ArgoCD (can view applications and sync status)
-- Read-only access to Tekton Dashboard (can view pipelines and runs)
-- No access to Authentik UI (can only authenticate)
+**platform-operators group**:
+- Full access to platform CRDs (cannot create/delete namespaces)
+- Can read logs and events in all namespaces for troubleshooting
+- Read-only access to ArgoCD and Tekton Dashboard
+
+**platform-engineering group**:
+- Can create, read, update platform CRDs (no delete permissions)
+- Restricted to user-* and team-* namespaces only
+- Cannot access platform system namespaces
+- Read-only access to ArgoCD and Tekton Dashboard
+
+### How do I troubleshoot OIDC authentication issues?
+
+**Symptom: "Cannot reach Dex" during login**
+
+1. **Check Dex pod status**:
+   ```bash
+   kubectl get pods -n auth-system -l app=dex
+   kubectl logs -n auth-system -l app=dex
+   ```
+
+2. **Verify Dex Ingress**:
+   ```bash
+   kubectl get ingress -n auth-system dex
+   curl -v https://dex.home.local/.well-known/openid-configuration
+   ```
+
+3. **Check DNS resolution**:
+   ```bash
+   nslookup dex.home.local
+   ```
+
+**Symptom: "Permission Denied" after successful login**
+
+1. **Check user's group membership in Authentik UI**
+2. **Verify RBAC permissions**:
+   ```bash
+   kubectl auth can-i create pipelines.platform.dev --as=user@platform.local --as-group=platform-engineering -n user-alice
+   ```
+
+3. **Check token claims**:
+   ```bash
+   # Decode JWT token to verify groups claim
+   # (Use jwt.io or similar tool to decode token)
+   ```
+
+**Symptom: Break-glass access needed**
+
+```bash
+# Use certificate-based admin access
+kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -n auth-system
+
+# Fix OIDC issues using admin access
+kubectl --kubeconfig /etc/kubernetes/admin.conf rollout restart deployment/dex -n auth-system
+```
 
 ### How do I configure DNS for authentication services?
 

@@ -86,15 +86,21 @@ The authentication system provides centralized authentication and authorization 
 ```mermaid
 graph TB
     Users[Platform Users]
+    AphexCLI[AphexCLI<br/>kubectl + exec plugin]
     
     subgraph Platform Services
         ArgoCD[ArgoCD UI<br/>OIDC Client]
         Tekton[Tekton Dashboard<br/>OIDC Client]
     end
     
+    subgraph Kubernetes Cluster
+        APIServer[kube-apiserver<br/>OIDC Validation]
+        RBAC[Kubernetes RBAC<br/>Group-based Authorization]
+    end
+    
     subgraph auth-system namespace
         subgraph Dex OIDC Connector Layer
-            Dex[Dex Server<br/>- OIDC Proxy/Connector<br/>- Token Translation<br/>- Service Integration]
+            Dex[Dex Server<br/>- OIDC Proxy/Connector<br/>- Token Translation<br/>- Service Integration<br/>- Kubernetes Client]
         end
         
         subgraph Authentik Identity Provider
@@ -113,15 +119,14 @@ graph TB
         ConfigSyncJob[Config Sync Job<br/>Orchestrates Authentik-Dex Integration]
     end
     
-    subgraph Kubernetes RBAC
-        RBAC[ClusterRoles<br/>ClusterRoleBindings<br/>Group-based Access]
-    end
-    
     subgraph Ingress Layer
         Ingress[Ingress Resources<br/>auth.home.local<br/>dex.home.local<br/>argocd.home.local<br/>tekton.home.local]
     end
     
     Users -->|HTTPS| Ingress
+    Users -->|aphex login| AphexCLI
+    AphexCLI -->|Browser OIDC Flow| Dex
+    AphexCLI -->|JWT Tokens| APIServer
     Ingress -->|Routes| ArgoCD
     Ingress -->|Routes| Tekton
     Ingress -->|Routes| Authentik
@@ -129,6 +134,8 @@ graph TB
     ArgoCD -->|OIDC Auth| Dex
     Tekton -->|OIDC Auth| Dex
     Dex -->|OIDC Connector| Authentik
+    APIServer -->|JWKS Validation| Dex
+    APIServer -->|Group Claims| RBAC
     Authentik --> Internal
     Authentik --> GitHub
     Authentik --> LDAP
@@ -141,6 +148,7 @@ graph TB
     
     style auth-system fill:#fff4e1
     style Ingress Layer fill:#e1f5ff
+    style Kubernetes Cluster fill:#f0f8ff
 ```
 
 ### Component Responsibilities
@@ -187,6 +195,45 @@ graph TB
 - Use real hostnames (e.g., `https://auth.home.local`, `https://dex.home.local`)
 - Enable browser-reachable URLs for OIDC redirect flows
 - Support TLS with self-signed certificates or Let's Encrypt
+
+**kube-apiserver OIDC Integration:**
+- Configured to trust Dex-issued JWT tokens
+- Validates token signature using Dex JWKS endpoint
+- Extracts username from email claim and groups from groups claim
+- Passes authenticated identity to Kubernetes RBAC for authorization
+- Maintains break-glass admin access via certificate-based authentication
+
+### Platform Groups and RBAC
+
+The authentication system defines three platform groups with distinct permission levels:
+
+**platform-admins:**
+- Full CRUD access to all platform CRDs in all namespaces
+- Can create and delete namespaces
+- Can read logs and events for troubleshooting
+- Bound to `platform-admin` ClusterRole via ClusterRoleBinding
+
+**platform-operators:**
+- Full CRUD access to platform CRDs (cannot create/delete namespaces)
+- Can read logs and events in all namespaces for troubleshooting
+- Cannot create or delete namespaces
+- Bound to `platform-operator` ClusterRole via ClusterRoleBinding
+
+**platform-engineering:**
+- Create, read, and update platform CRDs (no delete permissions)
+- Restricted to user-* and team-* namespaces only
+- Cannot access platform system namespaces (auth-system, tekton-pipelines, argocd)
+- Uses RoleBindings in specific namespaces (not ClusterRoleBinding)
+
+**Namespace Scoping Pattern:**
+- Engineers can only create resources in namespaces matching `user-*` or `team-*` patterns
+- Platform system namespaces are protected from engineer access
+- Admins and operators have access to all namespaces
+
+**Source**
+- `platform/auth/authentik/blueprints-configmap.yaml`
+- `platform/rbac/platform-rbac.yaml`
+- `platform/bootstrap/kind-cluster-config.yaml`
 
 ### GitOps Ownership Boundaries
 

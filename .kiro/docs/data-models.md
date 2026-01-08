@@ -568,6 +568,69 @@ ArgoCD updates Application status
 
 ## Authentication Data Models
 
+### Platform Groups
+
+The authentication system defines three platform groups with specific permissions:
+
+```yaml
+# platform-admins group
+name: platform-admins
+is_superuser: true
+permissions:
+  - Full CRUD access to all platform CRDs
+  - Create and delete namespaces
+  - Read logs and events in all namespaces
+
+# platform-operators group  
+name: platform-operators
+is_superuser: false
+permissions:
+  - Full CRUD access to platform CRDs (no namespace management)
+  - Read logs and events in all namespaces
+  - Cannot create or delete namespaces
+
+# platform-engineering group
+name: platform-engineering
+is_superuser: false
+permissions:
+  - Create, read, update platform CRDs (no delete)
+  - Restricted to user-* and team-* namespaces only
+  - Cannot access platform system namespaces
+```
+
+### JWT Token Claims
+
+Dex-issued JWT tokens contain the following claims structure:
+
+```typescript
+interface JWTClaims {
+  iss: string;                  // Issuer: "https://dex.home.local"
+  sub: string;                  // Subject: unique user identifier
+  aud: string;                  // Audience: "kubernetes" | "argocd" | "tekton-dashboard"
+  exp: number;                  // Expiration time (Unix timestamp)
+  iat: number;                  // Issued at time (Unix timestamp)
+  email: string;                // User's email address (used as username)
+  email_verified: boolean;      // Whether email is verified
+  name: string;                 // User's display name
+  groups: string[];             // User's group memberships from Authentik
+}
+```
+
+**Example Kubernetes API Token**:
+```json
+{
+  "iss": "https://dex.home.local",
+  "sub": "CgVhbGljZRIEbW9jaw",
+  "aud": "kubernetes",
+  "exp": 1704153600,
+  "iat": 1704067200,
+  "email": "alice@platform.local",
+  "email_verified": true,
+  "name": "Alice Developer",
+  "groups": ["platform-engineering"]
+}
+```
+
 ### Authentik User Schema
 
 ```typescript

@@ -166,9 +166,10 @@ generate_secrets() {
   # Generate Dex client secret
   DEX_CLIENT_SECRET=$(openssl rand -base64 32)
   
-  # Generate ArgoCD and Tekton client secrets
+  # Generate ArgoCD, Tekton, and Kubernetes client secrets
   ARGOCD_CLIENT_SECRET=$(openssl rand -base64 32)
   TEKTON_CLIENT_SECRET=$(openssl rand -base64 32)
+  KUBERNETES_CLIENT_SECRET=$(openssl rand -base64 32)
   
   log_success "Generated all secrets"
   
@@ -184,6 +185,7 @@ generate_secrets() {
     echo "Dex client secret (for Authentik): $DEX_CLIENT_SECRET"
     echo "ArgoCD OIDC client secret: $ARGOCD_CLIENT_SECRET"
     echo "Tekton Dashboard OIDC client secret: $TEKTON_CLIENT_SECRET"
+    echo "Kubernetes API OIDC client secret: $KUBERNETES_CLIENT_SECRET"
     echo ""
   fi
 }
@@ -247,7 +249,8 @@ create_auth_system_secrets() {
       --from-literal=client-secret="$DEX_CLIENT_SECRET" \
       --from-literal=authentik-client-secret="$DEX_CLIENT_SECRET" \
       --from-literal=argocd-client-secret="$ARGOCD_CLIENT_SECRET" \
-      --from-literal=tekton-client-secret="$TEKTON_CLIENT_SECRET"
+      --from-literal=tekton-client-secret="$TEKTON_CLIENT_SECRET" \
+      --from-literal=kubernetes-client-secret="$KUBERNETES_CLIENT_SECRET"
     log_success "Created secret: dex-secrets (in $AUTH_NAMESPACE)"
   fi
   
@@ -332,6 +335,26 @@ wait_for_config_sync_job() {
   log_info "Monitor with: kubectl logs -n auth-system job/auth-config-sync -f"
 }
 
+validate_oidc_configuration() {
+  log_info "OIDC validation will be available after Dex deployment"
+  echo ""
+  echo "To validate OIDC configuration after platform converges:"
+  echo ""
+  echo "1. Verify Dex OIDC discovery endpoint:"
+  echo "   curl https://dex.home.local/.well-known/openid-configuration"
+  echo ""
+  echo "2. Verify kube-apiserver can reach Dex (from within cluster):"
+  echo "   kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \\"
+  echo "     curl -v https://dex.home.local/.well-known/openid-configuration"
+  echo ""
+  echo "3. Verify JWKS endpoint:"
+  echo "   curl https://dex.home.local/keys"
+  echo ""
+  echo "4. Test break-glass access:"
+  echo "   kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes"
+  echo ""
+}
+
 print_access_instructions() {
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -409,6 +432,7 @@ main() {
   create_argocd_and_tekton_secrets
   create_root_application
   wait_for_config_sync_job
+  validate_oidc_configuration
   print_access_instructions
 }
 
