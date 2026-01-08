@@ -8,7 +8,6 @@ import (
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
 	authorizationv1 "k8s.io/api/authorization/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )

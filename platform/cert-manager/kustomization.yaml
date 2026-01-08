@@ -4,6 +4,7 @@ kind: Kustomization
 # Use official cert-manager manifests
 resources:
   - https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+  - webhook-readiness-hook.yaml
 
 # Add namespace label for ArgoCD tracking
 namespace: cert-manager

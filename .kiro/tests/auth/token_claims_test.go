@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 
