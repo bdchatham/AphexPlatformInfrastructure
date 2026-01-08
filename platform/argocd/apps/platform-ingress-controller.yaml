@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-ingress
+  name: platform-ingress-controller
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
@@ -13,11 +13,11 @@ spec:
   source:
     repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
-    path: platform/ingress
+    path: platform/ingress-controller
   
   destination:
     server: https://kubernetes.default.svc
-    namespace: auth-system
+    namespace: ingress-system
   
   syncPolicy:
     automated:

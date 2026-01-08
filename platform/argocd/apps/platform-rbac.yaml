@@ -1,10 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-ingress
+  name: platform-rbac
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "0"
+    argocd.argoproj.io/sync-wave: "5"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -13,18 +13,15 @@ spec:
   source:
     repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
     targetRevision: HEAD
-    path: platform/ingress
+    path: platform/rbac
   
   destination:
     server: https://kubernetes.default.svc
-    namespace: auth-system
   
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
     retry:
       limit: 5
       backoff:
