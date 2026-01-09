@@ -67,8 +67,8 @@ metadata:
   name: platform-engineer
 rules:
   # Create/read/update platform CRDs (no delete)
-  - apiGroups: ["platform.dev"]
-    resources: ["pipelines", "workspaces", "environments"]
+  - apiGroups: ["arbiter.local"]
+    resources: ["repobindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
   
   # Read-only for cluster-scoped resources
