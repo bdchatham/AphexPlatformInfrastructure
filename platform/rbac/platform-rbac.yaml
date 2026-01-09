@@ -5,7 +5,7 @@ metadata:
   name: platform-admin
 rules:
   # Full access to platform CRDs
-  - apiGroups: ["platform.dev"]
+  - apiGroups: ["arbiter.local"]
     resources: ["*"]
     verbs: ["*"]
   

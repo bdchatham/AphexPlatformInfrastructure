@@ -56,7 +56,7 @@ kubectl get pods --user=oidc
 
 The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `arbiter.io`  
+**API Group**: `pipeline.arbiter.local`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
 **Scope**: Namespaced (must be created in `platform-system` namespace)

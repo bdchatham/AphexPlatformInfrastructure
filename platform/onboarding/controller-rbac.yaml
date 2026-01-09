@@ -7,7 +7,7 @@ metadata:
 rules:
 # RepoBinding CRD permissions
 - apiGroups:
-  - arbiter.io
+  - arbiter.local
   resources:
   - repobindings
   verbs:
@@ -17,7 +17,7 @@ rules:
   - update
   - patch
 - apiGroups:
-  - arbiter.io
+  - arbiter.local
   resources:
   - repobindings/status
   verbs:

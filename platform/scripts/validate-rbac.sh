@@ -54,17 +54,17 @@ test_permission() {
 validate_platform_admins() {
   log_info "Validating platform-admins permissions..."
   
-  test_permission "admin@platform.local" "platform-admins" "create" "pipelines.platform.dev" "user-alice" "yes"
-  test_permission "admin@platform.local" "platform-admins" "delete" "pipelines.platform.dev" "user-alice" "yes"
-  test_permission "admin@platform.local" "platform-admins" "create" "pipelines.platform.dev" "auth-system" "yes"
+  test_permission "admin@platform.local" "platform-admins" "create" "repobindings.arbiter.local" "platform-system" "yes"
+  test_permission "admin@platform.local" "platform-admins" "delete" "repobindings.arbiter.local" "platform-system" "yes"
   test_permission "admin@platform.local" "platform-admins" "create" "namespaces" "" "yes"
+  test_permission "admin@platform.local" "platform-admins" "get" "pods" "tekton-pipelines" "yes"
 }
 
 validate_platform_operators() {
   log_info "Validating platform-operators permissions..."
   
-  test_permission "operator@platform.local" "platform-operators" "create" "pipelines.platform.dev" "user-alice" "yes"
-  test_permission "operator@platform.local" "platform-operators" "delete" "pipelines.platform.dev" "user-alice" "yes"
+  test_permission "operator@platform.local" "platform-operators" "create" "repobindings.arbiter.local" "platform-system" "yes"
+  test_permission "operator@platform.local" "platform-operators" "delete" "repobindings.arbiter.local" "platform-system" "yes"
   test_permission "operator@platform.local" "platform-operators" "get" "pods" "tekton-pipelines" "yes"
   test_permission "operator@platform.local" "platform-operators" "create" "namespaces" "" "no"
   test_permission "operator@platform.local" "platform-operators" "delete" "namespaces" "" "no"
@@ -73,10 +73,10 @@ validate_platform_operators() {
 validate_platform_engineering() {
   log_info "Validating platform-engineering permissions..."
   
-  test_permission "alice@platform.local" "platform-engineering" "create" "pipelines.platform.dev" "user-alice" "yes"
-  test_permission "alice@platform.local" "platform-engineering" "update" "pipelines.platform.dev" "user-alice" "yes"
-  test_permission "alice@platform.local" "platform-engineering" "delete" "pipelines.platform.dev" "user-alice" "no"
-  test_permission "alice@platform.local" "platform-engineering" "create" "pipelines.platform.dev" "auth-system" "no"
+  test_permission "alice@platform.local" "platform-engineering" "create" "repobindings.arbiter.local" "platform-system" "no"
+  test_permission "alice@platform.local" "platform-engineering" "get" "repobindings.arbiter.local" "platform-system" "no"
+  test_permission "alice@platform.local" "platform-engineering" "delete" "repobindings.arbiter.local" "platform-system" "no"
+  test_permission "alice@platform.local" "platform-engineering" "get" "pods" "auth-system" "no"
   test_permission "alice@platform.local" "platform-engineering" "create" "namespaces" "" "no"
 }
 
