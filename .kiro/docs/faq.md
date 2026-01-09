@@ -4,26 +4,77 @@
 
 ### What is this repository for?
 
-The Arbiter Pipeline Infrastructure provides a lightweight GitOps platform using ArgoCD and Tekton for homelab Kubernetes clusters. It enables self-service repository registration with automated tenant provisioning, CDKTF deployment pipelines, and self-upgrade capabilities through ArgoCD-based GitOps.
+The Arbiter Pipeline Infrastructure provides a production-ready GitOps platform using ArgoCD and Tekton with revolutionary layered cert-manager architecture. It enables zero-touch deployment, centralized authentication, self-service repository onboarding, and bulletproof certificate management.
 
 ### How does this fit into the larger system?
 
-This platform provides shared CI/CD infrastructure for the Arbiter agent suite and product teams. Teams can onboard their repositories, which automatically provisions isolated tenant resources and enables automated CDKTF deployments on merge to main.
+This platform provides shared CI/CD infrastructure with complete tenant isolation. Teams can onboard repositories through RepoBinding CRDs, which automatically provisions isolated namespaces with RBAC, network policies, and pipeline resources. The platform serves as the foundation for automated deployments and infrastructure management.
+
+### What makes the cert-manager architecture special?
+
+The platform implements a layered cert-manager deployment that eliminates the classic "webhook chicken-and-egg" problem:
+- **Wave 10**: cert-manager installation with PostSync webhook validation
+- **Wave 20**: Certificate creation (only after webhook is truly ready)
+- **Wave 30**: Ingress resources (only after certificates exist)
+
+This eliminates manual intervention and timing-related failures that plague traditional cert-manager deployments.
+
+### What is zero-touch bootstrap?
+
+The bootstrap script achieves complete platform convergence automatically:
+- Generates ALL secrets (PostgreSQL, Authentik, Dex, API tokens)
+- Creates cluster and installs ArgoCD
+- Waits for Authentik deployment and creates API token
+- Achieves full platform functionality without manual steps
+- Never prints secrets to stdout (provides kubectl commands instead)
 
 ### What is a tenant?
 
-A tenant is a product team with an isolated namespace and dedicated pipeline resources. Each tenant gets:
-- Dedicated Kubernetes namespace
-- Service account with least-privilege RBAC
-- Resource quotas to prevent exhaustion
-- Network policies for isolation
-- EventListener for webhook handling
-- Ingress for webhook routing
-- Terraform backend configuration
+A tenant is a product team with complete isolation and dedicated resources:
+- **Namespace**: Isolated Kubernetes namespace with RBAC boundaries
+- **Service Account**: Least-privilege access with role-based permissions
+- **Resource Quotas**: CPU, memory, and storage limits
+- **Network Policies**: Traffic isolation with ingress exceptions
+- **EventListener**: Tekton webhook handler for GitHub integration
+- **Pipeline Resources**: Access to shared catalog and custom pipelines
 
-### Can I use this platform for non-CDKTF projects?
+## Authentication Questions
 
-Yes! While the platform includes a CDKTF pipeline in the catalog, you can define custom pipelines in your repository for any build/deploy workflow. The platform provides the infrastructure and isolation; you define the pipeline steps.
+### How do I access platform services?
+
+All platform services use centralized authentication via Authentik and Dex:
+
+**ArgoCD UI**: `https://argocd.home.local`
+- Click "Login via Dex" → Authenticate with Authentik
+
+**Tekton Dashboard**: `https://tekton.home.local`
+- Authenticate via Dex/Authentik
+
+**Authentik UI**: `https://auth.home.local`
+- Direct login with admin credentials
+
+### How do I manage users?
+
+Use the Authentik web UI for user management:
+1. Access `https://auth.home.local`
+2. Login with admin credentials
+3. Navigate to Directory → Users
+4. Create users and assign to groups (`admins` or `engineering`)
+
+### How do I get admin credentials?
+
+Retrieve from Kubernetes secrets (never printed during bootstrap):
+```bash
+kubectl get secret authentik-secrets -n auth-system \
+  -o jsonpath='{.data.admin-password}' | base64 -d
+```
+
+### Why can't I access services at localhost URLs?
+
+The platform uses real hostnames for OIDC authentication:
+- Browser redirects require reachable URLs
+- Internal Kubernetes DNS (`*.svc.cluster.local`) won't work
+- Configure DNS for `*.home.local` in your router or hosts file
 
 ## Development Questions
 
@@ -31,73 +82,228 @@ Yes! While the platform includes a CDKTF pipeline in the catalog, you can define
 
 Create a RepoBinding resource:
 
-```bash
-kubectl apply -f - <<EOF
-apiVersion: arbiter.io/v1alpha1
+```yaml
+apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: platform-system
+  namespace: pipeline-system
 spec:
-  repoOrg: "your-github-org"
-  repoName: "your-repo"
-  tenantName: "my-tenant"
+  repoOrg: "acme-corp"
+  repoName: "my-application"
+  tenantName: "my-app"
   permissionProfile: "standard"
-  ingressHost: "webhooks.example.com"
-EOF
 ```
 
-Then verify onboarding:
-
+Apply and verify:
 ```bash
-kubectl get repobinding my-repo-binding -n platform-system
-kubectl get namespace my-tenant
+kubectl apply -f repobinding.yaml
+kubectl get repobinding my-repo-binding -n pipeline-system
+kubectl get namespace my-app
 ```
 
 ### How do I configure the GitHub webhook?
 
-After onboarding, get the webhook URL and secret from the RepoBinding status:
+After RepoBinding reaches `Ready` phase:
 
 ```bash
-kubectl get repobinding my-repo-binding -n platform-system -o yaml
-```
+# Get webhook configuration
+kubectl get repobinding my-repo-binding -n pipeline-system -o yaml
 
-Then configure in GitHub:
-1. Go to repository Settings → Webhooks → Add webhook
-2. Payload URL: (from RepoBinding status.webhookURL)
-3. Content type: application/json
-4. Secret: (from RepoBinding status.webhookSecret)
-5. Events: Push events
-6. Active: ✓
+# Configure in GitHub repository:
+# Settings → Webhooks → Add webhook
+# - Payload URL: (from status.webhookConfiguration.url)
+# - Content type: application/json
+# - Secret: (from status.webhookConfiguration.secret)
+# - Events: Push events
+# - Active: ✓
+```
 
 ### How do I view pipeline logs?
 
 ```bash
-# List PipelineRuns
-kubectl get pipelineruns -n my-tenant
+# List recent PipelineRuns
+kubectl get pipelineruns -n my-app --sort-by=.metadata.creationTimestamp
 
 # Get PipelineRun details
-kubectl describe pipelinerun <name> -n my-tenant
+kubectl describe pipelinerun <name> -n my-app
 
-# View logs
-kubectl logs -n my-tenant -l tekton.dev/pipelineRun=<name>
+# View logs for all tasks
+kubectl logs -n my-app -l tekton.dev/pipelineRun=<name>
 
-# Stream logs
-kubectl logs -n my-tenant -l tekton.dev/pipelineRun=<name> -f
+# Stream logs in real-time
+kubectl logs -n my-app -l tekton.dev/pipelineRun=<name> -f
 ```
 
-### How do I test my pipeline locally?
+### How do I test pipelines without GitHub webhooks?
 
-You can create a PipelineRun manually:
+Create a PipelineRun manually:
 
-```bash
-kubectl create -f - <<EOF
+```yaml
 apiVersion: tekton.dev/v1beta1
 kind: PipelineRun
 metadata:
   name: test-run
-  namespace: my-tenant
+  namespace: my-app
 spec:
+  pipelineRef:
+    name: my-pipeline
+  params:
+  - name: git-url
+    value: "https://github.com/acme-corp/my-application"
+  - name: git-revision
+    value: "main"
+  workspaces:
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+```
+
+## Operational Questions
+
+### How do I upgrade the platform?
+
+The platform is self-upgrading via GitOps:
+1. Update component versions in `platform/` manifests
+2. Commit and push to Git
+3. ArgoCD detects changes and syncs automatically
+4. Monitor application health in ArgoCD UI
+
+### How do I troubleshoot cert-manager issues?
+
+Check the layered deployment status:
+
+```bash
+# Wave 10: cert-manager installation
+kubectl get pods -n cert-manager
+kubectl get job cert-manager-webhook-readiness -n cert-manager
+kubectl logs job/cert-manager-webhook-readiness -n cert-manager
+
+# Wave 20: Certificate creation
+kubectl get clusterissuer selfsigned-issuer
+kubectl get certificates -A
+
+# Wave 30: Ingress resources
+kubectl get ingress -A
+```
+
+### Why are my certificates not ready?
+
+Check the cert-manager webhook validation:
+
+```bash
+# Check webhook readiness job
+kubectl get job cert-manager-webhook-readiness -n cert-manager
+kubectl logs job/cert-manager-webhook-readiness -n cert-manager
+
+# Check webhook endpoints
+kubectl get endpoints cert-manager-webhook -n cert-manager
+
+# Check webhook configuration
+kubectl get validatingwebhookconfiguration cert-manager-webhook \
+  -o jsonpath='{.webhooks[0].clientConfig.caBundle}' | base64 -d | openssl x509 -text -noout
+```
+
+### How do I check ArgoCD application sync status?
+
+```bash
+# List all applications with status
+kubectl get applications -n argocd
+
+# Get detailed application status
+kubectl describe application platform-cert-manager -n argocd
+
+# Check sync waves and ordering
+kubectl get applications -n argocd \
+  -o custom-columns="NAME:.metadata.name,WAVE:.metadata.annotations.argocd\.argoproj\.io/sync-wave,STATUS:.status.sync.status,HEALTH:.status.health.status"
+```
+
+### How do I access ArgoCD when authentication is broken?
+
+Use port-forward to bypass ingress and authentication:
+
+```bash
+# Port-forward to ArgoCD server
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+
+# Get admin password
+kubectl get secret argocd-initial-admin-secret -n argocd \
+  -o jsonpath='{.data.password}' | base64 -d
+
+# Access at https://localhost:8080
+# Username: admin, Password: (from above)
+```
+
+### How do I reset the authentication system?
+
+If authentication is completely broken:
+
+```bash
+# Delete auth-system pods to restart
+kubectl delete pods -n auth-system --all
+
+# Check Config Sync Job status
+kubectl get job auth-config-sync -n auth-system
+kubectl logs job/auth-config-sync -n auth-system
+
+# Verify Dex scaling
+kubectl get deployment dex -n auth-system
+```
+
+### How do I migrate from Kind to a real cluster?
+
+The platform is designed for portability:
+
+1. **Deploy ingress controller** to real cluster
+2. **Configure real DNS** for `*.home.local` (or your domain)
+3. **Update ClusterIssuer** for Let's Encrypt (optional)
+4. **Run bootstrap script** with `--use-existing` flag
+5. **Platform converges identically** to Kind deployment
+
+The only differences are ingress controller and DNS configuration.
+
+## Troubleshooting
+
+### Bootstrap fails with "authentication required" error
+
+This usually means ArgoCD can't access the Git repository:
+- Verify repository URL is correct and accessible
+- Check if repository is private (may need access tokens)
+- Ensure network connectivity from cluster to GitHub
+
+### Certificates stuck in "Progressing" state
+
+Check the layered cert-manager deployment:
+- Verify cert-manager pods are Running
+- Check webhook readiness job completed successfully
+- Verify ClusterIssuer is ready before certificates
+
+### Authentication redirects fail with "invalid redirect URI"
+
+Verify OIDC configuration:
+- Ensure hostnames are reachable from browser
+- Check DNS configuration for `*.home.local`
+- Verify ingress controller is accessible
+- Never use `*.svc.cluster.local` URLs for browser redirects
+
+### Platform services return 503 errors
+
+Check ingress and TLS configuration:
+- Verify ingress controller is running
+- Check certificate status (`kubectl get certificates -A`)
+- Verify DNS resolution from your device
+- Check ingress resource configuration
+
+**Source**
+- `platform/bootstrap/bootstrap.sh` - Bootstrap implementation and troubleshooting
+- `platform/cert-manager/webhook-readiness-hook.yaml` - cert-manager validation
+- `platform/auth/` - Authentication system components
+- `platform/argocd/apps/` - ArgoCD application definitions
   pipelineRef:
     name: cdktf-deploy-pipeline
     namespace: platform-system

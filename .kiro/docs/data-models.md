@@ -2,12 +2,13 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs) and standard Kubernetes resources to define data structures. All state is managed by Kubernetes (cluster state) and the onboarding controller (tenant provisioning state).
+The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs), standard Kubernetes resources, and configuration data structures to manage platform state. All data is stored in Kubernetes etcd with GitOps-managed configuration.
 
-Data flows through the system in three main forms:
-1. **RepoBinding Resources**: Custom resources for onboarding requests
-2. **Kubernetes Resources**: YAML manifests for tenant infrastructure
-3. **ArgoCD Applications**: GitOps application definitions
+Data flows through the system in four main forms:
+1. **RepoBinding Resources**: Custom resources for tenant onboarding
+2. **ArgoCD Applications**: GitOps application definitions with sync waves
+3. **Authentication Data**: User accounts, groups, and OIDC configuration
+4. **Certificate Resources**: TLS certificates and issuers managed by cert-manager
 
 ## RepoBinding Data Model
 
@@ -15,29 +16,26 @@ Data flows through the system in three main forms:
 
 ```typescript
 interface RepoBindingSpec {
-  repoOrg: string;              // GitHub organization (e.g., "your-github-org")
-  repoName: string;             // Repository name (e.g., "archon-agent")
-  tenantName: string;           // Tenant namespace name (e.g., "archon")
+  repoOrg: string;              // GitHub organization (e.g., "acme-corp")
+  repoName: string;             // Repository name (e.g., "my-application")
+  tenantName: string;           // Tenant namespace name (e.g., "my-app")
   permissionProfile: "standard" | "elevated";  // Permission level (default: "standard")
-  ingressHost?: string;         // Optional ingress hostname (e.g., "webhooks.example.com")
 }
 ```
 
 **Validation Rules**:
-- `repoOrg`: Must match pattern `^[a-z0-9-]+$`
-- `repoName`: Must match pattern `^[a-z0-9-]+$`
-- `tenantName`: Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace
+- `repoOrg`: Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$`
+- `repoName`: Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$`
+- `tenantName`: Must match Kubernetes namespace naming rules
 - `permissionProfile`: Must be "standard" or "elevated"
-- `ingressHost`: Must be valid hostname format (if provided)
 
 **Example**:
 ```yaml
 spec:
-  repoOrg: "your-github-org"
-  repoName: "archon-agent"
-  tenantName: "archon"
+  repoOrg: "acme-corp"
+  repoName: "my-application"
+  tenantName: "my-app"
   permissionProfile: "standard"
-  ingressHost: "webhooks.example.com"
 ```
 
 ### RepoBinding Status
@@ -46,16 +44,29 @@ spec:
 interface RepoBindingStatus {
   phase: "Pending" | "Provisioning" | "Ready" | "Failed";
   message: string;
-  webhookURL: string;
-  webhookSecret: string;
-  namespaceCreated: boolean;
-  serviceAccountCreated: boolean;
-  rbacCreated: boolean;
-  quotasCreated: boolean;
-  networkPolicyCreated: boolean;
-  terraformSecretCreated: boolean;
-  eventListenerCreated: boolean;
-  ingressCreated: boolean;
+  conditions: Condition[];
+  webhookConfiguration: {
+    url: string;
+    secret: string;
+    events: string[];
+  };
+  provisionedResources: {
+    namespace: boolean;
+    serviceAccount: boolean;
+    rbac: boolean;
+    resourceQuota: boolean;
+    networkPolicy: boolean;
+    eventListener: boolean;
+    pipelineResources: boolean;
+  };
+}
+
+interface Condition {
+  type: string;
+  status: "True" | "False" | "Unknown";
+  reason: string;
+  message: string;
+  lastTransitionTime: string;
 }
 ```
 
@@ -66,38 +77,284 @@ Pending → Provisioning → Ready
                     Failed
 ```
 
-**Example**:
-```yaml
-status:
-  phase: Ready
-  message: "All resources provisioned successfully"
-  webhookURL: "https://webhooks.example.com/archon"
-  webhookSecret: "whsec_abc123xyz456"
-  namespaceCreated: true
-  serviceAccountCreated: true
-  rbacCreated: true
-  quotasCreated: true
-  networkPolicyCreated: true
-  terraformSecretCreated: true
-  eventListenerCreated: true
-  ingressCreated: true
-```
+**Condition Types**:
+- `NamespaceReady`: Tenant namespace created and configured
+- `RBACReady`: Service account and RBAC policies configured
+- `NetworkPolicyReady`: Network isolation policies applied
+- `EventListenerReady`: Tekton webhook handler configured
+- `WebhookReady`: GitHub webhook configuration available
 
 ## ArgoCD Application Data Model
 
-### Application Spec
+### Application Spec with Sync Waves
 
 ```typescript
 interface ApplicationSpec {
   project: string;              // ArgoCD project (default: "default")
   source: {
     repoURL: string;            // Git repository URL
-    targetRevision: string;     // Git branch/tag/commit (e.g., "main")
+    targetRevision: string;     // Git branch/tag/commit (e.g., "HEAD")
     path: string;               // Path within repository
   };
   destination: {
     server: string;             // Kubernetes API server URL
+    namespace?: string;         // Target namespace (optional)
+  };
+  syncPolicy: {
+    automated: {
+      prune: boolean;           // Delete resources not in Git
+      selfHeal: boolean;        // Correct drift automatically
+    };
+    syncOptions: string[];      // Additional sync options
+    retry: {
+      limit: number;            // Max retry attempts
+      backoff: {
+        duration: string;       // Initial backoff duration
+        factor: number;         // Backoff multiplier
+        maxDuration: string;    // Maximum backoff duration
+      };
+    };
+  };
+}
+```
+
+### Sync Wave Annotations
+
+```typescript
+interface SyncWaveAnnotations {
+  "argocd.argoproj.io/sync-wave": string;  // Deployment order (e.g., "10", "20", "30")
+}
+```
+
+**Platform Sync Waves**:
+- **Wave 0**: `platform-ingress-controller` - Ingress controller deployment
+- **Wave 1**: `platform-tekton` - Tekton Pipelines and Triggers
+- **Wave 5**: `platform-crds`, `platform-rbac` - CRDs and RBAC policies
+- **Wave 10**: `platform-cert-manager`, `platform-auth` - cert-manager and authentication
+- **Wave 20**: `platform-cert-foundation`, `platform-controllers`, `platform-catalog` - Certificates and controllers
+- **Wave 30**: `platform-ingress` - Ingress resources with TLS
+
+## Authentication Data Model
+
+### Authentik User Data
+
+```typescript
+interface AuthentikUser {
+  pk: number;                   // Primary key
+  username: string;             // Username
+  email: string;                // Email address
+  name: string;                 // Display name
+  is_active: boolean;           // Account active status
+  groups: number[];             // Group membership (by group PK)
+  attributes: Record<string, any>; // Custom attributes
+}
+```
+
+### Authentik Group Data
+
+```typescript
+interface AuthentikGroup {
+  pk: number;                   // Primary key
+  name: string;                 // Group name (e.g., "admins", "engineering")
+  is_superuser: boolean;        // Superuser privileges
+  users: number[];              // User membership (by user PK)
+  attributes: Record<string, any>; // Custom attributes
+}
+```
+
+**Platform Groups**:
+- `admins`: Full access to all platform services
+- `engineering`: Read-only access to platform services
+
+### OIDC Provider Configuration
+
+```typescript
+interface OIDCProvider {
+  name: string;                 // Provider name (e.g., "dex")
+  client_id: string;            // OIDC client ID
+  client_secret: string;        // OIDC client secret
+  authorization_url: string;    // Authorization endpoint
+  access_token_url: string;     // Token endpoint
+  profile_url: string;          // User info endpoint
+  oidc_jwks_url: string;        // JWKS endpoint
+  issuer: string;               // OIDC issuer URL
+}
+```
+
+### Dex Configuration
+
+```typescript
+interface DexConfig {
+  issuer: string;               // Dex issuer URL (e.g., "https://dex.home.local")
+  storage: {
+    type: "kubernetes";
+    config: {
+      inCluster: boolean;
+    };
+  };
+  web: {
+    http: string;               // HTTP listen address
+    tlsCert?: string;           // TLS certificate path
+    tlsKey?: string;            // TLS key path
+  };
+  connectors: DexConnector[];
+  staticClients: DexClient[];
+  oauth2: {
+    skipApprovalScreen: boolean;
+  };
+}
+
+interface DexConnector {
+  type: "oidc";
+  id: string;                   // Connector ID
+  name: string;                 // Display name
+  config: {
+    issuer: string;             // Authentik issuer URL
+    clientID: string;           // OIDC client ID
+    clientSecret: string;       // OIDC client secret
+    redirectURI: string;        // Redirect URI
+    scopes: string[];           // OIDC scopes
+    claimsMapping: {
+      groups: string;           // Groups claim name
+    };
+  };
+}
+
+interface DexClient {
+  id: string;                   // Client ID (e.g., "argocd", "tekton-dashboard")
+  redirectURIs: string[];       // Allowed redirect URIs
+  name: string;                 // Client display name
+  secret: string;               // Client secret
+}
+```
+
+## Certificate Data Model
+
+### Certificate Resource
+
+```typescript
+interface Certificate {
+  apiVersion: "cert-manager.io/v1";
+  kind: "Certificate";
+  metadata: {
+    name: string;               // Certificate name (e.g., "dex-tls")
     namespace: string;          // Target namespace
+  };
+  spec: {
+    secretName: string;         // Secret name for certificate storage
+    issuerRef: {
+      name: string;             // Issuer name (e.g., "selfsigned-issuer")
+      kind: "ClusterIssuer" | "Issuer";
+    };
+    dnsNames: string[];         // DNS names for certificate
+    duration?: string;          // Certificate validity duration
+    renewBefore?: string;       // Renewal threshold
+  };
+  status?: {
+    conditions: CertificateCondition[];
+    renewalTime?: string;
+  };
+}
+
+interface CertificateCondition {
+  type: "Ready" | "Issuing";
+  status: "True" | "False" | "Unknown";
+  reason: string;
+  message: string;
+  lastTransitionTime: string;
+}
+```
+
+### ClusterIssuer Resource
+
+```typescript
+interface ClusterIssuer {
+  apiVersion: "cert-manager.io/v1";
+  kind: "ClusterIssuer";
+  metadata: {
+    name: string;               // Issuer name (e.g., "selfsigned-issuer")
+  };
+  spec: {
+    selfSigned?: {};            // Self-signed issuer configuration
+    acme?: {                    // ACME/Let's Encrypt configuration
+      server: string;           // ACME server URL
+      email: string;            // Contact email
+      privateKeySecretRef: {
+        name: string;           // Secret for ACME private key
+      };
+      solvers: ACMESolver[];
+    };
+  };
+  status?: {
+    conditions: IssuerCondition[];
+    acme?: {
+      uri: string;
+      lastRegisteredEmail: string;
+    };
+  };
+}
+```
+
+**Platform Certificates**:
+- `dex-tls`: TLS certificate for Dex OIDC connector
+- `authentik-tls`: TLS certificate for Authentik identity provider
+- `argocd-tls`: TLS certificate for ArgoCD UI
+- `tekton-tls`: TLS certificate for Tekton Dashboard
+
+## Configuration Data Flow
+
+### Bootstrap Secret Generation
+
+```typescript
+interface GeneratedSecrets {
+  postgresql: {
+    password: string;           // PostgreSQL user password
+    postgresPassword: string;   // PostgreSQL superuser password
+  };
+  authentik: {
+    secretKey: string;          // Authentik SECRET_KEY
+    adminPassword: string;      // Admin user password
+    bootstrapToken: string;     // API token for automation
+  };
+  dex: {
+    clientSecret: string;       // OIDC client secret
+  };
+  argocd: {
+    oidcClientSecret: string;   // ArgoCD OIDC client secret
+  };
+  tekton: {
+    oidcClientSecret: string;   // Tekton Dashboard OIDC client secret
+  };
+}
+```
+
+### Config Sync Job Data
+
+```typescript
+interface ConfigSyncJobData {
+  authentikConfig: {
+    baseUrl: string;            // Authentik base URL
+    token: string;              // API token
+    providerId: number;         // OIDC provider ID
+  };
+  dexConfig: {
+    clientSecret: string;       // Client secret to update
+    namespace: string;          // Dex deployment namespace
+    deploymentName: string;     // Dex deployment name
+  };
+  validation: {
+    authentikDiscovery: string; // Authentik OIDC discovery URL
+    dexDiscovery: string;       // Dex OIDC discovery URL
+  };
+}
+```
+
+**Source**
+- `platform/crds/repobinding-crd.yaml` - RepoBinding CRD definition
+- `platform/argocd/apps/` - ArgoCD application definitions
+- `platform/auth/authentik/blueprints-configmap.yaml` - Authentik configuration
+- `platform/auth/dex/dex-config.yaml` - Dex configuration
+- `platform/cert-foundation/certificates.yaml` - Certificate definitions
   };
   syncPolicy: {
     automated?: {
