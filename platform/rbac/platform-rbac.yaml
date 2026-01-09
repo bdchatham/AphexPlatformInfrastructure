@@ -66,17 +66,12 @@ kind: ClusterRole
 metadata:
   name: platform-engineer
 rules:
-  # Create/read/update platform CRDs (no delete)
-  - apiGroups: ["arbiter.local"]
-    resources: ["repobindings"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
-  
   # Read-only for cluster-scoped resources
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
   
-  # Read pods and logs in own namespaces
+  # Read pods and logs in own namespaces (will be restricted by RoleBindings)
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

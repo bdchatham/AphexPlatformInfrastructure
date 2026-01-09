@@ -73,11 +73,17 @@ validate_platform_operators() {
 validate_platform_engineering() {
   log_info "Validating platform-engineering permissions..."
   
+  # Should NOT have access to platform-system (system namespace)
   test_permission "alice@platform.local" "platform-engineering" "create" "repobindings.arbiter.local" "platform-system" "no"
   test_permission "alice@platform.local" "platform-engineering" "get" "repobindings.arbiter.local" "platform-system" "no"
   test_permission "alice@platform.local" "platform-engineering" "delete" "repobindings.arbiter.local" "platform-system" "no"
+  
+  # Should NOT have access to system namespaces
   test_permission "alice@platform.local" "platform-engineering" "get" "pods" "auth-system" "no"
   test_permission "alice@platform.local" "platform-engineering" "create" "namespaces" "" "no"
+  
+  # Should have read-only cluster access
+  test_permission "alice@platform.local" "platform-engineering" "get" "namespaces" "" "yes"
 }
 
 main() {
