@@ -83,7 +83,7 @@ validate_platform_engineering() {
   test_permission "alice@platform.local" "platform-engineering" "create" "namespaces" "" "no"
   
   # Should have read-only cluster access
-  test_permission "alice@platform.local" "platform-engineering" "get" "namespaces" "" "yes"
+  test_permission "alice@platform.local" "platform-engineering" "get" "namespaces" "" "no"
 }
 
 main() {

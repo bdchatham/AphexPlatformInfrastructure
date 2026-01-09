@@ -104,18 +104,4 @@ subjects:
     name: platform-operators
     apiGroup: rbac.authorization.k8s.io
 
-# Note: platform-engineering uses RoleBindings in specific namespaces, not ClusterRoleBinding
-# However, they need cluster-level read access to namespaces
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: platform-engineering
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: platform-engineer
-subjects:
-  - kind: Group
-    name: platform-engineering
-    apiGroup: rbac.authorization.k8s.io
+# platform-engineering uses RoleBindings in specific user-*/team-* namespaces only
