@@ -2,102 +2,233 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure.
+The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure with complete isolation and security boundaries.
 
 ## RepoBinding API
 
 ### RepoBinding Custom Resource
 
-The primary API for onboarding repositories to the platform.
+The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `arbiter.io`  
+**API Group**: `platform.arbiter.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
-**Scope**: Namespaced (must be created in `platform-system` namespace)
+**Scope**: Namespaced (must be created in `pipeline-system` namespace)
 
 ### RepoBinding Spec
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: <binding-name>
-  namespace: platform-system
+  namespace: pipeline-system
 spec:
   repoOrg: <string>              # Required: GitHub organization
   repoName: <string>             # Required: Repository name
   tenantName: <string>           # Required: Tenant namespace name
   permissionProfile: <string>    # Optional: "standard" or "elevated" (default: "standard")
-  ingressHost: <string>          # Optional: Ingress hostname for webhooks
 ```
 
 **Field Descriptions**:
 
 | Field | Type | Required | Description | Validation |
 |-------|------|----------|-------------|------------|
-| `repoOrg` | string | Yes | GitHub organization name | Must match pattern `^[a-z0-9-]+$` |
-| `repoName` | string | Yes | Repository name | Must match pattern `^[a-z0-9-]+$` |
-| `tenantName` | string | Yes | Tenant namespace name | Must match pattern `^[a-z0-9-]+$`, cannot be privileged namespace |
+| `repoOrg` | string | Yes | GitHub organization name | Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$` |
+| `repoName` | string | Yes | Repository name | Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$` |
+| `tenantName` | string | Yes | Tenant namespace name | Must match Kubernetes namespace naming rules |
 | `permissionProfile` | string | No | Permission level | Must be "standard" or "elevated" (default: "standard") |
-| `ingressHost` | string | No | Ingress hostname | Valid hostname format |
 
 **Validation Rules**:
-- `tenantName` cannot be a privileged namespace (kube-system, platform-system, argocd, tekton-pipelines, etc.)
-- `permissionProfile` must be one of the predefined profiles
+- `tenantName` cannot be a system namespace (kube-system, pipeline-system, argocd, tekton-pipelines, cert-manager, auth-system, ingress-system)
+- `permissionProfile` determines RBAC permissions and resource quotas
+- Repository must exist and be accessible to the platform
 
 ### RepoBinding Status
 
-The onboarding controller updates the status to reflect provisioning progress.
+The onboarding controller updates the status to reflect provisioning progress and provide GitHub webhook configuration details.
 
 ```yaml
 status:
   phase: <string>                    # "Pending" | "Provisioning" | "Ready" | "Failed"
   message: <string>                  # Human-readable status message
-  webhookURL: <string>               # Webhook URL for GitHub configuration
-  webhookSecret: <string>            # Webhook secret for GitHub configuration
-  namespaceCreated: <boolean>        # Whether tenant namespace was created
-  serviceAccountCreated: <boolean>   # Whether service account was created
-  rbacCreated: <boolean>             # Whether RBAC was configured
-  quotasCreated: <boolean>           # Whether resource quotas were created
-  networkPolicyCreated: <boolean>    # Whether network policy was created
-  terraformSecretCreated: <boolean>  # Whether Terraform secret was created
-  eventListenerCreated: <boolean>    # Whether EventListener was created
-  ingressCreated: <boolean>          # Whether Ingress was created
+  conditions:                        # Detailed condition tracking
+  - type: <string>                   # Condition type
+    status: <string>                 # "True" | "False" | "Unknown"
+    reason: <string>                 # Machine-readable reason
+    message: <string>                # Human-readable message
+    lastTransitionTime: <timestamp>  # When condition last changed
+  webhookConfiguration:              # GitHub webhook setup information
+    url: <string>                    # Webhook URL for GitHub configuration
+    secret: <string>                 # Webhook secret for GitHub configuration
+    events: <[]string>               # Supported webhook events
+  provisionedResources:              # Status of provisioned resources
+    namespace: <boolean>             # Tenant namespace created
+    serviceAccount: <boolean>        # Service account created
+    rbac: <boolean>                  # RBAC policies created
+    resourceQuota: <boolean>         # Resource quotas created
+    networkPolicy: <boolean>         # Network policies created
+    eventListener: <boolean>         # Tekton EventListener created
+    pipelineResources: <boolean>     # Pipeline resources created
 ```
 
 **Phase Values**:
-- `Pending`: RepoBinding created, waiting for reconciliation
-- `Provisioning`: Onboarding controller is provisioning resources
-- `Ready`: All resources provisioned successfully
-- `Failed`: Provisioning failed (see message for details)
+- `Pending`: RepoBinding created, validation in progress
+- `Provisioning`: Controller is creating tenant resources
+- `Ready`: All resources provisioned successfully, webhook ready
+- `Failed`: Provisioning failed (check conditions for details)
+
+**Condition Types**:
+- `NamespaceReady`: Tenant namespace created and configured
+- `RBACReady`: Service account and RBAC policies configured
+- `NetworkPolicyReady`: Network isolation policies applied
+- `EventListenerReady`: Tekton webhook handler configured
+- `WebhookReady`: GitHub webhook configuration available
 
 ### Usage Examples
 
-**Example 1: Standard Onboarding**
+**Example 1: Standard Repository Onboarding**
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
-  name: archon-binding
-  namespace: platform-system
+  name: my-app-binding
+  namespace: pipeline-system
 spec:
-  repoOrg: "your-github-org"
-  repoName: "archon-agent"
-  tenantName: "archon"
+  repoOrg: "acme-corp"
+  repoName: "my-application"
+  tenantName: "my-app"
   permissionProfile: "standard"
-  ingressHost: "webhooks.example.com"
 ```
 
-**Example 2: Elevated Permissions**
+**Example 2: Infrastructure Repository with Elevated Permissions**
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
-  namespace: platform-system
+  namespace: pipeline-system
 spec:
+  repoOrg: "acme-corp"
+  repoName: "infrastructure-as-code"
+  tenantName: "infrastructure"
+  permissionProfile: "elevated"
+```
+
+### Permission Profiles
+
+**Standard Profile**:
+- Namespace-scoped RBAC permissions
+- Standard resource quotas (CPU: 2 cores, Memory: 4Gi, Storage: 10Gi)
+- Network policies allowing ingress from ingress-system only
+- Access to shared pipeline catalog
+- EventListener for webhook handling
+
+**Elevated Profile**:
+- Additional cluster-scoped read permissions for infrastructure resources
+- Higher resource quotas (CPU: 4 cores, Memory: 8Gi, Storage: 20Gi)
+- Additional network policy exceptions for infrastructure access
+- Access to infrastructure-specific pipeline tasks
+
+### GitHub Webhook Configuration
+
+After RepoBinding reaches `Ready` phase, configure the GitHub webhook:
+
+**Step 1: Get Webhook Configuration**
+```bash
+kubectl get repobinding my-app-binding -n pipeline-system -o yaml
+```
+
+**Step 2: Configure in GitHub Repository**
+1. Navigate to repository Settings → Webhooks → Add webhook
+2. **Payload URL**: Use `status.webhookConfiguration.url`
+3. **Content type**: `application/json`
+4. **Secret**: Use `status.webhookConfiguration.secret`
+5. **Events**: Select "Push events" (or use `status.webhookConfiguration.events`)
+6. **Active**: ✓ Enabled
+
+**Step 3: Verify Webhook**
+```bash
+# Check EventListener logs
+kubectl logs -n <tenant-name> -l app.kubernetes.io/component=eventlistener
+
+# Test webhook delivery in GitHub repository settings
+```
+
+## Onboarding Controller API
+
+### Controller Behavior
+
+The onboarding controller watches RepoBinding resources and provisions tenant infrastructure automatically.
+
+**Reconciliation Process**:
+1. **Validation**: Validates RepoBinding spec and checks repository accessibility
+2. **Namespace Creation**: Creates tenant namespace with proper labels and annotations
+3. **RBAC Setup**: Creates ServiceAccount, Role, and RoleBinding based on permission profile
+4. **Resource Quotas**: Applies resource limits based on permission profile
+5. **Network Policies**: Configures network isolation with ingress exceptions
+6. **EventListener**: Creates Tekton EventListener for webhook handling
+7. **Pipeline Resources**: Provisions pipeline templates and shared resources
+8. **Webhook Configuration**: Generates webhook URL and secret for GitHub setup
+9. **Status Updates**: Updates RepoBinding status with provisioning progress
+
+**Error Handling**:
+- Validation errors result in `Failed` phase with descriptive error messages
+- Transient errors trigger exponential backoff retry
+- Resource conflicts are detected and resolved automatically
+- Orphaned resources are cleaned up on RepoBinding deletion
+
+**Source**
+- `platform/crds/repobinding-crd.yaml` - RepoBinding CRD definition
+- `platform/onboarding/controller-deployment.yaml` - Controller implementation
+- `platform/onboarding/controller-rbac.yaml` - Controller RBAC permissions
+
+## Platform Services API
+
+### ArgoCD Integration
+
+**OIDC Authentication**:
+- **Issuer URL**: `https://dex.home.local`
+- **Client ID**: `argocd`
+- **Scopes**: `openid profile email groups`
+- **Group Claims**: Maps Authentik groups to ArgoCD roles
+
+**Access Patterns**:
+- **Admin Group**: Full access to all ArgoCD applications and settings
+- **Engineering Group**: Read-only access to applications, no admin functions
+- **Tenant-specific**: Future enhancement for tenant-scoped access
+
+### Tekton Dashboard Integration
+
+**OIDC Authentication**:
+- **Issuer URL**: `https://dex.home.local`
+- **Client ID**: `tekton-dashboard`
+- **Scopes**: `openid profile email groups`
+- **Group Claims**: Maps Authentik groups to Kubernetes RBAC
+
+**Access Patterns**:
+- **Admin Group**: Full access to all pipelines and resources
+- **Engineering Group**: Read-only access to pipeline runs and logs
+- **Tenant-scoped**: Access limited to tenant namespace resources
+
+### Authentik Management API
+
+**Admin Access**:
+- **URL**: `https://auth.home.local`
+- **Admin User**: `admin` (password from bootstrap)
+- **API Access**: Token-based API for automation
+
+**User Management**:
+- **Groups**: `admins`, `engineering` with different platform permissions
+- **External Providers**: GitHub OAuth, LDAP, SAML integration support
+- **Self-Service**: Users can update profiles and passwords
+
+**Source**
+- `platform/auth/authentik/` - Authentik configuration and blueprints
+- `platform/auth/dex/` - Dex OIDC connector configuration
+- `platform/auth/ingress/` - Ingress resources for authentication services
   repoOrg: "your-github-org"
   repoName: "infrastructure-repo"
   tenantName: "infrastructure"

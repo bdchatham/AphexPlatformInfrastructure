@@ -4,100 +4,195 @@
 
 ### Prerequisites
 
-Before deploying the ArgoCD + Tekton platform, ensure you have:
+Before deploying the platform, ensure you have:
 
 1. **Kubernetes Cluster**: Version 1.24+ with RBAC enabled
-2. **kubectl**: Configured with cluster access
-3. **GitHub Organization**: With admin access for webhook configuration
-4. **Cluster Features**: RBAC and NetworkPolicy support
+2. **kubectl**: Configured with cluster access and admin permissions
+3. **Ingress Controller**: Deployed and accessible from your network
+4. **DNS Configuration**: For `*.home.local` (or your chosen domain)
+5. **Network Access**: Ability to reach ingress controller from your devices
 
-### Bootstrap Process
+### DNS Setup for Home Network Access
 
-The bootstrap process installs all platform components in the correct order. After bootstrap completes, ArgoCD takes over and manages all platform components via GitOps.
+The platform requires DNS configuration for browser-based authentication. Choose one option:
 
-**Step 1: Run Bootstrap Script**
+**Option A: Router/Pi-hole DNS (Recommended)**
+```bash
+# Find your ingress controller IP
+kubectl get svc -n ingress-nginx ingress-nginx-controller
+
+# Add A records in your router or Pi-hole:
+auth.home.local     → <INGRESS_IP>
+dex.home.local      → <INGRESS_IP>
+argocd.home.local   → <INGRESS_IP>
+tekton.home.local   → <INGRESS_IP>
+```
+
+**Option B: Hosts File (Per-device)**
+```bash
+# Add to /etc/hosts on each device:
+<INGRESS_IP> auth.home.local
+<INGRESS_IP> dex.home.local
+<INGRESS_IP> argocd.home.local
+<INGRESS_IP> tekton.home.local
+```
+
+### Zero-Touch Bootstrap Process
+
+The bootstrap script achieves complete platform convergence automatically with no manual steps required.
+
+**Run Bootstrap**
 
 ```bash
-# Clone the repository
 git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
 cd ArbiterPipelineInfrastructure
-
-# Run bootstrap
-cd platform/bootstrap
-./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/ArbiterPipelineInfrastructure
+./platform/bootstrap/bootstrap.sh
 ```
 
-**Bootstrap Script Actions**:
-1. Detects and cleans up existing JenkinsX installations (if present)
-2. Creates Kubernetes cluster (Kind for local, configurable for others)
-3. **Generates and creates ALL secrets (PostgreSQL, Authentik, Dex)**
-4. **Creates auth-system namespace**
-5. Installs Tekton Pipelines v0.65.0
-6. Installs Tekton Triggers v0.29.0
-7. Installs Tekton Triggers Core Interceptors v0.29.0
-8. Installs ArgoCD
-9. Creates platform namespaces (argocd, tekton-pipelines, platform-system)
-10. Creates platform root ArgoCD Application
-11. **Waits for Authentik to be ready (deployed by ArgoCD)**
-12. **Creates Authentik API token via Authentik API**
-13. **Stores API token in Kubernetes Secret**
-14. Displays ArgoCD credentials and access instructions
-15. **Prints commands to retrieve secrets (NOT the secrets themselves)**
+**Bootstrap Actions (Automatic)**:
+1. Creates Kind cluster (or uses existing kubeconfig)
+2. **Generates ALL secrets automatically** (PostgreSQL, Authentik, Dex, API tokens)
+3. Creates auth-system and tekton-pipelines namespaces
+4. **Stores all secrets in Kubernetes** (never prints to stdout)
+5. Installs ArgoCD with proper OIDC configuration
+6. Creates platform-root ArgoCD Application (app-of-apps)
+7. **Waits for ArgoCD to deploy Authentik** (GitOps-managed)
+8. **Creates Authentik API token** via Authentik API
+9. **Achieves complete platform convergence** automatically
+10. Displays access instructions and secret retrieval commands
 
-**Note**: After bootstrap, all platform components (Tekton, auth-system, etc.) are managed by ArgoCD via GitOps. Bootstrap handles cluster setup, secret generation, and ArgoCD installation. ArgoCD handles everything else.
+**Key Innovation**: Bootstrap generates secrets but **never prints them**. Instead, it provides kubectl commands to retrieve secrets securely.
 
-**Step 2: Verify Bootstrap**
+### Layered cert-manager Deployment
 
+The platform implements a revolutionary layered cert-manager architecture that eliminates timing issues and manual intervention.
+
+**Deployment Waves (Automatic via ArgoCD)**:
+
+**Wave 10: cert-manager Installation**
 ```bash
-# Check all platform components
-kubectl get pods -n argocd
-kubectl get pods -n tekton-pipelines
-kubectl get pods -n platform-system
-
-# Verify ArgoCD Application
-kubectl get application platform-root -n argocd
-
-# Check ArgoCD sync status
-kubectl get application -n argocd
+# ArgoCD deploys cert-manager with PostSync validation
+kubectl get pods -n cert-manager
+kubectl get job cert-manager-webhook-readiness -n cert-manager
 ```
 
-**Expected Output**:
-- All pods in argocd namespace running
-- All pods in tekton-pipelines namespace running
-- platform-root Application syncing
-- Child Applications (platform-crds, platform-infrastructure, platform-controllers, platform-catalog) created
-
-**Step 3: Access ArgoCD UI**
-
+**Wave 20: Certificate Foundation**
 ```bash
-# Get ArgoCD admin password
-kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' | base64 -d
+# Only proceeds after webhook validation passes
+kubectl get clusterissuer selfsigned-issuer
+kubectl get certificates -A
+```
 
-# Port-forward to ArgoCD server
-kubectl port-forward svc/argocd-server -n argocd 8080:443
+**Wave 30: Ingress Resources**
+```bash
+# Only proceeds after certificates are ready
+kubectl get ingress -A
+```
 
-# Access UI at http://localhost:8080
+**PostSync Webhook Validation**:
+The platform includes a custom PostSync hook that validates cert-manager webhook functionality:
+- Checks webhook Service has ready endpoints
+- Validates ValidatingWebhookConfiguration has non-empty caBundle
+- Validates MutatingWebhookConfiguration has non-empty caBundle
+- Blocks certificate creation until webhook is truly ready
+
+**RBAC Fixes**:
+The platform automatically fixes cert-manager's default RBAC configuration:
+- Patches cert-manager controller to use cert-manager namespace for leader election
+- Patches cert-manager-cainjector to use cert-manager namespace for leader election
+- Eliminates "forbidden: cannot get resource leases in kube-system" errors
+
+### Verification Steps
+
+**Step 1: Check Bootstrap Completion**
+```bash
+# All ArgoCD applications should be Synced/Healthy
+kubectl get applications -n argocd
+
+# cert-manager components should be running
+kubectl get pods -n cert-manager
+
+# Certificates should be Ready
+kubectl get certificates -A
+```
+
+**Step 2: Verify Authentication System**
+```bash
+# Check auth-system components
+kubectl get pods -n auth-system
+
+# Verify Authentik is accessible
+curl -k https://auth.home.local/if/flow/initial-setup/
+
+# Verify Dex OIDC discovery
+curl -k https://dex.home.local/.well-known/openid-configuration
+```
+
+**Step 3: Access Platform Services**
+
+**Authentik UI (User Management)**:
+```bash
+# Get admin password
+kubectl get secret authentik-secrets -n auth-system \
+  -o jsonpath='{.data.admin-password}' | base64 -d
+
+# Access: https://auth.home.local
 # Username: admin
 # Password: (from above command)
 ```
 
-**Source**
-- `platform/bootstrap/bootstrap.sh`
-
-## Authentication System Validation
-
-After bootstrap completes and ArgoCD syncs the authentication system, validate OIDC functionality:
-
-### Validate OIDC Discovery
-
+**ArgoCD UI (GitOps Management)**:
 ```bash
-# Run OIDC discovery validation script
-platform/scripts/validate-oidc-discovery.sh
-
-# Manual validation
-curl https://dex.home.local/.well-known/openid-configuration
-curl https://dex.home.local/keys
+# Access: https://argocd.home.local
+# Click "Login via Dex"
+# Authenticate with Authentik credentials
 ```
+
+**Tekton Dashboard (Pipeline Monitoring)**:
+```bash
+# Access: https://tekton.home.local
+# Authenticate via Dex/Authentik
+```
+
+### Expected Final State
+
+After successful bootstrap and convergence:
+
+**ArgoCD Applications**:
+```
+NAME                          SYNC STATUS   HEALTH STATUS
+platform-auth                 Synced        Healthy
+platform-catalog              Synced        Healthy
+platform-cert-foundation      Synced        Healthy
+platform-cert-manager         Synced        Healthy
+platform-controllers          Synced        Healthy
+platform-crds                 Synced        Healthy
+platform-ingress              Synced        Healthy
+platform-ingress-controller   Synced        Healthy
+platform-rbac                 Synced        Healthy
+platform-root                 Synced        Healthy
+platform-tekton               Synced        Healthy
+```
+
+**Certificates**:
+```
+NAMESPACE     NAME            READY   SECRET          AGE
+auth-system   argocd-tls      True    argocd-tls      5m
+auth-system   authentik-tls   True    authentik-tls   5m
+auth-system   dex-tls         True    dex-tls         5m
+auth-system   tekton-tls      True    tekton-tls      5m
+```
+
+**Platform Services**:
+- All pods Running in cert-manager, auth-system, argocd, tekton-pipelines namespaces
+- All Ingress resources configured with TLS certificates
+- Authentication flow working end-to-end
+
+**Source**
+- `platform/bootstrap/bootstrap.sh` - Bootstrap implementation
+- `platform/cert-manager/` - Layered cert-manager architecture
+- `platform/cert-manager/webhook-readiness-hook.yaml` - PostSync validation
+- `platform/auth/` - Authentication system components
 
 ### Validate RBAC Authorization
 
