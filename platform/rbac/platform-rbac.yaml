@@ -36,7 +36,7 @@ metadata:
   name: platform-operator
 rules:
   # Manage platform CRDs (full access)
-  - apiGroups: ["platform.dev"]
+  - apiGroups: ["arbiter.local"]
     resources: ["*"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   
