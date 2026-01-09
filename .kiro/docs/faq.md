@@ -12,21 +12,15 @@ This platform provides shared CI/CD infrastructure with complete tenant isolatio
 
 ### What makes the cert-manager architecture special?
 
-The platform implements a layered cert-manager deployment that eliminates the classic "webhook chicken-and-egg" problem:
-- **Wave 10**: cert-manager installation with PostSync webhook validation
-- **Wave 20**: Certificate creation (only after webhook is truly ready)
-- **Wave 30**: Ingress resources (only after certificates exist)
+The platform implements a layered cert-manager deployment that eliminates the classic "webhook chicken-and-egg" problem through sync waves and PostSync validation. This eliminates manual intervention and timing-related failures.
 
-This eliminates manual intervention and timing-related failures that plague traditional cert-manager deployments.
+For detailed architecture, see [architecture.md](architecture.md).
 
 ### What is zero-touch bootstrap?
 
-The bootstrap script achieves complete platform convergence automatically:
-- Generates ALL secrets (PostgreSQL, Authentik, Dex, API tokens)
-- Creates cluster and installs ArgoCD
-- Waits for Authentik deployment and creates API token
-- Achieves full platform functionality without manual steps
-- Never prints secrets to stdout (provides kubectl commands instead)
+The bootstrap script achieves complete platform convergence automatically by generating all secrets, creating the cluster, and waiting for full platform functionality without manual steps.
+
+For deployment procedures, see [operations.md](operations.md).
 
 ### What is a tenant?
 
@@ -44,30 +38,26 @@ A tenant is a product team with complete isolation and dedicated resources:
 
 All platform services use centralized authentication via Authentik and Dex:
 
-**ArgoCD UI**: `https://argocd.home.local`
-- Click "Login via Dex" → Authenticate with Authentik
+**ArgoCD UI**: `https://argocd.home.local` - Click "Login via Dex"
+**Tekton Dashboard**: `https://tekton.home.local` - Authenticate via Dex/Authentik  
+**Authentik UI**: `https://auth.home.local` - Direct login with admin credentials
 
-**Tekton Dashboard**: `https://tekton.home.local`
-- Authenticate via Dex/Authentik
-
-**Authentik UI**: `https://auth.home.local`
-- Direct login with admin credentials
+For detailed authentication procedures, see [operations.md](operations.md).
 
 ### How do I manage users?
 
-Use the Authentik web UI for user management:
-1. Access `https://auth.home.local`
-2. Login with admin credentials
-3. Navigate to Directory → Users
-4. Create users and assign to groups (`admins` or `engineering`)
+Use the Authentik web UI at `https://auth.home.local`. Create users and assign to groups (`admins` or `engineering`). Users can authenticate immediately without pod restarts.
+
+For user management procedures, see [operations.md](operations.md).
 
 ### How do I get admin credentials?
 
-Retrieve from Kubernetes secrets (never printed during bootstrap):
 ```bash
 kubectl get secret authentik-secrets -n auth-system \
   -o jsonpath='{.data.admin-password}' | base64 -d
 ```
+
+Bootstrap never prints secrets to stdout for security.
 
 ### Why can't I access services at localhost URLs?
 
@@ -95,29 +85,13 @@ spec:
   permissionProfile: "standard"
 ```
 
-Apply and verify:
-```bash
-kubectl apply -f repobinding.yaml
-kubectl get repobinding my-repo-binding -n pipeline-system
-kubectl get namespace my-app
-```
+For detailed onboarding procedures, see [operations.md](operations.md).
 
 ### How do I configure the GitHub webhook?
 
-After RepoBinding reaches `Ready` phase:
+After RepoBinding reaches `Ready` phase, get webhook configuration from RepoBinding status and configure in GitHub repository Settings → Webhooks.
 
-```bash
-# Get webhook configuration
-kubectl get repobinding my-repo-binding -n pipeline-system -o yaml
-
-# Configure in GitHub repository:
-# Settings → Webhooks → Add webhook
-# - Payload URL: (from status.webhookConfiguration.url)
-# - Content type: application/json
-# - Secret: (from status.webhookConfiguration.secret)
-# - Events: Push events
-# - Active: ✓
-```
+For webhook configuration details, see [operations.md](operations.md).
 
 ### How do I view pipeline logs?
 
@@ -306,7 +280,7 @@ Check ingress and TLS configuration:
 - `platform/argocd/apps/` - ArgoCD application definitions
   pipelineRef:
     name: cdktf-deploy-pipeline
-    namespace: platform-system
+    namespace: pipeline-system
   params:
     - name: repo-url
       value: "https://github.com/your-github-org/your-repo"
@@ -335,7 +309,7 @@ kubectl logs -n <tenant-namespace> -l eventlistener=github-listener | grep "webh
 kubectl get ingress -n <tenant-namespace>
 
 # Check RepoBinding status
-kubectl describe repobinding <name> -n platform-system
+kubectl describe repobinding <name> -n pipeline-system
 ```
 
 **Common Issues**:
@@ -391,7 +365,7 @@ kubectl get application -n argocd -w
 Update your RepoBinding to use the elevated profile:
 
 ```bash
-kubectl patch repobinding <name> -n platform-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
+kubectl patch repobinding <name> -n pipeline-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
 ```
 
 The onboarding controller will reconcile and update the Role.
@@ -401,7 +375,7 @@ The onboarding controller will reconcile and update the Role.
 Delete the RepoBinding:
 
 ```bash
-kubectl delete repobinding <name> -n platform-system
+kubectl delete repobinding <name> -n pipeline-system
 ```
 
 Or manually delete the namespace:

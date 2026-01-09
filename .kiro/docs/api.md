@@ -4,6 +4,52 @@
 
 The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure with complete isolation and security boundaries.
 
+## Kubernetes API OIDC Authentication
+
+The platform provides OIDC authentication for the Kubernetes API server, enabling kubectl and other Kubernetes clients to authenticate using the centralized Authentik identity provider via Dex.
+
+### Configuration
+
+**API Server OIDC Settings** (configured in Kind cluster):
+- **Issuer URL**: `https://dex.home.local`
+- **Client ID**: `kubernetes`
+- **Username Claim**: `email`
+- **Groups Claim**: `groups`
+
+**Dex Client Configuration**:
+- **Client ID**: `kubernetes`
+- **Redirect URIs**: `http://localhost:8000/callback`, `http://localhost:18000/callback`
+- **Authentication Flow**: Authentik → Dex → Kubernetes API
+
+### Usage
+
+Users authenticate to the Kubernetes API using the kubectl OIDC plugin:
+
+```bash
+# Install kubectl OIDC plugin
+kubectl krew install oidc-login
+
+# Configure OIDC authentication
+kubectl oidc-login setup \
+  --oidc-issuer-url=https://dex.home.local \
+  --oidc-client-id=kubernetes
+
+# Authenticate and access cluster
+kubectl get pods --user=oidc
+```
+
+**Authentication Flow**:
+1. User runs kubectl command with OIDC authentication
+2. kubectl opens browser to Dex login page
+3. Dex redirects to Authentik for authentication
+4. User authenticates with Authentik credentials
+5. Authentik returns to Dex with user info and groups
+6. Dex issues JWT token to kubectl
+7. kubectl uses JWT for Kubernetes API requests
+8. API server validates JWT and maps groups to RBAC roles
+
+**Source**: `platform/bootstrap/kind-cluster-config.yaml`, `platform/auth/dex/configmap.yaml`
+
 ## RepoBinding API
 
 ### RepoBinding Custom Resource

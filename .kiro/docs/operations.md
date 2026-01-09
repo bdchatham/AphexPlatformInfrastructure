@@ -61,7 +61,7 @@ cd ArbiterPipelineInfrastructure
 9. **Achieves complete platform convergence** automatically
 10. Displays access instructions and secret retrieval commands
 
-**Key Innovation**: Bootstrap generates secrets but **never prints them**. Instead, it provides kubectl commands to retrieve secrets securely.
+For detailed architecture, see [architecture.md](architecture.md).
 
 ### Layered cert-manager Deployment
 
@@ -89,18 +89,7 @@ kubectl get certificates -A
 kubectl get ingress -A
 ```
 
-**PostSync Webhook Validation**:
-The platform includes a custom PostSync hook that validates cert-manager webhook functionality:
-- Checks webhook Service has ready endpoints
-- Validates ValidatingWebhookConfiguration has non-empty caBundle
-- Validates MutatingWebhookConfiguration has non-empty caBundle
-- Blocks certificate creation until webhook is truly ready
-
-**RBAC Fixes**:
-The platform automatically fixes cert-manager's default RBAC configuration:
-- Patches cert-manager controller to use cert-manager namespace for leader election
-- Patches cert-manager-cainjector to use cert-manager namespace for leader election
-- Eliminates "forbidden: cannot get resource leases in kube-system" errors
+For detailed cert-manager architecture, see [architecture.md](architecture.md).
 
 ### Verification Steps
 
@@ -261,7 +250,7 @@ apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: platform-system
+  namespace: pipeline-system
 spec:
   repoOrg: "your-github-org"
   repoName: "your-repo"
@@ -282,8 +271,8 @@ EOF
 
 ```bash
 # Check RepoBinding status
-kubectl get repobinding my-repo-binding -n platform-system
-kubectl describe repobinding my-repo-binding -n platform-system
+kubectl get repobinding my-repo-binding -n pipeline-system
+kubectl describe repobinding my-repo-binding -n pipeline-system
 
 # Verify tenant namespace
 kubectl get namespace my-tenant
@@ -313,7 +302,7 @@ After onboarding, configure the webhook in GitHub:
 
 ```bash
 # Get webhook URL and secret from RepoBinding status
-kubectl get repobinding my-repo-binding -n platform-system -o yaml
+kubectl get repobinding my-repo-binding -n pipeline-system -o yaml
 
 # Look for status.webhookURL and status.webhookSecret
 ```

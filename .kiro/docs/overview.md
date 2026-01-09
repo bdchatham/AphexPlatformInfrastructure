@@ -26,39 +26,19 @@ Documentation follows the Archon contract defined in `CLAUDE.md` with exactly 6 
 ArgoCD manages all platform components declaratively from Git using the app-of-apps pattern. After bootstrap, the platform is entirely self-managing with automatic drift correction and self-healing capabilities.
 
 ### Layered cert-manager Deployment
-Revolutionary approach to cert-manager deployment that eliminates the classic "webhook chicken-and-egg" problem:
-- **Wave 10**: cert-manager installation with PostSync webhook validation
-- **Wave 20**: Certificate and ClusterIssuer creation (gated behind webhook readiness)
-- **Wave 30**: Ingress resources (gated behind certificate availability)
-
-### PostSync Webhook Validation
-Custom ArgoCD hook that validates cert-manager webhook functionality before allowing certificate creation. Checks endpoint readiness and CA bundle injection, preventing timing-related failures.
+Revolutionary approach that eliminates the "webhook chicken-and-egg" problem through sync waves and PostSync validation. See [architecture.md](architecture.md) for detailed design.
 
 ### Zero-Touch Bootstrap
-One-time initialization script that generates all secrets automatically (PostgreSQL, Authentik, Dex, API tokens) and achieves complete platform convergence without manual intervention. Run once and walk away.
+One-time initialization script that generates all secrets automatically and achieves complete platform convergence without manual intervention. See [operations.md](operations.md) for deployment steps.
 
 ### Centralized Authentication
-Authentik Identity Provider with Dex OIDC connector provides single sign-on (SSO) for all platform services:
-- **ArgoCD UI**: Full GitOps management interface
-- **Tekton Dashboard**: Pipeline execution monitoring
-- **Authentik UI**: User and group management
-
-### Home Network Access
-Platform services exposed via Ingress with real hostnames (`https://auth.home.local`, `https://argocd.home.local`) for browser-based access from home networks.
+Authentik Identity Provider with Dex OIDC connector provides SSO for all platform services. See [architecture.md](architecture.md) for authentication flow details.
 
 ### Tenant Isolation
-Each product team receives:
-- Dedicated namespace with RBAC boundaries
-- Resource quotas and network policies
-- Isolated pipeline execution environment
-- Self-service onboarding via RepoBinding CRDs
+Each product team receives a dedicated namespace with RBAC boundaries, resource quotas, and isolated pipeline execution. See [api.md](api.md) for onboarding details.
 
 ### Self-Service Onboarding
-Users create RepoBinding resources to automatically provision:
-- Tenant namespace and service accounts
-- RBAC and network policies
-- Tekton EventListeners for webhook handling
-- GitHub webhook secrets and configuration
+Users create RepoBinding resources to automatically provision tenant infrastructure. See [operations.md](operations.md) for registration procedures.
 
 ## Design Principles
 
@@ -94,6 +74,8 @@ User → ArgoCD UI → Dex → Authentik → OIDC Token → ArgoCD Access
 ```
 cert-manager (Wave 10) → Webhook Validation → Certificates (Wave 20) → Ingress (Wave 30)
 ```
+
+For detailed architecture, see [architecture.md](architecture.md).
 
 ## Quick Start
 
@@ -146,6 +128,8 @@ spec:
   tenantName: "my-tenant"
   permissionProfile: "standard"
 ```
+
+For detailed onboarding procedures, see [operations.md](operations.md).
 
 ## System Benefits
 

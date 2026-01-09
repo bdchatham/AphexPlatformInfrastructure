@@ -6,9 +6,12 @@ The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions 
 
 Data flows through the system in four main forms:
 1. **RepoBinding Resources**: Custom resources for tenant onboarding
-2. **ArgoCD Applications**: GitOps application definitions with sync waves
+2. **ArgoCD Applications**: GitOps application definitions with sync waves  
 3. **Authentication Data**: User accounts, groups, and OIDC configuration
 4. **Certificate Resources**: TLS certificates and issuers managed by cert-manager
+
+For detailed architecture, see [architecture.md](architecture.md).
+For operational procedures, see [operations.md](operations.md).
 
 ## RepoBinding Data Model
 
@@ -814,7 +817,7 @@ ArgoCD updates Application status
 ### Namespace Validation
 
 - Name must be valid DNS label (lowercase alphanumeric and hyphens)
-- Name cannot be privileged (kube-system, platform-system, argocd, tekton-pipelines, etc.)
+- Name cannot be privileged (kube-system, pipeline-system, argocd, tekton-pipelines, etc.)
 - Name must be unique in cluster
 
 ### Pipeline Parameters Validation
