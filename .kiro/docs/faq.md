@@ -73,11 +73,11 @@ The platform uses real hostnames for OIDC authentication:
 Create a RepoBinding resource:
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "acme-corp"
   repoName: "my-application"

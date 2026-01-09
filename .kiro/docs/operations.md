@@ -1168,7 +1168,7 @@ kubectl apply -f repobindings-backup.yaml
 
 # Verify onboarding
 kubectl get repobindings -n platform-system
-kubectl get namespaces -l platform.arbiter.io/managed-by=onboarding-controller
+kubectl get namespaces -l arbiter.io/managed-by=onboarding-controller
 ```
 
 **Step 4: Verify Platform**
@@ -1180,7 +1180,7 @@ kubectl get pods -n tekton-pipelines
 kubectl get pods -n platform-system
 
 # Check tenant namespaces
-kubectl get namespaces -l platform.arbiter.io/managed-by=onboarding-controller
+kubectl get namespaces -l arbiter.io/managed-by=onboarding-controller
 
 # Check ArgoCD sync status
 kubectl get application -n argocd

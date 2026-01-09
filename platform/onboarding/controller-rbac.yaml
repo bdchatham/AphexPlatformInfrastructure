@@ -60,6 +60,7 @@ rules:
   - watch
   - update
   - patch
+  - delete
 # RBAC permissions (namespace-scoped)
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -138,6 +139,10 @@ rules:
   resources:
   - clusterinterceptors
   - clustertriggerbindings
+  - interceptors
+  - triggerbindings
+  - triggers
+  - triggertemplates
   verbs:
   - get
   - list

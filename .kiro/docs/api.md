@@ -56,19 +56,19 @@ kubectl get pods --user=oidc
 
 The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `platform.arbiter.io`  
+**API Group**: `arbiter.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
-**Scope**: Namespaced (must be created in `pipeline-system` namespace)
+**Scope**: Namespaced (must be created in `platform-system` namespace)
 
 ### RepoBinding Spec
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: <binding-name>
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: <string>              # Required: GitHub organization
   repoName: <string>             # Required: Repository name
@@ -86,7 +86,7 @@ spec:
 | `permissionProfile` | string | No | Permission level | Must be "standard" or "elevated" (default: "standard") |
 
 **Validation Rules**:
-- `tenantName` cannot be a system namespace (kube-system, pipeline-system, argocd, tekton-pipelines, cert-manager, auth-system, ingress-system)
+- `tenantName` cannot be a system namespace (kube-system, platform-system, argocd, tekton-pipelines, cert-manager, auth-system, ingress-system)
 - `permissionProfile` determines RBAC permissions and resource quotas
 - Repository must exist and be accessible to the platform
 
@@ -140,7 +140,7 @@ apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-app-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "acme-corp"
   repoName: "my-application"
@@ -155,7 +155,7 @@ apiVersion: platform.arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "acme-corp"
   repoName: "infrastructure-as-code"
@@ -184,7 +184,7 @@ After RepoBinding reaches `Ready` phase, configure the GitHub webhook:
 
 **Step 1: Get Webhook Configuration**
 ```bash
-kubectl get repobinding my-app-binding -n pipeline-system -o yaml
+kubectl get repobinding my-app-binding -n platform-system -o yaml
 ```
 
 **Step 2: Configure in GitHub Repository**

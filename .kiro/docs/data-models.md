@@ -541,18 +541,18 @@ terraform {
 
 ```typescript
 interface NamespaceLabels {
-  "platform.arbiter.io/tenant": string;      // Tenant name
-  "platform.arbiter.io/repo": string;        // Repository (org/name)
-  "platform.arbiter.io/managed-by": string;  // "onboarding-controller"
+  "arbiter.io/tenant": string;      // Tenant name
+  "arbiter.io/repo": string;        // Repository (org/name)
+  "arbiter.io/managed-by": string;  // "onboarding-controller"
 }
 ```
 
 **Example**:
 ```yaml
 labels:
-  platform.arbiter.io/tenant: "archon"
-  platform.arbiter.io/repo: "your-github-org/archon-agent"
-  platform.arbiter.io/managed-by: "onboarding-controller"
+  arbiter.io/tenant: "archon"
+  arbiter.io/repo: "your-github-org/archon-agent"
+  arbiter.io/managed-by: "onboarding-controller"
 ```
 
 ### Resource Quota Spec

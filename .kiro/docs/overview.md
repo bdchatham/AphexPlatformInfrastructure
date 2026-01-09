@@ -117,11 +117,11 @@ After bootstrap completes:
 ### Onboard a Repository
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
   repoOrg: "your-github-org"
   repoName: "your-repo"
