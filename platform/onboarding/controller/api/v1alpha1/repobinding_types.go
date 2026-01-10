@@ -21,6 +21,11 @@ type RepoBindingSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
 	TenantName string `json:"tenantName"`
 
+	// PipelineName is the name of the Pipeline to trigger when webhooks are received
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
+	PipelineName string `json:"pipelineName"`
+
 	// PermissionProfile defines the RBAC permission level
 	// +kubebuilder:validation:Enum=standard;elevated
 	// +kubebuilder:default=standard
@@ -69,6 +74,12 @@ type RepoBindingStatus struct {
 
 	// IngressCreated indicates if the Ingress was created
 	IngressCreated bool `json:"ingressCreated,omitempty"`
+
+	// TriggerBindingCreated indicates if the TriggerBinding was created
+	TriggerBindingCreated bool `json:"triggerBindingCreated,omitempty"`
+
+	// TriggerTemplateCreated indicates if the TriggerTemplate was created
+	TriggerTemplateCreated bool `json:"triggerTemplateCreated,omitempty"`
 
 	// WebhookSecret is the generated webhook secret for GitHub webhook configuration
 	WebhookSecret string `json:"webhookSecret,omitempty"`

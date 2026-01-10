@@ -39,6 +39,9 @@ type RepoBindingReconciler struct {
 // +kubebuilder:rbac:groups="",resources=resourcequotas,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=limitranges,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=triggers.tekton.dev,resources=triggerbindings,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=triggers.tekton.dev,resources=triggertemplates,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=triggers.tekton.dev,resources=eventlisteners,verbs=get;list;watch;create;update;patch
 
 // Reconcile handles RepoBinding create/update/delete events
 func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
@@ -91,6 +94,8 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 		{name: "network policy", statusField: &repoBinding.Status.NetworkPolicyCreated, provisionFunc: r.provisionNetworkPolicy},
 		{name: "Terraform backend secret", statusField: &repoBinding.Status.TerraformSecretCreated, provisionFunc: r.provisionTerraformBackendSecret},
 		{name: "webhook secret", statusField: &repoBinding.Status.WebhookSecretCreated, provisionFunc: r.provisionWebhookSecret},
+		{name: "TriggerBinding", statusField: &repoBinding.Status.TriggerBindingCreated, provisionFunc: r.provisionTriggerBinding},
+		{name: "TriggerTemplate", statusField: &repoBinding.Status.TriggerTemplateCreated, provisionFunc: r.provisionTriggerTemplate},
 		{name: "EventListener", statusField: &repoBinding.Status.EventListenerCreated, provisionFunc: r.provisionEventListener},
 		{name: "Ingress", statusField: &repoBinding.Status.IngressCreated, provisionFunc: r.provisionIngress},
 	}
@@ -219,9 +224,6 @@ func (r *RepoBindingReconciler) finalizeProvisioning(ctx context.Context, logger
 	}
 
 	return nil
-}
-
-	return ctrl.Result{}, nil
 }
 
 func (r *RepoBindingReconciler) fetchRepoBinding(ctx context.Context, request ctrl.Request) (*platformv1alpha1.RepoBinding, error) {

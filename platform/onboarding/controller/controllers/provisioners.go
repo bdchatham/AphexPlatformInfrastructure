@@ -624,6 +624,133 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 }
 
 
+// provisionTriggerBinding creates or updates the TriggerBinding for GitHub webhooks
+func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Define the TriggerBinding GVK
+	triggerBindingGVK := schema.GroupVersionKind{
+		Group:   "triggers.tekton.dev",
+		Version: "v1beta1",
+		Kind:    "TriggerBinding",
+	}
+	
+	// Build the TriggerBinding spec
+	triggerBinding := &unstructured.Unstructured{}
+	triggerBinding.SetGroupVersionKind(triggerBindingGVK)
+	triggerBinding.SetName("github-push-binding")
+	triggerBinding.SetNamespace(rb.Spec.TenantName)
+	triggerBinding.SetLabels(map[string]string{
+		"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+		"platform.arbiter.io/managed-by": "onboarding-controller",
+	})
+	
+	// Set the spec
+	spec := map[string]interface{}{
+		"params": []interface{}{
+			map[string]interface{}{
+				"name":  "git-url",
+				"value": "$(body.repository.clone_url)",
+			},
+			map[string]interface{}{
+				"name":  "git-revision",
+				"value": "$(body.after)",
+			},
+		},
+	}
+	
+	if err := unstructured.SetNestedMap(triggerBinding.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("failed to set TriggerBinding spec: %w", err)
+	}
+	
+	// Apply the TriggerBinding
+	if err := r.Client.Patch(ctx, triggerBinding, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
+		return fmt.Errorf("failed to apply TriggerBinding: %w", err)
+	}
+	
+	return nil
+}
+
+// provisionTriggerTemplate creates or updates the TriggerTemplate for pipeline execution
+func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Define the TriggerTemplate GVK
+	triggerTemplateGVK := schema.GroupVersionKind{
+		Group:   "triggers.tekton.dev",
+		Version: "v1beta1",
+		Kind:    "TriggerTemplate",
+	}
+	
+	// Build the TriggerTemplate spec
+	triggerTemplate := &unstructured.Unstructured{}
+	triggerTemplate.SetGroupVersionKind(triggerTemplateGVK)
+	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName))
+	triggerTemplate.SetNamespace(rb.Spec.TenantName)
+	triggerTemplate.SetLabels(map[string]string{
+		"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+		"platform.arbiter.io/managed-by": "onboarding-controller",
+	})
+	
+	// Set the spec
+	spec := map[string]interface{}{
+		"params": []interface{}{
+			map[string]interface{}{
+				"name": "git-url",
+			},
+			map[string]interface{}{
+				"name": "git-revision",
+			},
+		},
+		"resourcetemplates": []interface{}{
+			map[string]interface{}{
+				"apiVersion": "tekton.dev/v1beta1",
+				"kind":       "PipelineRun",
+				"metadata": map[string]interface{}{
+					"generateName": fmt.Sprintf("%s-run-", rb.Spec.TenantName),
+				},
+				"spec": map[string]interface{}{
+					"pipelineRef": map[string]interface{}{
+						"name": rb.Spec.PipelineName,
+					},
+					"params": []interface{}{
+						map[string]interface{}{
+							"name":  "git-url",
+							"value": "$(tt.params.git-url)",
+						},
+						map[string]interface{}{
+							"name":  "git-revision",
+							"value": "$(tt.params.git-revision)",
+						},
+					},
+					"workspaces": []interface{}{
+						map[string]interface{}{
+							"name": "source",
+							"volumeClaimTemplate": map[string]interface{}{
+								"spec": map[string]interface{}{
+									"accessModes": []interface{}{"ReadWriteOnce"},
+									"resources": map[string]interface{}{
+										"requests": map[string]interface{}{
+											"storage": "1Gi",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	
+	if err := unstructured.SetNestedMap(triggerTemplate.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("failed to set TriggerTemplate spec: %w", err)
+	}
+	
+	// Apply the TriggerTemplate
+	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
+		return fmt.Errorf("failed to apply TriggerTemplate: %w", err)
+	}
+	
+	return nil
+}
+
 // provisionEventListener creates or updates the tenant EventListener
 func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// Define the EventListener GVK
@@ -688,7 +815,7 @@ func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *
 					},
 				},
 				"template": map[string]interface{}{
-					"ref": "cdktf-deploy-trigger-template",
+					"ref": fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName),
 				},
 			},
 		},

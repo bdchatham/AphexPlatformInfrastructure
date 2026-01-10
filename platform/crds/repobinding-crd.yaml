@@ -27,6 +27,7 @@ spec:
                 - repoOrg
                 - repoName
                 - tenantName
+                - pipelineName
               properties:
                 repoOrg:
                   type: string
@@ -40,6 +41,10 @@ spec:
                   type: string
                   pattern: '^[a-z0-9-]+$'
                   description: Tenant namespace name (will be created with this name)
+                pipelineName:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
+                  description: Name of the Pipeline to trigger when webhooks are received
                 permissionProfile:
                   type: string
                   enum:
@@ -100,6 +105,12 @@ spec:
                 ingressCreated:
                   type: boolean
                   description: Whether Ingress for webhook routing has been created
+                triggerBindingCreated:
+                  type: boolean
+                  description: Whether TriggerBinding has been created
+                triggerTemplateCreated:
+                  type: boolean
+                  description: Whether TriggerTemplate has been created
                 lastReconcileTime:
                   type: string
                   format: date-time
@@ -116,9 +127,9 @@ spec:
         - name: Tenant
           type: string
           jsonPath: .spec.tenantName
-        - name: Profile
+        - name: Pipeline
           type: string
-          jsonPath: .spec.permissionProfile
+          jsonPath: .spec.pipelineName
         - name: Phase
           type: string
           jsonPath: .status.phase

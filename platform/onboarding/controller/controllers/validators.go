@@ -30,6 +30,9 @@ var (
 	// Valid namespace pattern
 	namespacePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
+	// Valid pipeline name pattern
+	pipelineNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
+
 	// Valid permission profiles
 	validPermissionProfiles = []string{"standard", "elevated"}
 )
@@ -63,6 +66,11 @@ func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding) error {
 
 	// Validate permission profile
 	if err := validatePermissionProfile(rb.Spec.PermissionProfile); err != nil {
+		return err
+	}
+
+	// Validate pipeline name
+	if err := validatePipelineName(rb.Spec.PipelineName); err != nil {
 		return err
 	}
 
@@ -122,4 +130,22 @@ func validatePermissionProfile(profile string) error {
 		Field:   "permissionProfile",
 		Message: "Permission profile must be 'standard' or 'elevated'",
 	}
+}
+
+// validatePipelineName checks if the pipeline name matches the required pattern
+func validatePipelineName(name string) error {
+	if name == "" {
+		return &ValidationError{
+			Field:   "pipelineName",
+			Message: "Pipeline name is required",
+		}
+	}
+
+	if !pipelineNamePattern.MatchString(name) {
+		return &ValidationError{
+			Field:   "pipelineName",
+			Message: "Pipeline name must match pattern ^[a-z0-9-]+$",
+		}
+	}
+	return nil
 }
