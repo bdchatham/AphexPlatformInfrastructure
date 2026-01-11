@@ -122,13 +122,21 @@ rules:
   verbs:
   - "*"
 
-# Tekton permissions for organization provisioning
+# Tekton triggers permissions for RepoBinding provisioning
 - apiGroups:
-  - tekton.dev
+  - triggers.tekton.dev
   resources:
-  - "*"
+  - triggerbindings
+  - triggertemplates
+  - eventlisteners
   verbs:
-  - "*"
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
 
 # Events permissions for tenant roles
 - apiGroups:
@@ -202,13 +210,26 @@ rules:
   - clusterinterceptors
   - clustertriggerbindings
   - interceptors
-  - triggerbindings
-  - triggers
-  - triggertemplates
   verbs:
   - get
   - list
   - watch
+
+# Tekton triggers permissions for RepoBinding provisioning
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - triggerbindings
+  - triggertemplates
+  - eventlisteners
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
 # ResourceQuota permissions
 - apiGroups:
   - ""
@@ -238,18 +259,6 @@ rules:
   - networking.k8s.io
   resources:
   - networkpolicies
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-# EventListener permissions (Tekton Triggers)
-- apiGroups:
-  - triggers.tekton.dev
-  resources:
-  - eventlisteners
   verbs:
   - create
   - get
