@@ -114,24 +114,21 @@ rules:
   - update
   - patch
 
+# All core API permissions for organization admin roles
+- apiGroups:
+  - ""
+  resources:
+  - "*"
+  verbs:
+  - "*"
+
 # Tekton permissions for organization provisioning
 - apiGroups:
   - tekton.dev
   resources:
-  - pipelineruns
-  - taskruns
-  - pipelines
-  - tasks
-  - clustertasks
-  - pipelineresources
+  - "*"
   verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
+  - "*"
 
 # Events permissions for tenant roles
 - apiGroups:
