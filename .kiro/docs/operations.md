@@ -243,8 +243,18 @@ kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-pa
 
 Organizations must be bootstrapped before repositories can be onboarded. This creates the organization namespace, webhook infrastructure, and admin RBAC.
 
+**Using AphexCLI (Recommended)**:
 ```bash
-# Create Organization resource
+# Bootstrap organization with AphexCLI
+aphex organization bootstrap --admin-email admin@acme.com acme
+
+# Verify organization status
+kubectl get organization acme -n platform-system
+```
+
+**Manual YAML Application**:
+```bash
+# Create Organization resource manually
 kubectl apply -f - <<EOF
 apiVersion: arbiter.io/v1alpha1
 kind: Organization
