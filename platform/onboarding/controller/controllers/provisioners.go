@@ -2,8 +2,6 @@ package controllers
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -992,18 +990,6 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 	return nil
 }
 
-// generateWebhookSecret generates a cryptographically secure webhook secret
-func generateWebhookSecret() (string, error) {
-	randomBytes := make([]byte, 32)
-	_, err := rand.Read(randomBytes)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate random bytes: %w", err)
-	}
-	
-	encodedSecret := base64.URLEncoding.EncodeToString(randomBytes)
-	return fmt.Sprintf("whsec_%s", encodedSecret), nil
-}
-
 // updateRepoBindingStatusWithWebhookInfo updates the RepoBinding status with webhook configuration details
 func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// Retrieve the webhook secret from organization namespace
@@ -1020,13 +1006,9 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 	
 	// Use organization-specific webhook URL
 	rb.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", rb.Spec.TenantName)
-	if rb.Spec.IngressHost != "" {
-		ingressHost = rb.Spec.IngressHost
-	}
 	
 	// Update RepoBinding status with webhook information
 	rb.Status.WebhookSecret = string(webhookSecret)
-	rb.Status.WebhookURL = fmt.Sprintf("http://%s/%s", ingressHost, rb.Spec.TenantName)
 	
 	// Build configuration instructions message
 	instructions := fmt.Sprintf(`Registration successful!

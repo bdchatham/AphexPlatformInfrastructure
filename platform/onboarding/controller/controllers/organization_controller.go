@@ -6,14 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -219,19 +216,19 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: [""],
-				Resources: ["*"],
-				Verbs:     ["*"],
+				APIGroups: []string{""},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
 			},
 			{
-				APIGroups: ["tekton.dev"],
-				Resources: ["*"],
-				Verbs:     ["*"],
+				APIGroups: []string{"tekton.dev"},
+				Resources: []string{"*"},
+				Verbs:     []string{"*"},
 			},
 			{
-				APIGroups: ["arbiter.io"],
-				Resources: ["repobindings"],
-				Verbs:     ["get", "list", "watch", "create", "update", "patch"],
+				APIGroups: []string{"arbiter.io"},
+				Resources: []string{"repobindings"},
+				Verbs:     []string{"get", "list", "watch", "create", "update", "patch"},
 			},
 		},
 	}
