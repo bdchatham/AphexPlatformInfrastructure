@@ -401,58 +401,74 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 - `platform/tekton/kustomization.yaml` (ArgoCD management)
 - `platform/argocd/apps/platform-tekton.yaml` (ArgoCD Application)
 
-### 5. Onboarding Controller
+### 5. Organization and Onboarding System
 
-**Purpose**: Provision tenant resources based on RepoBinding CRs
+**Purpose**: Multi-tenant organization management with automated webhook infrastructure
 
-**Namespace**: `pipeline-system`
+**Namespace**: `platform-system` (controllers), `org-{name}` (tenant resources)
 
 **Installation**: Managed by ArgoCD from `platform/onboarding/`
 
+#### Organization Controller
+
 **Resources**:
-- Controller Deployment
-- Controller ServiceAccount
-- Controller ClusterRole and ClusterRoleBinding
-- Tenant resource templates
+- Organization CRD and Controller
+- Per-organization namespace provisioning
+- Cloudflared tunnel infrastructure per organization
+- Organization-scoped webhook secrets and RBAC
+
+**Controller Logic**:
+1. Watch Organization resources
+2. Create organization namespace: `org-{name}`
+3. Generate webhook secret (cryptographically secure)
+4. Create Cloudflared tunnel ConfigMap and Deployment
+5. Create organization admin RBAC
+6. Update Organization status with webhook URL: `https://webhooks-{org}.homelab.local`
+
+#### RepoBinding Controller
+
+**Resources**:
+- RepoBinding CRD and Controller
+- Tekton webhook infrastructure per repository
+- Pipeline namespace discovery and cross-namespace references
 
 **Controller Logic**:
 1. Watch RepoBinding resources
-2. Validate spec (org, repo, tenant name)
-3. Generate webhook secret (cryptographically secure)
-4. Create namespace with labels
-5. Create service account
-6. Create namespace-scoped RBAC (Role, RoleBinding)
-7. Create cluster-scoped RBAC (ClusterRole, ClusterRoleBinding for Tekton Triggers)
-8. Create ResourceQuota and LimitRange
-9. Create NetworkPolicy
-10. Create Terraform backend secret
-11. Create EventListener for webhooks
-12. Create Ingress for EventListener
-13. Update RepoBinding status with webhook URL and secret
+2. Validate spec (org, repo, tenant name, pipeline name)
+3. Discover pipeline namespace automatically across cluster
+4. Create namespace-scoped resources in organization namespace:
+   - ServiceAccount (`pipeline-runner`)
+   - RBAC (Role, RoleBinding)
+   - ResourceQuota and LimitRange
+   - NetworkPolicy
+   - Terraform backend secret
+5. Create Tekton webhook resources:
+   - TriggerBinding (`github-push-binding`)
+   - TriggerTemplate (`{tenant}-trigger-template`)
+   - EventListener (`github-listener`)
+6. Reference Organization-managed webhook secret
+7. Update RepoBinding status with webhook configuration
 
-**RBAC Provisioning**:
+#### Per-Organization Webhook Infrastructure
 
-The controller provisions two types of RBAC for each tenant:
+Each organization gets isolated webhook infrastructure:
 
-1. **Namespace-scoped RBAC**: Role and RoleBinding in tenant namespace for pipeline execution
-   - Permissions for pods, configmaps, secrets, PipelineRuns, TaskRuns
-   - Scoped to tenant namespace only
+**Cloudflared Tunnel**:
+- Unique subdomain: `webhooks-{org}.homelab.local`
+- Dedicated tunnel deployment in organization namespace
+- Routes directly to EventListener: `el-github-listener:8080`
+- No complex routing logic needed
 
-2. **Cluster-scoped RBAC**: ClusterRole and ClusterRoleBinding for Tekton Triggers resources
-   - Read-only permissions for ClusterInterceptor and ClusterTriggerBinding
-   - Required for EventListener pods to function correctly
-   - ClusterRole named `pipeline-runner-<tenant-name>`
-   - ClusterRoleBinding binds ClusterRole to tenant's `pipeline-runner` ServiceAccount
+**Webhook Flow**:
+```
+GitHub → webhooks-{org}.homelab.local → Cloudflared → EventListener → TriggerTemplate → PipelineRun
+```
 
-**Why Cluster-scoped RBAC is Needed**:
-
-EventListener pods need to read cluster-scoped Tekton Triggers resources (ClusterInterceptor, ClusterTriggerBinding) to validate webhooks and create PipelineRuns. These resources are cluster-scoped and cannot be accessed via namespace-scoped Roles.
-
-**Webhook Secret Management**:
-- Secret generated using crypto/rand (e.g., `whsec_` + 32 random bytes base64)
-- Stored in Secret: `webhook-<tenant-name>` in tenant namespace
-- EventListener configured to validate using this secret
-- Secret displayed in RepoBinding status for GitHub configuration
+**Benefits**:
+- Complete isolation between organizations
+- Simple GitHub webhook setup (unique URL per org)
+- No router port forwarding required
+- Independent scaling per organization
 
 **Source**
 - `platform/onboarding/controller/` (Go source code)

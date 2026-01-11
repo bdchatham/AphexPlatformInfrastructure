@@ -804,7 +804,7 @@ func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *
 							map[string]interface{}{
 								"name": "secretRef",
 								"value": map[string]interface{}{
-									"secretName": fmt.Sprintf("webhook-%s", rb.Spec.TenantName),
+									"secretName": "github-webhook-secret",
 									"secretKey":  "secret",
 								},
 							},
@@ -867,82 +867,6 @@ func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *
 	}
 	if err := r.Update(ctx, existingEL); err != nil {
 		return fmt.Errorf("failed to update EventListener: %w", err)
-	}
-	
-	return nil
-}
-
-
-// provisionIngress creates or updates the tenant Ingress for webhook routing
-func (r *RepoBindingReconciler) provisionIngress(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Determine ingress hostname (default to "webhooks.local" for homelab)
-	ingressHost := "webhooks.local"
-	if rb.Spec.IngressHost != "" {
-		ingressHost = rb.Spec.IngressHost
-	}
-	
-	pathType := networkingv1.PathTypePrefix
-	ingress := &networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "github-webhook",
-			Namespace: rb.Spec.TenantName,
-			Labels: map[string]string{
-				"arbiter.io/tenant":     rb.Spec.TenantName,
-				"arbiter.io/managed-by": "onboarding-controller",
-			},
-			Annotations: map[string]string{
-				"nginx.ingress.kubernetes.io/rewrite-target": "/",
-			},
-		},
-		Spec: networkingv1.IngressSpec{
-			IngressClassName: stringPtr("nginx"),
-			Rules: []networkingv1.IngressRule{
-				{
-					Host: ingressHost,
-					IngressRuleValue: networkingv1.IngressRuleValue{
-						HTTP: &networkingv1.HTTPIngressRuleValue{
-							Paths: []networkingv1.HTTPIngressPath{
-								{
-									Path:     fmt.Sprintf("/%s", rb.Spec.TenantName),
-									PathType: &pathType,
-									Backend: networkingv1.IngressBackend{
-										Service: &networkingv1.IngressServiceBackend{
-											Name: "el-github-listener",
-											Port: networkingv1.ServiceBackendPort{
-												Number: 8080,
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	
-	// Try to get existing Ingress
-	existingIngress := &networkingv1.Ingress{}
-	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook", Namespace: rb.Spec.TenantName}, existingIngress)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create new Ingress
-			r.Log.Info("Creating Ingress", "namespace", rb.Spec.TenantName, "host", ingressHost)
-			if err := r.Create(ctx, ingress); err != nil {
-				return fmt.Errorf("failed to create Ingress: %w", err)
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to get Ingress: %w", err)
-	}
-	
-	// Ingress exists, update if needed
-	r.Log.Info("Updating Ingress", "namespace", rb.Spec.TenantName, "host", ingressHost)
-	existingIngress.Spec = ingress.Spec
-	existingIngress.Annotations = ingress.Annotations
-	if err := r.Update(ctx, existingIngress); err != nil {
-		return fmt.Errorf("failed to update Ingress: %w", err)
 	}
 	
 	return nil
@@ -1080,63 +1004,11 @@ func generateWebhookSecret() (string, error) {
 	return fmt.Sprintf("whsec_%s", encodedSecret), nil
 }
 
-// provisionWebhookSecret generates and stores the webhook secret for the tenant
-func (r *RepoBindingReconciler) provisionWebhookSecret(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	secretName := fmt.Sprintf("webhook-%s", rb.Spec.TenantName)
-	
-	// Check if secret already exists in tenant namespace
-	existingSecret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: rb.Spec.TenantName}, existingSecret)
-	if err == nil {
-		// Secret exists, verify it has the required key
-		if _, ok := existingSecret.Data["secret"]; ok {
-			r.Log.Info("Webhook secret already exists", "tenant", rb.Spec.TenantName)
-			return nil
-		}
-		return fmt.Errorf("webhook secret exists but missing 'secret' key")
-	}
-	
-	if !errors.IsNotFound(err) {
-		return fmt.Errorf("failed to get webhook secret: %w", err)
-	}
-	
-	// Generate new webhook secret
-	webhookSecret, err := generateWebhookSecret()
-	if err != nil {
-		return fmt.Errorf("failed to generate webhook secret: %w", err)
-	}
-	
-	// Create secret in tenant namespace
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: rb.Spec.TenantName,
-			Labels: map[string]string{
-				"platform.arbiter.io/tenant": rb.Spec.TenantName,
-				"platform.arbiter.io/type":   "webhook-secret",
-			},
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"secret": webhookSecret,
-		},
-	}
-	
-	r.Log.Info("Creating webhook secret", "tenant", rb.Spec.TenantName, "secretName", secretName)
-	if err := r.Create(ctx, secret); err != nil {
-		return fmt.Errorf("failed to create webhook secret: %w", err)
-	}
-	
-	return nil
-}
-
 // updateRepoBindingStatusWithWebhookInfo updates the RepoBinding status with webhook configuration details
 func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	secretName := fmt.Sprintf("webhook-%s", rb.Spec.TenantName)
-	
-	// Retrieve the webhook secret from Kubernetes
+	// Retrieve the webhook secret from organization namespace
 	secret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: secretName, Namespace: rb.Spec.TenantName}, secret)
+	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: rb.Spec.TenantName}, secret)
 	if err != nil {
 		return fmt.Errorf("failed to get webhook secret: %w", err)
 	}
@@ -1146,8 +1018,8 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 		return fmt.Errorf("webhook secret missing 'secret' key")
 	}
 	
-	// Determine ingress hostname
-	ingressHost := "webhooks.local"
+	// Use organization-specific webhook URL
+	rb.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", rb.Spec.TenantName)
 	if rb.Spec.IngressHost != "" {
 		ingressHost = rb.Spec.IngressHost
 	}

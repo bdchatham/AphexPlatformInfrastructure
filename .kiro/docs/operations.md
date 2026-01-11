@@ -237,11 +237,57 @@ kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-pa
 - `platform/scripts/validate-rbac.sh`
 - `platform/auth/ingress/`
 
-## Repository Registration
+## Organization and Repository Registration
+
+### Bootstrap Organization
+
+Organizations must be bootstrapped before repositories can be onboarded. This creates the organization namespace, webhook infrastructure, and admin RBAC.
+
+```bash
+# Create Organization resource
+kubectl apply -f - <<EOF
+apiVersion: arbiter.io/v1alpha1
+kind: Organization
+metadata:
+  name: acme
+  namespace: platform-system
+spec:
+  displayName: "Acme Corporation"
+  adminUsers: ["admin@acme.com", "devops@acme.com"]
+  webhookSecret: "wh_abc123def456"  # Optional - auto-generated if omitted
+EOF
+```
+
+**Field Descriptions**:
+- `name`: Organization identifier (lowercase, alphanumeric, hyphens)
+- `displayName`: Human-readable organization name
+- `adminUsers`: List of admin email addresses for RBAC
+- `webhookSecret`: GitHub webhook secret (auto-generated if not provided)
+
+### Verify Organization Bootstrap
+
+```bash
+# Check Organization status
+kubectl get organization acme -n platform-system
+kubectl describe organization acme -n platform-system
+
+# Verify organization namespace
+kubectl get namespace org-acme
+
+# Verify webhook secret
+kubectl get secret github-webhook-secret -n org-acme
+
+# Verify Cloudflared tunnel
+kubectl get deployment cloudflared -n org-acme
+kubectl get configmap cloudflared-config -n org-acme
+
+# Verify admin RBAC
+kubectl get role,rolebinding -n org-acme
+```
 
 ### Create RepoBinding
 
-To onboard a repository to the platform, create a RepoBinding resource:
+After organization bootstrap, repositories can be onboarded to create webhook integration with existing pipelines.
 
 ```bash
 # Create RepoBinding
@@ -250,22 +296,22 @@ apiVersion: arbiter.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
-  namespace: pipeline-system
+  namespace: platform-system
 spec:
-  repoOrg: "your-github-org"
-  repoName: "your-repo"
-  tenantName: "my-tenant"
+  repoOrg: "acme"
+  repoName: "my-application"
+  tenantName: "org-acme"
+  pipelineName: "my-application-pipeline"
   permissionProfile: "standard"
-  ingressHost: "webhooks.example.com"
 EOF
 ```
 
 **Field Descriptions**:
 - `repoOrg`: GitHub organization name
 - `repoName`: Repository name
-- `tenantName`: Kubernetes namespace name for this tenant (lowercase, alphanumeric, hyphens)
+- `tenantName`: Organization namespace name (must match existing Organization)
+- `pipelineName`: Name of existing Tekton Pipeline (discovered automatically across namespaces)
 - `permissionProfile`: Permission level (`standard` or `elevated`)
-- `ingressHost`: Hostname for webhook Ingress (optional, defaults to cluster ingress)
 
 ### Verify Onboarding
 

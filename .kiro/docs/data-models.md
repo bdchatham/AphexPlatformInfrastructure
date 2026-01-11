@@ -5,13 +5,59 @@
 The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs), standard Kubernetes resources, and configuration data structures to manage platform state. All data is stored in Kubernetes etcd with GitOps-managed configuration.
 
 Data flows through the system in four main forms:
-1. **RepoBinding Resources**: Custom resources for tenant onboarding
-2. **ArgoCD Applications**: GitOps application definitions with sync waves  
-3. **Authentication Data**: User accounts, groups, and OIDC configuration
-4. **Certificate Resources**: TLS certificates and issuers managed by cert-manager
+1. **Organization Resources**: Multi-tenant organization management with webhook infrastructure
+2. **RepoBinding Resources**: Custom resources for repository-to-pipeline integration
+3. **ArgoCD Applications**: GitOps application definitions with sync waves  
+4. **Authentication Data**: User accounts, groups, and OIDC configuration
+5. **Certificate Resources**: TLS certificates and issuers managed by cert-manager
 
 For detailed architecture, see [architecture.md](architecture.md).
 For operational procedures, see [operations.md](operations.md).
+
+## Organization Data Model
+
+### Organization Spec
+
+```typescript
+interface OrganizationSpec {
+  displayName: string;          // Human-readable organization name
+  adminUsers: string[];         // List of admin email addresses
+  webhookSecret?: string;       // GitHub webhook secret (auto-generated if not provided)
+}
+```
+
+**Validation Rules**:
+- `displayName`: Must match pattern `^[a-zA-Z0-9\s\-\.]+$`
+- `adminUsers`: Array of valid email addresses
+- `webhookSecret`: Must match pattern `^[a-zA-Z0-9_-]+$`
+
+**Example**:
+```yaml
+spec:
+  displayName: "Acme Corporation"
+  adminUsers: ["admin@acme.com", "devops@acme.com"]
+  webhookSecret: "wh_abc123def456"  # Optional - auto-generated
+```
+
+### Organization Status
+
+```typescript
+interface OrganizationStatus {
+  namespace: string;            // Organization namespace (org-{name})
+  webhookURL: string;          // External webhook URL
+  phase: "Pending" | "Active" | "Failed";
+  message: string;             // Human-readable status message
+}
+```
+
+**Example**:
+```yaml
+status:
+  namespace: "org-acme"
+  webhookURL: "https://webhooks-acme.homelab.local"
+  phase: "Active"
+  message: "Organization provisioned successfully"
+```
 
 ## RepoBinding Data Model
 
