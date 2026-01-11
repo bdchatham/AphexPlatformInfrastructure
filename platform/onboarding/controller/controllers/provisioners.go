@@ -671,6 +671,14 @@ func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb 
 
 // provisionTriggerTemplate creates or updates the TriggerTemplate for pipeline execution
 func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Find the pipeline's namespace by searching across all namespaces
+	pipelineNamespace, err := r.findPipelineNamespace(ctx, rb.Spec.PipelineName)
+	if err != nil {
+		return fmt.Errorf("failed to find pipeline %q: %w", rb.Spec.PipelineName, err)
+	}
+
+	r.Log.Info("Found pipeline in namespace", "pipeline", rb.Spec.PipelineName, "namespace", pipelineNamespace)
+
 	// Define the TriggerTemplate GVK
 	triggerTemplateGVK := schema.GroupVersionKind{
 		Group:   "triggers.tekton.dev",
@@ -708,6 +716,17 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 				"spec": map[string]interface{}{
 					"pipelineRef": map[string]interface{}{
 						"name": rb.Spec.PipelineName,
+						"resolver": "cluster",
+						"params": []interface{}{
+							map[string]interface{}{
+								"name":  "name",
+								"value": rb.Spec.PipelineName,
+							},
+							map[string]interface{}{
+								"name":  "namespace", 
+								"value": pipelineNamespace,
+							},
+						},
 					},
 					"params": []interface{}{
 						map[string]interface{}{
@@ -1160,4 +1179,38 @@ Next steps - Configure GitHub webhook:
 		"webhookURL", rb.Status.WebhookURL)
 	
 	return nil
+}
+
+// findPipelineNamespace searches for a pipeline by name across all accessible namespaces
+func (r *RepoBindingReconciler) findPipelineNamespace(ctx context.Context, pipelineName string) (string, error) {
+	// List all namespaces
+	namespaceList := &corev1.NamespaceList{}
+	if err := r.List(ctx, namespaceList); err != nil {
+		return "", fmt.Errorf("failed to list namespaces: %w", err)
+	}
+
+	// Search each namespace for the pipeline
+	for _, ns := range namespaceList.Items {
+		namespace := ns.Name
+		
+		// Try to get the pipeline in this namespace using unstructured client
+		pipeline := &unstructured.Unstructured{}
+		pipeline.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "tekton.dev",
+			Version: "v1",
+			Kind:    "Pipeline",
+		})
+		
+		err := r.Get(ctx, client.ObjectKey{
+			Name:      pipelineName,
+			Namespace: namespace,
+		}, pipeline)
+		
+		if err == nil {
+			// Found it!
+			return namespace, nil
+		}
+	}
+
+	return "", fmt.Errorf("pipeline %q not found in any accessible namespace", pipelineName)
 }
