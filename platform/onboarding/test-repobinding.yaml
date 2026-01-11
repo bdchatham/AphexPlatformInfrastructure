@@ -7,7 +7,8 @@ metadata:
     test: "true"
     purpose: "pipeline-execution-test"
 spec:
-  repoOrg: "your-github-org"  # Replace with your GitHub organization
-  repoName: "test-pipeline-execution"  # Replace with your test repository name
+  repoOrg: "your-github-org"
+  repoName: "test-pipeline-execution"
   tenantName: "test-tenant"
   permissionProfile: "standard"
+  pipelineName: "test-pipeline"

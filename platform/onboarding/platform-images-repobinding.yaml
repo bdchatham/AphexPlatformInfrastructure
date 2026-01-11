@@ -10,14 +10,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "5"
     description: "Automated builds for platform container images"
 spec:
-  # GitHub repository details
   repoOrg: "bdchatham"
   repoName: "ArbiterPipelineInfrastructure"
-  
-  # Tenant namespace for running image build pipelines
   tenantName: "platform-images"
-  
-  # Elevated permissions needed for:
-  # - Building container images (requires privileged operations)
-  # - Pushing to GHCR (requires secret access)
+  pipelineName: "platform-image-build"
   permissionProfile: "elevated"
