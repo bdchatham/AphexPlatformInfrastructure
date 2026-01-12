@@ -306,3 +306,16 @@ subjects:
 - kind: ServiceAccount
   name: onboarding-controller
   namespace: platform-system
+# Additional Tekton triggers permissions for missing resources
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - triggers
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
