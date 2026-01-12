@@ -8,6 +8,8 @@ resources:
   - https://github.com/tektoncd/triggers/releases/download/v0.29.0/release.yaml
   # Tekton Triggers Core Interceptors v0.29.0
   - https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+  # Tekton Dashboard v0.64.0
+  - https://github.com/tektoncd/dashboard/releases/download/v0.64.0/release.yaml
 
 # Replace all gcr.io/tekton-releases images with ghcr.io/tektoncd equivalents
 images:
