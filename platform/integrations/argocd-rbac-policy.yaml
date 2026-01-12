@@ -7,10 +7,10 @@ data:
   policy.default: role:readonly
   policy.csv: |
     # Admin group has full access
-    g, admins, role:admin
+    g, platform-admins, role:admin
     
     # Engineering group has read-only access
-    g, engineering, role:readonly
+    g, platform-engineering, role:readonly
     
     # Readonly role can view applications
     p, role:readonly, applications, get, */*, allow
