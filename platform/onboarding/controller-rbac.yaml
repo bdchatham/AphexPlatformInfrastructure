@@ -196,13 +196,9 @@ rules:
 - apiGroups:
   - tekton.dev
   resources:
-  - pipelineruns
-  - taskruns
+  - "*"
   verbs:
-  - get
-  - list
-  - create
-  - watch
+  - "*"
 # Tekton Triggers permissions (cluster-scoped resources that tenants need read access to)
 - apiGroups:
   - triggers.tekton.dev
