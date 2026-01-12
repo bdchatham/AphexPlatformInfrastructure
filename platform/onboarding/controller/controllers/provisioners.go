@@ -992,20 +992,53 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 
 // updateRepoBindingStatusWithWebhookInfo updates the RepoBinding status with webhook configuration details
 func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Retrieve the webhook secret from organization namespace
-	secret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: rb.Spec.TenantName}, secret)
+	// First, try to get webhook secret from organization namespace
+	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.RepoOrg)
+	orgSecret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: orgNamespace}, orgSecret)
 	if err != nil {
-		return fmt.Errorf("failed to get webhook secret: %w", err)
+		return fmt.Errorf("failed to get webhook secret from organization namespace %s: %w", orgNamespace, err)
 	}
 	
-	webhookSecret, ok := secret.Data["secret"]
+	// Copy the webhook secret to the pipeline namespace if it doesn't exist
+	pipelineSecret := &corev1.Secret{}
+	err = r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: rb.Spec.TenantName}, pipelineSecret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Create a copy of the secret in the pipeline namespace
+			pipelineSecret = &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "github-webhook-secret",
+					Namespace: rb.Spec.TenantName,
+					Labels: map[string]string{
+						"platform.arbiter.io/managed-by": "repobinding-controller",
+						"platform.arbiter.io/organization": rb.Spec.RepoOrg,
+					},
+				},
+				Type: orgSecret.Type,
+				Data: orgSecret.Data,
+			}
+			
+			// Set owner reference for cleanup
+			if err := controllerutil.SetControllerReference(rb, pipelineSecret, r.Scheme); err != nil {
+				return fmt.Errorf("failed to set owner reference on webhook secret: %w", err)
+			}
+			
+			if err := r.Create(ctx, pipelineSecret); err != nil {
+				return fmt.Errorf("failed to copy webhook secret to pipeline namespace: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to check webhook secret in pipeline namespace: %w", err)
+		}
+	}
+	
+	webhookSecret, ok := pipelineSecret.Data["secret"]
 	if !ok {
 		return fmt.Errorf("webhook secret missing 'secret' key")
 	}
 	
 	// Use organization-specific webhook URL
-	rb.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", rb.Spec.TenantName)
+	rb.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", rb.Spec.RepoOrg)
 	
 	// Update RepoBinding status with webhook information
 	rb.Status.WebhookSecret = string(webhookSecret)
