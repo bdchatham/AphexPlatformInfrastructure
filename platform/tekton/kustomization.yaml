@@ -4,10 +4,10 @@ kind: Kustomization
 resources:
   # Tekton Pipelines v0.65.0
   - https://github.com/tektoncd/pipeline/releases/download/v0.65.0/release.yaml
-  # Tekton Triggers v0.29.0
-  - https://github.com/tektoncd/triggers/releases/download/v0.29.0/release.yaml
-  # Tekton Triggers Core Interceptors v0.29.0
-  - https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+  # Tekton Triggers v0.34.0
+  - https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/release.yaml
+  # Tekton Triggers Core Interceptors v0.34.0
+  - https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/interceptors.yaml
   # Tekton Dashboard v0.64.0
   - https://github.com/tektoncd/dashboard/releases/download/v0.64.0/release.yaml
 
@@ -38,3 +38,5 @@ images:
     newName: ghcr.io/tektoncd/github.com/tektoncd/triggers/cmd/webhook
   - name: gcr.io/tekton-releases/github.com/tektoncd/triggers/cmd/interceptors
     newName: ghcr.io/tektoncd/github.com/tektoncd/triggers/cmd/interceptors
+  - name: gcr.io/tekton-releases/github.com/tektoncd/triggers/cmd/eventlistenersink
+    newName: ghcr.io/tektoncd/github.com/tektoncd/triggers/cmd/eventlistenersink
