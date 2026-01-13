@@ -329,10 +329,9 @@ func (r *OrganizationReconciler) provisionEventListenerServiceAccount(ctx contex
 		}
 	}
 
-	roleBinding := &rbacv1.RoleBinding{
+	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "eventlistener",
-			Namespace: org.Status.Namespace,
+			Name: fmt.Sprintf("eventlistener-%s", org.Name),
 			Labels: map[string]string{
 				"platform.arbiter.io/organization": org.Name,
 				"platform.arbiter.io/managed-by":   "organization-controller",
@@ -352,11 +351,11 @@ func (r *OrganizationReconciler) provisionEventListenerServiceAccount(ctx contex
 		},
 	}
 
-	existingRoleBinding := &rbacv1.RoleBinding{}
-	err = r.Get(ctx, client.ObjectKey{Name: roleBinding.Name, Namespace: roleBinding.Namespace}, existingRoleBinding)
+	existingClusterRoleBinding := &rbacv1.ClusterRoleBinding{}
+	err = r.Get(ctx, client.ObjectKey{Name: clusterRoleBinding.Name}, existingClusterRoleBinding)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			if err := r.Create(ctx, roleBinding); err != nil {
+			if err := r.Create(ctx, clusterRoleBinding); err != nil {
 				return err
 			}
 		} else {
