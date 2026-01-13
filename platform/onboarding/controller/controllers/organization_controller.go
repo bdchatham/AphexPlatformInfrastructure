@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
 const (
@@ -44,6 +45,7 @@ type OrganizationReconciler struct {
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=triggers.tekton.dev,resources=eventlisteners,verbs=get;list;watch;create;update;patch
 
 // Reconcile manages Organization resources
 func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -148,6 +150,10 @@ func (r *OrganizationReconciler) provisionOrganization(ctx context.Context, org 
 	// Create RBAC for organization admins
 	if err := r.provisionRBAC(ctx, org); err != nil {
 		return fmt.Errorf("failed to provision RBAC: %w", err)
+	}
+
+	if err := r.provisionEventListenerServiceAccount(ctx, org); err != nil {
+		return fmt.Errorf("failed to provision EventListener ServiceAccount: %w", err)
 	}
 
 	return nil
@@ -293,6 +299,68 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 			} else {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+func (r *OrganizationReconciler) provisionEventListenerServiceAccount(ctx context.Context, org *platformv1alpha1.Organization) error {
+	serviceAccount := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "eventlistener",
+			Namespace: org.Status.Namespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+			},
+		},
+	}
+
+	existingSA := &corev1.ServiceAccount{}
+	err := r.Get(ctx, client.ObjectKey{Name: serviceAccount.Name, Namespace: serviceAccount.Namespace}, existingSA)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, serviceAccount); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	roleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "eventlistener",
+			Namespace: org.Status.Namespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+			},
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "eventlistener",
+				Namespace: org.Status.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "eventlistener-access",
+		},
+	}
+
+	existingRoleBinding := &rbacv1.RoleBinding{}
+	err = r.Get(ctx, client.ObjectKey{Name: roleBinding.Name, Namespace: roleBinding.Namespace}, existingRoleBinding)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, roleBinding); err != nil {
+				return err
+			}
+		} else {
+			return err
 		}
 	}
 
@@ -549,6 +617,51 @@ ingress:
 		}
 	}
 
+	// Create EventListener
+	orgNamespace := fmt.Sprintf("org-%s", org.Name)
+	eventListener := &triggersv1beta1.EventListener{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-listener",
+			Namespace: orgNamespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+			},
+		},
+		Spec: triggersv1beta1.EventListenerSpec{
+			ServiceAccountName: "eventlistener",
+			TriggerGroups: []triggersv1beta1.EventListenerTriggerGroup{
+				{
+					Name: "github-webhooks",
+					TriggerSelector: triggersv1beta1.EventListenerTriggerSelector{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"platform.arbiter.io/organization": org.Name,
+							},
+						},
+					},
+					Interceptors: []*triggersv1beta1.TriggerInterceptor{
+						{
+							Name: stringPtr("github"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	existingEventListener := &triggersv1beta1.EventListener{}
+	err = r.Get(ctx, client.ObjectKey{Name: eventListener.Name, Namespace: eventListener.Namespace}, existingEventListener)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, eventListener); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -667,12 +780,19 @@ func (r *OrganizationReconciler) deleteCloudflaredTunnel(ctx context.Context, or
 		return fmt.Errorf("account ID not found in credentials")
 	}
 
-	// Create Cloudflare API client and delete tunnel
+	// Create Cloudflare API client
 	api, err := cloudflare.NewWithAPIToken(apiToken)
 	if err != nil {
 		return fmt.Errorf("failed to create Cloudflare API client: %w", err)
 	}
 
+	// Clean up tunnel connections first
+	err = api.CleanupTunnelConnections(ctx, cloudflare.AccountIdentifier(accountID), tunnelID)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup tunnel connections for %s: %w", tunnelID, err)
+	}
+
+	// Delete tunnel
 	err = api.DeleteTunnel(ctx, cloudflare.AccountIdentifier(accountID), tunnelID)
 	if err != nil {
 		return fmt.Errorf("failed to delete Cloudflare tunnel %s: %w", tunnelID, err)

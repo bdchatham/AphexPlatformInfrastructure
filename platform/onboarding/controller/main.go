@@ -14,6 +14,7 @@ import (
 
 	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
 	"github.com/arbiter/jenkinsx-platform/onboarding-controller/controllers"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
 var (
@@ -24,6 +25,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(platformv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(triggersv1beta1.AddToScheme(scheme))
 }
 
 func main() {

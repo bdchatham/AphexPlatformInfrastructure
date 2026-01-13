@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
+	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
 // provisionNamespace creates or updates the tenant namespace
@@ -624,46 +625,37 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 
 // provisionTriggerBinding creates or updates the TriggerBinding for GitHub webhooks
 func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Define the TriggerBinding GVK
-	triggerBindingGVK := schema.GroupVersionKind{
-		Group:   "triggers.tekton.dev",
-		Version: "v1beta1",
-		Kind:    "TriggerBinding",
-	}
-	
-	// Build the TriggerBinding spec
-	triggerBinding := &unstructured.Unstructured{}
-	triggerBinding.SetGroupVersionKind(triggerBindingGVK)
-	triggerBinding.SetName("github-push-binding")
-	triggerBinding.SetNamespace(rb.Spec.TenantName)
-	triggerBinding.SetLabels(map[string]string{
-		"platform.arbiter.io/tenant":     rb.Spec.TenantName,
-		"platform.arbiter.io/managed-by": "onboarding-controller",
-	})
-	
-	// Set the spec
-	spec := map[string]interface{}{
-		"params": []interface{}{
-			map[string]interface{}{
-				"name":  "git-url",
-				"value": "$(body.repository.clone_url)",
+	triggerBinding := &triggersv1beta1.TriggerBinding{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "triggers.tekton.dev/v1beta1",
+			Kind:       "TriggerBinding",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-push-binding",
+			Namespace: rb.Spec.TenantName,
+			Labels: map[string]string{
+				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/managed-by": "onboarding-controller",
 			},
-			map[string]interface{}{
-				"name":  "git-revision",
-				"value": "$(body.after)",
+		},
+		Spec: triggersv1beta1.TriggerBindingSpec{
+			Params: []triggersv1beta1.Param{
+				{
+					Name:  "git-url",
+					Value: "$(body.repository.clone_url)",
+				},
+				{
+					Name:  "git-revision",
+					Value: "$(body.after)",
+				},
 			},
 		},
 	}
-	
-	if err := unstructured.SetNestedMap(triggerBinding.Object, spec, "spec"); err != nil {
-		return fmt.Errorf("failed to set TriggerBinding spec: %w", err)
-	}
-	
-	// Apply the TriggerBinding
+
 	if err := r.Client.Patch(ctx, triggerBinding, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
 		return fmt.Errorf("failed to apply TriggerBinding: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -763,108 +755,6 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	// Apply the TriggerTemplate
 	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
 		return fmt.Errorf("failed to apply TriggerTemplate: %w", err)
-	}
-	
-	return nil
-}
-
-// provisionEventListener creates or updates the tenant EventListener
-func (r *RepoBindingReconciler) provisionEventListener(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Define the EventListener GVK
-	eventListenerGVK := schema.GroupVersionKind{
-		Group:   "triggers.tekton.dev",
-		Version: "v1beta1",
-		Kind:    "EventListener",
-	}
-	
-	// Build the EventListener spec
-	eventListener := &unstructured.Unstructured{}
-	eventListener.SetGroupVersionKind(eventListenerGVK)
-	eventListener.SetName("github-listener")
-	eventListener.SetNamespace(rb.Spec.TenantName)
-	eventListener.SetLabels(map[string]string{
-		"arbiter.io/tenant":     rb.Spec.TenantName,
-		"arbiter.io/managed-by": "onboarding-controller",
-	})
-	
-	// Set the spec
-	spec := map[string]interface{}{
-		"serviceAccountName": "pipeline-runner",
-		"triggers": []interface{}{
-			map[string]interface{}{
-				"name": "github-push-main",
-				"interceptors": []interface{}{
-					map[string]interface{}{
-						"ref": map[string]interface{}{
-							"name": "github",
-						},
-						"params": []interface{}{
-							map[string]interface{}{
-								"name": "secretRef",
-								"value": map[string]interface{}{
-									"secretName": "github-webhook-secret",
-									"secretKey":  "secret",
-								},
-							},
-							map[string]interface{}{
-								"name": "eventTypes",
-								"value": []interface{}{
-									"push",
-								},
-							},
-						},
-					},
-					map[string]interface{}{
-						"ref": map[string]interface{}{
-							"name": "cel",
-						},
-						"params": []interface{}{
-							map[string]interface{}{
-								"name":  "filter",
-								"value": "body.ref == 'refs/heads/main'",
-							},
-						},
-					},
-				},
-				"bindings": []interface{}{
-					map[string]interface{}{
-						"ref": "github-push-binding",
-					},
-				},
-				"template": map[string]interface{}{
-					"ref": fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName),
-				},
-			},
-		},
-	}
-	
-	if err := unstructured.SetNestedMap(eventListener.Object, spec, "spec"); err != nil {
-		return fmt.Errorf("failed to set EventListener spec: %w", err)
-	}
-	
-	// Try to get existing EventListener
-	existingEL := &unstructured.Unstructured{}
-	existingEL.SetGroupVersionKind(eventListenerGVK)
-	err := r.Get(ctx, client.ObjectKey{Name: "github-listener", Namespace: rb.Spec.TenantName}, existingEL)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			// Create new EventListener
-			r.Log.Info("Creating EventListener", "namespace", rb.Spec.TenantName)
-			if err := r.Create(ctx, eventListener); err != nil {
-				return fmt.Errorf("failed to create EventListener: %w", err)
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to get EventListener: %w", err)
-	}
-	
-	// EventListener exists, update if needed
-	r.Log.Info("Updating EventListener", "namespace", rb.Spec.TenantName)
-	if err := unstructured.SetNestedMap(existingEL.Object, spec, "spec"); err != nil {
-		return fmt.Errorf("failed to update EventListener spec: %w", err)
-	}
-	if err := r.Update(ctx, existingEL); err != nil {
-		return fmt.Errorf("failed to update EventListener: %w", err)
 	}
 	
 	return nil

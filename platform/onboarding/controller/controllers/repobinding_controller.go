@@ -95,7 +95,6 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 		{name: "Terraform backend secret", statusField: &repoBinding.Status.TerraformSecretCreated, provisionFunc: r.provisionTerraformBackendSecret},
 		{name: "TriggerBinding", statusField: &repoBinding.Status.TriggerBindingCreated, provisionFunc: r.provisionTriggerBinding},
 		{name: "TriggerTemplate", statusField: &repoBinding.Status.TriggerTemplateCreated, provisionFunc: r.provisionTriggerTemplate},
-		{name: "EventListener", statusField: &repoBinding.Status.EventListenerCreated, provisionFunc: r.provisionEventListener},
 	}
 
 	for _, step := range steps {
