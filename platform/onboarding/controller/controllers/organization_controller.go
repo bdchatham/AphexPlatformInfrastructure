@@ -3,9 +3,12 @@ package controllers
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
+	"github.com/cloudflare/cloudflare-go"
 	corev1 "k8s.io/api/core/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -21,7 +24,9 @@ import (
 )
 
 const (
-	organizationFinalizer = "platform.arbiter.io/organization-finalizer"
+	organizationFinalizer     = "platform.arbiter.io/organization-finalizer"
+	cloudflareAPITokenSecret  = "cloudflare-api-token"
+	platformSystemNamespace   = "platform-system"
 )
 
 // OrganizationReconciler reconciles an Organization object
@@ -59,10 +64,14 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.handleDeletion(ctx, org)
 	}
 
+	// Track if we need to update the resource
+	needsUpdate := false
+	needsStatusUpdate := false
+
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(org, organizationFinalizer) {
 		controllerutil.AddFinalizer(org, organizationFinalizer)
-		return ctrl.Result{}, r.Update(ctx, org)
+		needsUpdate = true
 	}
 
 	// Generate webhook secret if not provided
@@ -72,9 +81,7 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, fmt.Errorf("failed to generate webhook secret: %w", err)
 		}
 		org.Spec.WebhookSecret = secret
-		if err := r.Update(ctx, org); err != nil {
-			return ctrl.Result{}, err
-		}
+		needsUpdate = true
 	}
 
 	// Set initial status
@@ -82,9 +89,22 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		org.Status.Phase = "Pending"
 		org.Status.Namespace = fmt.Sprintf("org-%s", org.Name)
 		org.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", org.Name)
+		needsStatusUpdate = true
+	}
+
+	// Apply updates if needed
+	if needsUpdate {
+		if err := r.Update(ctx, org); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil // Requeue for next reconciliation
+	}
+
+	if needsStatusUpdate {
 		if err := r.Status().Update(ctx, org); err != nil {
 			return ctrl.Result{}, err
 		}
+		return ctrl.Result{}, nil // Requeue for next reconciliation
 	}
 
 	// Provision organization resources
@@ -95,11 +115,13 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// Update status to Active
-	org.Status.Phase = "Active"
-	org.Status.Message = "Organization provisioned successfully"
-	if err := r.Status().Update(ctx, org); err != nil {
-		return ctrl.Result{}, err
+	// Update status to Active if not already
+	if org.Status.Phase != "Active" {
+		org.Status.Phase = "Active"
+		org.Status.Message = "Organization provisioned successfully"
+		if err := r.Status().Update(ctx, org); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	log.Info("Organization reconciled successfully", "organization", org.Name)
@@ -174,51 +196,18 @@ func (r *OrganizationReconciler) provisionWebhookSecret(ctx context.Context, org
 		},
 	}
 
-	// Also create Cloudflared credentials secret in organization namespace
-	cloudflaredSecret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
-			Namespace: org.Status.Namespace,
-			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
-			},
-		},
-		Data: map[string][]byte{
-			"credentials.json": []byte("{}"), // Placeholder - will be updated by bootstrap
-		},
-	}
-
-	// Create webhook secret
 	existingSecret := &corev1.Secret{}
 	err := r.Get(ctx, client.ObjectKey{Name: secret.Name, Namespace: secret.Namespace}, existingSecret)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			if err := r.Create(ctx, secret); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	} else {
-		existingSecret.Data = secret.Data
-		existingSecret.Labels = secret.Labels
-		if err := r.Update(ctx, existingSecret); err != nil {
-			return err
-		}
-	}
-
-	// Create Cloudflared credentials secret
-	existingCloudflaredSecret := &corev1.Secret{}
-	err = r.Get(ctx, client.ObjectKey{Name: cloudflaredSecret.Name, Namespace: cloudflaredSecret.Namespace}, existingCloudflaredSecret)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return r.Create(ctx, cloudflaredSecret)
+			return r.Create(ctx, secret)
 		}
 		return err
 	}
 
-	return nil
+	existingSecret.Data = secret.Data
+	existingSecret.Labels = secret.Labels
+	return r.Update(ctx, existingSecret)
 }
 
 // provisionRBAC creates RBAC for organization admins
@@ -321,6 +310,117 @@ func generateWebhookSecret() (string, error) {
 
 // provisionCloudflaredTunnel creates Cloudflared tunnel infrastructure for the organization
 func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context, org *platformv1alpha1.Organization) error {
+	// Get Cloudflare API token from cluster secret
+	apiTokenSecret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Name: cloudflareAPITokenSecret, Namespace: platformSystemNamespace}, apiTokenSecret)
+	if err != nil {
+		return fmt.Errorf("failed to get Cloudflare API token secret: %w", err)
+	}
+	
+	apiToken := string(apiTokenSecret.Data["token"])
+	if apiToken == "" {
+		return fmt.Errorf("Cloudflare API token not found in secret")
+	}
+
+	// Create Cloudflare API client
+	api, err := cloudflare.NewWithAPIToken(apiToken)
+	if err != nil {
+		return fmt.Errorf("failed to create Cloudflare API client: %w", err)
+	}
+
+	// Get account ID (required for tunnel operations)
+	accounts, _, err := api.Accounts(ctx, cloudflare.AccountsListParams{})
+	if err != nil {
+		return fmt.Errorf("failed to list Cloudflare accounts: %w", err)
+	}
+	if len(accounts) == 0 {
+		return fmt.Errorf("no Cloudflare accounts found")
+	}
+	accountID := accounts[0].ID
+
+	// Check if we already have valid tunnel credentials
+	tunnelName := fmt.Sprintf("webhooks-%s", org.Name)
+	existingCredentialsSecret := &corev1.Secret{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
+		Namespace: org.Status.Namespace,
+	}, existingCredentialsSecret)
+	
+	var tunnel cloudflare.Tunnel
+	var tunnelSecret string
+	
+	if err == nil {
+		// We have existing credentials, parse them to get tunnel info
+		credentialsJSON := existingCredentialsSecret.Data["credentials.json"]
+		var credentials map[string]interface{}
+		if json.Unmarshal(credentialsJSON, &credentials) == nil {
+			if tunnelID, ok := credentials["TunnelID"].(string); ok && tunnelID != "" {
+				if secret, ok := credentials["TunnelSecret"].(string); ok && secret != "" {
+					// We have valid existing credentials, use them
+					tunnel = cloudflare.Tunnel{
+						ID:     tunnelID,
+						Name:   tunnelName,
+						Secret: secret,
+					}
+					tunnelSecret = secret
+				}
+			}
+		}
+	}
+	
+	// If we don't have valid existing credentials, get or create tunnel
+	if tunnel.ID == "" {
+		tunnel, err = r.createFreshTunnelWithSecret(ctx, api, accountID, tunnelName)
+		if err != nil {
+			return fmt.Errorf("failed to get or create Cloudflare tunnel: %w", err)
+		}
+		tunnelSecret = tunnel.Secret
+	}
+
+	// Create tunnel credentials
+	credentials := map[string]interface{}{
+		"AccountTag":   accountID,
+		"TunnelSecret": tunnelSecret,
+		"TunnelID":     tunnel.ID,
+	}
+	credentialsJSON, err := json.Marshal(credentials)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tunnel credentials: %w", err)
+	}
+
+	// Create Cloudflared credentials secret
+	credentialsSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
+			Namespace: org.Status.Namespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+			},
+		},
+		Data: map[string][]byte{
+			"credentials.json": credentialsJSON,
+		},
+	}
+
+	existingCredentialsSecret = &corev1.Secret{}
+	err = r.Get(ctx, client.ObjectKey{Name: credentialsSecret.Name, Namespace: credentialsSecret.Namespace}, existingCredentialsSecret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, credentialsSecret); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		existingCredentialsSecret.Data = credentialsSecret.Data
+		existingCredentialsSecret.Labels = credentialsSecret.Labels
+		if err := r.Update(ctx, existingCredentialsSecret); err != nil {
+			return err
+		}
+	}
+
 	// Create Cloudflared ConfigMap
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -338,12 +438,12 @@ credentials-file: /etc/cloudflared/credentials/credentials.json
 ingress:
   - hostname: webhooks-%s.homelab.local
     service: http://el-github-listener:8080
-  - service: http_status:404`, org.Name, org.Name),
+  - service: http_status:404`, tunnel.ID, org.Name),
 		},
 	}
 
 	existingConfigMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, client.ObjectKey{Name: configMap.Name, Namespace: configMap.Namespace}, existingConfigMap)
+	err = r.Get(ctx, client.ObjectKey{Name: configMap.Name, Namespace: configMap.Namespace}, existingConfigMap)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			if err := r.Create(ctx, configMap); err != nil {
@@ -452,10 +552,53 @@ ingress:
 	return nil
 }
 
+func (r *OrganizationReconciler) createFreshTunnelWithSecret(ctx context.Context, api *cloudflare.API, accountID, tunnelName string) (cloudflare.Tunnel, error) {
+	tunnels, _, err := api.ListTunnels(ctx, cloudflare.AccountIdentifier(accountID), cloudflare.TunnelListParams{
+		Name: tunnelName,
+	})
+	if err != nil {
+		return cloudflare.Tunnel{}, fmt.Errorf("failed to list tunnels: %w", err)
+	}
+
+	for _, tunnel := range tunnels {
+		if tunnel.Name == tunnelName {
+			err := api.DeleteTunnel(ctx, cloudflare.AccountIdentifier(accountID), tunnel.ID)
+			if err != nil {
+				return cloudflare.Tunnel{}, fmt.Errorf("failed to delete existing tunnel: %w", err)
+			}
+			break
+		}
+	}
+
+	tunnelSecret := generateTunnelSecret()
+	tunnel, err := api.CreateTunnel(ctx, cloudflare.AccountIdentifier(accountID), cloudflare.TunnelCreateParams{
+		Name:   tunnelName,
+		Secret: tunnelSecret,
+	})
+	if err != nil {
+		return cloudflare.Tunnel{}, fmt.Errorf("failed to create tunnel: %w", err)
+	}
+
+	tunnel.Secret = tunnelSecret
+	return tunnel, nil
+}
+
+// generateTunnelSecret generates a random secret for the tunnel
+func generateTunnelSecret() string {
+	secret := make([]byte, 32)
+	rand.Read(secret)
+	return base64.StdEncoding.EncodeToString(secret)
+}
+
 // handleDeletion cleans up organization resources and removes finalizer
 func (r *OrganizationReconciler) handleDeletion(ctx context.Context, org *platformv1alpha1.Organization) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 	log.Info("Handling organization deletion", "organization", org.Name)
+
+	// Delete Cloudflare tunnel before deleting namespace
+	if err := r.deleteCloudflaredTunnel(ctx, org); err != nil {
+		log.Error(err, "Failed to delete Cloudflare tunnel, continuing with namespace deletion")
+	}
 
 	// Delete organization namespace (this cascades to all resources in the namespace)
 	namespace := &corev1.Namespace{}
@@ -477,6 +620,65 @@ func (r *OrganizationReconciler) handleDeletion(ctx context.Context, org *platfo
 
 	log.Info("Organization deletion completed", "organization", org.Name)
 	return ctrl.Result{}, nil
+}
+
+// deleteCloudflaredTunnel deletes the Cloudflare tunnel for the organization
+func (r *OrganizationReconciler) deleteCloudflaredTunnel(ctx context.Context, org *platformv1alpha1.Organization) error {
+	// Get Cloudflare API token from cluster secret
+	apiTokenSecret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Name: cloudflareAPITokenSecret, Namespace: platformSystemNamespace}, apiTokenSecret)
+	if err != nil {
+		return fmt.Errorf("failed to get Cloudflare API token secret: %w", err)
+	}
+	
+	apiToken := string(apiTokenSecret.Data["token"])
+	if apiToken == "" {
+		return fmt.Errorf("Cloudflare API token not found in secret")
+	}
+
+	// Get tunnel credentials to find tunnel ID
+	credentialsSecret := &corev1.Secret{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
+		Namespace: org.Status.Namespace,
+	}, credentialsSecret)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// No credentials secret means tunnel was never created successfully
+			return nil
+		}
+		return fmt.Errorf("failed to get tunnel credentials: %w", err)
+	}
+
+	// Parse tunnel credentials to get tunnel ID
+	credentialsJSON := credentialsSecret.Data["credentials.json"]
+	var credentials map[string]interface{}
+	if err := json.Unmarshal(credentialsJSON, &credentials); err != nil {
+		return fmt.Errorf("failed to parse tunnel credentials: %w", err)
+	}
+
+	tunnelID, ok := credentials["TunnelID"].(string)
+	if !ok {
+		return fmt.Errorf("tunnel ID not found in credentials")
+	}
+
+	accountID, ok := credentials["AccountTag"].(string)
+	if !ok {
+		return fmt.Errorf("account ID not found in credentials")
+	}
+
+	// Create Cloudflare API client and delete tunnel
+	api, err := cloudflare.NewWithAPIToken(apiToken)
+	if err != nil {
+		return fmt.Errorf("failed to create Cloudflare API client: %w", err)
+	}
+
+	err = api.DeleteTunnel(ctx, cloudflare.AccountIdentifier(accountID), tunnelID)
+	if err != nil {
+		return fmt.Errorf("failed to delete Cloudflare tunnel %s: %w", tunnelID, err)
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager

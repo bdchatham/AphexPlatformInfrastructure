@@ -1019,11 +1019,6 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 				Data: orgSecret.Data,
 			}
 			
-			// Set owner reference for cleanup
-			if err := controllerutil.SetControllerReference(rb, pipelineSecret, r.Scheme); err != nil {
-				return fmt.Errorf("failed to set owner reference on webhook secret: %w", err)
-			}
-			
 			if err := r.Create(ctx, pipelineSecret); err != nil {
 				return fmt.Errorf("failed to copy webhook secret to pipeline namespace: %w", err)
 			}

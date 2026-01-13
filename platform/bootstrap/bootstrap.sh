@@ -110,6 +110,14 @@ check_prerequisites() {
     exit 1
   fi
   
+  # Check for Cloudflare API token
+  if [[ -z "${CLOUDFLARE_TUNNEL_CREDENTIALS:-}" ]]; then
+    log_error "CLOUDFLARE_TUNNEL_CREDENTIALS environment variable not set"
+    log_error "This is required for organization webhook tunnels"
+    log_error "Set it in your environment or .env file"
+    exit 1
+  fi
+  
   log_success "All prerequisites satisfied"
 }
 
@@ -208,6 +216,14 @@ create_namespaces() {
   else
     log_info "Namespace tekton-pipelines already exists"
   fi
+  
+  # Create platform-system namespace (required for Cloudflare API token secret)
+  if ! kubectl get namespace "platform-system" &> /dev/null; then
+    kubectl create namespace "platform-system"
+    log_success "Created namespace: platform-system"
+  else
+    log_info "Namespace platform-system already exists"
+  fi
 }
 
 create_auth_system_secrets() {
@@ -252,6 +268,16 @@ create_auth_system_secrets() {
       --from-literal=tekton-client-secret="$TEKTON_CLIENT_SECRET" \
       --from-literal=kubernetes-client-secret="$KUBERNETES_CLIENT_SECRET"
     log_success "Created secret: dex-secrets (in $AUTH_NAMESPACE)"
+  fi
+  
+  # Create Cloudflare API token secret in platform-system namespace
+  if kubectl get secret cloudflare-api-token -n "platform-system" &> /dev/null; then
+    log_info "Secret cloudflare-api-token already exists (skipping)"
+  else
+    kubectl create secret generic cloudflare-api-token \
+      -n "platform-system" \
+      --from-literal=token="$CLOUDFLARE_TUNNEL_CREDENTIALS"
+    log_success "Created secret: cloudflare-api-token (in platform-system)"
   fi
   
   if [[ "$secrets_exist" == true ]]; then
