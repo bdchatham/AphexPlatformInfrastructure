@@ -7,5 +7,5 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"
 rules:
   - apiGroups: ["triggers.tekton.dev"]
-    resources: ["eventlisteners", "triggers", "triggerbindings", "triggertemplates", "interceptors"]
+    resources: ["eventlisteners", "triggers", "triggerbindings", "triggertemplates", "interceptors", "clusterinterceptors", "clustertriggerbindings"]
     verbs: ["get", "list", "watch"]
