@@ -7,15 +7,21 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
+)
+
+const (
+	organizationFinalizer = "platform.arbiter.io/organization-finalizer"
 )
 
 // OrganizationReconciler reconciles an Organization object
@@ -27,8 +33,10 @@ type OrganizationReconciler struct {
 // +kubebuilder:rbac:groups=arbiter.io,resources=organizations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=arbiter.io,resources=organizations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=arbiter.io,resources=organizations/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch
 
@@ -44,6 +52,17 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
+	}
+
+	// Handle deletion
+	if org.DeletionTimestamp != nil {
+		return r.handleDeletion(ctx, org)
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(org, organizationFinalizer) {
+		controllerutil.AddFinalizer(org, organizationFinalizer)
+		return ctrl.Result{}, r.Update(ctx, org)
 	}
 
 	// Generate webhook secret if not provided
@@ -341,7 +360,123 @@ ingress:
 		}
 	}
 
+	// Create Cloudflared Deployment
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("cloudflared-%s", org.Name),
+			Namespace: org.Status.Namespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+				"app":                               "cloudflared",
+			},
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(1),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app": "cloudflared",
+					"org": org.Name,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app": "cloudflared",
+						"org": org.Name,
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "cloudflared",
+							Image: "cloudflare/cloudflared:latest",
+							Args:  []string{"tunnel", "--config", "/etc/cloudflared/config/config.yaml", "run"},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "config",
+									MountPath: "/etc/cloudflared/config",
+									ReadOnly:  true,
+								},
+								{
+									Name:      "credentials",
+									MountPath: "/etc/cloudflared/credentials",
+									ReadOnly:  true,
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "config",
+							VolumeSource: corev1.VolumeSource{
+								ConfigMap: &corev1.ConfigMapVolumeSource{
+									LocalObjectReference: corev1.LocalObjectReference{
+										Name: "cloudflared-config",
+									},
+								},
+							},
+						},
+						{
+							Name: "credentials",
+							VolumeSource: corev1.VolumeSource{
+								Secret: &corev1.SecretVolumeSource{
+									SecretName: fmt.Sprintf("cloudflared-credentials-%s", org.Name),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	existingDeployment := &appsv1.Deployment{}
+	err = r.Get(ctx, client.ObjectKey{Name: deployment.Name, Namespace: deployment.Namespace}, existingDeployment)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, deployment); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else {
+		existingDeployment.Spec = deployment.Spec
+		existingDeployment.Labels = deployment.Labels
+		if err := r.Update(ctx, existingDeployment); err != nil {
+			return err
+		}
+	}
+
 	return nil
+}
+
+// handleDeletion cleans up organization resources and removes finalizer
+func (r *OrganizationReconciler) handleDeletion(ctx context.Context, org *platformv1alpha1.Organization) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+	log.Info("Handling organization deletion", "organization", org.Name)
+
+	// Delete organization namespace (this cascades to all resources in the namespace)
+	namespace := &corev1.Namespace{}
+	err := r.Get(ctx, client.ObjectKey{Name: org.Status.Namespace}, namespace)
+	if err == nil {
+		if err := r.Delete(ctx, namespace); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to delete organization namespace: %w", err)
+		}
+		log.Info("Deleted organization namespace", "namespace", org.Status.Namespace)
+	} else if !errors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("failed to get organization namespace: %w", err)
+	}
+
+	// Remove finalizer
+	controllerutil.RemoveFinalizer(org, organizationFinalizer)
+	if err := r.Update(ctx, org); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
+	}
+
+	log.Info("Organization deletion completed", "organization", org.Name)
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager
