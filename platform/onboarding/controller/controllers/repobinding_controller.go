@@ -64,6 +64,10 @@ func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
+	if err := r.ensureOwnerReference(ctx, repoBinding); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if err := r.initializeStatus(ctx, logger, repoBinding); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -288,6 +292,25 @@ func (r *RepoBindingReconciler) ensureFinalizer(ctx context.Context, repoBinding
 		return r.Update(ctx, repoBinding)
 	}
 	return nil
+}
+
+func (r *RepoBindingReconciler) ensureOwnerReference(ctx context.Context, repoBinding *platformv1alpha1.RepoBinding) error {
+	for _, ownerRef := range repoBinding.GetOwnerReferences() {
+		if ownerRef.Kind == "Organization" {
+			return nil
+		}
+	}
+
+	org := &platformv1alpha1.Organization{}
+	if err := r.Get(ctx, client.ObjectKey{Name: repoBinding.Spec.AphexOrg, Namespace: "platform-system"}, org); err != nil {
+		return fmt.Errorf("failed to get organization %s: %w", repoBinding.Spec.AphexOrg, err)
+	}
+
+	if err := controllerutil.SetOwnerReference(org, repoBinding, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
+	}
+
+	return r.Update(ctx, repoBinding)
 }
 
 func (r *RepoBindingReconciler) initializeStatus(ctx context.Context, logger logr.Logger, repoBinding *platformv1alpha1.RepoBinding) error {
