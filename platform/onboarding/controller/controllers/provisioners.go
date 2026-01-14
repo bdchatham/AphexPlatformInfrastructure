@@ -634,8 +634,9 @@ func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb 
 			Name:      "github-push-binding",
 			Namespace: rb.Spec.TenantName,
 			Labels: map[string]string{
-				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
-				"platform.arbiter.io/managed-by": "onboarding-controller",
+				"platform.arbiter.io/tenant":       rb.Spec.TenantName,
+				"platform.arbiter.io/managed-by":   "onboarding-controller",
+				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
 			},
 		},
 		Spec: triggersv1beta1.TriggerBindingSpec{
@@ -682,8 +683,9 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName))
 	triggerTemplate.SetNamespace(rb.Spec.TenantName)
 	triggerTemplate.SetLabels(map[string]string{
-		"platform.arbiter.io/tenant":     rb.Spec.TenantName,
-		"platform.arbiter.io/managed-by": "onboarding-controller",
+		"platform.arbiter.io/tenant":       rb.Spec.TenantName,
+		"platform.arbiter.io/managed-by":   "onboarding-controller",
+		"platform.arbiter.io/organization": rb.Spec.AphexOrg,
 	})
 	
 	// Set the spec
