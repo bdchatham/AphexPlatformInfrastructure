@@ -25,6 +25,14 @@ Documentation follows the Archon contract defined in `CLAUDE.md` with exactly 6 
 ### GitOps Architecture
 ArgoCD manages all platform components declaratively from Git using the app-of-apps pattern. After bootstrap, the platform is entirely self-managing with automatic drift correction and self-healing capabilities.
 
+### Organizations
+Organizations provide multi-tenant isolation with dedicated namespaces, EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels.
+
+### Public vs Local Domains
+The platform uses two domain strategies:
+- **arbiter-dev.com** (public): Organization webhook endpoints accessible from the internet via Cloudflare tunnels
+- **home.local** (local): Authentication and platform services accessible only within the home network
+
 ### Layered cert-manager Deployment
 Revolutionary approach that eliminates the "webhook chicken-and-egg" problem through sync waves and PostSync validation. See [architecture.md](architecture.md) for detailed design.
 
@@ -38,7 +46,7 @@ Authentik Identity Provider with Dex OIDC connector provides SSO for all platfor
 Each product team receives a dedicated namespace with RBAC boundaries, resource quotas, and isolated pipeline execution. See [api.md](api.md) for onboarding details.
 
 ### Self-Service Onboarding
-Users create RepoBinding resources to automatically provision tenant infrastructure. See [operations.md](operations.md) for registration procedures.
+Users create Organization or RepoBinding resources to automatically provision tenant infrastructure. See [operations.md](operations.md) for registration procedures.
 
 ## Design Principles
 
@@ -114,20 +122,24 @@ After bootstrap completes:
 **Tekton Dashboard**: `https://tekton.home.local`
 - Authenticate via Dex/Authentik
 
-### Onboard a Repository
+### Onboard an Organization
 
 ```yaml
 apiVersion: arbiter.io/v1alpha1
-kind: RepoBinding
+kind: Organization
 metadata:
-  name: my-repo-binding
+  name: acme-corp
   namespace: platform-system
 spec:
-  repoOrg: "your-github-org"
-  repoName: "your-repo"
-  tenantName: "my-tenant"
-  permissionProfile: "standard"
+  adminEmail: admin@acme-corp.com
 ```
+
+This creates:
+- Dedicated namespace: `org-acme-corp`
+- Public webhook endpoint: `https://acme-corp.arbiter-dev.com`
+- Cloudflare tunnel with DNS record
+- EventListener for GitHub webhooks
+- Organization admin RBAC
 
 For detailed onboarding procedures, see [operations.md](operations.md).
 

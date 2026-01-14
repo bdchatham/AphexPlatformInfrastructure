@@ -414,16 +414,32 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 **Resources**:
 - Organization CRD and Controller
 - Per-organization namespace provisioning
-- Cloudflared tunnel infrastructure per organization
+- Cloudflare tunnel with DNS record management
+- EventListener with dedicated ServiceAccount and ClusterRoleBinding
 - Organization-scoped webhook secrets and RBAC
 
 **Controller Logic**:
-1. Watch Organization resources
+1. Watch Organization resources in platform-system namespace
 2. Create organization namespace: `org-{name}`
-3. Generate webhook secret (cryptographically secure)
-4. Create Cloudflared tunnel ConfigMap and Deployment
-5. Create organization admin RBAC
-6. Update Organization status with webhook URL: `https://webhooks-{org}.homelab.local`
+3. Generate webhook secret (cryptographically secure random)
+4. Create Cloudflare tunnel via API
+5. Create DNS CNAME record: `{org}.arbiter-dev.com → {tunnel-id}.cfargotunnel.com`
+6. Create Cloudflared tunnel ConfigMap and Deployment
+7. Create EventListener ServiceAccount with ClusterRoleBinding to eventlistener-access ClusterRole
+8. Create organization admin RBAC
+9. Update Organization status with webhook URL: `https://{org}.arbiter-dev.com`
+
+**Deletion Logic**:
+1. Delete DNS CNAME record from Cloudflare
+2. Cleanup tunnel connections via Cloudflare API
+3. Delete tunnel from Cloudflare
+4. Delete ClusterRoleBinding for EventListener
+5. Delete organization namespace (cascades all resources)
+
+**Source**
+- `platform/onboarding/controller/controllers/organization_controller.go` - Controller implementation
+- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
+- `platform/rbac/eventlistener-rbac.yaml` - EventListener ClusterRole
 
 #### RepoBinding Controller
 
@@ -451,22 +467,37 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 
 #### Per-Organization Webhook Infrastructure
 
-Each organization gets isolated webhook infrastructure:
+Each organization gets isolated webhook infrastructure with public internet accessibility:
 
-**Cloudflared Tunnel**:
-- Unique subdomain: `webhooks-{org}.homelab.local`
+**Cloudflare Tunnel**:
+- Unique subdomain: `{org}.arbiter-dev.com` (publicly resolvable)
 - Dedicated tunnel deployment in organization namespace
 - Routes directly to EventListener: `el-github-listener:8080`
-- No complex routing logic needed
+- DNS CNAME record automatically created in Cloudflare
+- SSL/TLS termination at Cloudflare edge (Full TLS mode)
+- No inbound ports required on local network
+
+**EventListener RBAC**:
+- Dedicated ServiceAccount per organization: `eventlistener`
+- ClusterRoleBinding: `eventlistener-{org}` → `eventlistener-access` ClusterRole
+- Permissions for Tekton Triggers resources (namespace and cluster-scoped)
+- Isolated from default ServiceAccount
 
 **Webhook Flow**:
 ```
-GitHub → webhooks-{org}.homelab.local → Cloudflared → EventListener → TriggerTemplate → PipelineRun
+GitHub → {org}.arbiter-dev.com → Cloudflare DNS → Cloudflare Edge (SSL) → Tunnel → EventListener → TriggerTemplate → PipelineRun
 ```
 
 **Benefits**:
 - Complete isolation between organizations
 - Simple GitHub webhook setup (unique URL per org)
+- Public internet accessibility without exposing local network
+- Automatic SSL certificate management via Cloudflare
+- No manual DNS configuration required
+
+**Source**
+- `platform/onboarding/controller/controllers/organization_controller.go` - Tunnel and DNS provisioning
+- `platform/rbac/eventlistener-rbac.yaml` - EventListener ClusterRole definition
 - No router port forwarding required
 - Independent scaling per organization
 
