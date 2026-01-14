@@ -50,6 +50,60 @@ kubectl get pods --user=oidc
 
 **Source**: `platform/bootstrap/kind-cluster-config.yaml`, `platform/auth/dex/configmap.yaml`
 
+## Organization API
+
+### Organization Custom Resource
+
+The primary API for creating multi-tenant organizations with isolated namespaces, public webhook endpoints, and Cloudflare tunnel integration.
+
+**API Group**: `arbiter.io`  
+**API Version**: `v1alpha1`  
+**Kind**: `Organization`  
+**Scope**: Namespaced (must be created in `platform-system`)
+
+### Create Organization
+
+```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: Organization
+metadata:
+  name: acme-corp
+  namespace: platform-system
+spec:
+  adminEmail: admin@acme-corp.com
+```
+
+**Behavior**:
+1. Creates namespace: `org-acme-corp`
+2. Creates Cloudflare tunnel via API
+3. Creates DNS CNAME: `acme-corp.arbiter-dev.com → {tunnel-id}.cfargotunnel.com`
+4. Deploys cloudflared tunnel pod
+5. Creates EventListener with dedicated ServiceAccount and ClusterRoleBinding
+6. Creates organization admin RBAC
+7. Updates status with webhook URL
+
+**Status Fields**:
+- `namespace`: Organization namespace name
+- `webhookURL`: Public webhook endpoint (e.g., `https://acme-corp.arbiter-dev.com`)
+- `phase`: `Pending`, `Active`, or `Failed`
+
+### Delete Organization
+
+```bash
+kubectl delete organization acme-corp -n platform-system
+```
+
+**Behavior**:
+1. Deletes DNS CNAME record from Cloudflare
+2. Cleans up tunnel connections via Cloudflare API
+3. Deletes tunnel from Cloudflare
+4. Deletes ClusterRoleBinding for EventListener
+5. Deletes organization namespace (cascades all resources)
+
+**Source**
+- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
+- `platform/onboarding/controller/controllers/organization_controller.go` - Controller implementation
+
 ## RepoBinding API
 
 ### RepoBinding Custom Resource

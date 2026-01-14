@@ -48,6 +48,74 @@ For detailed authentication procedures, see [operations.md](operations.md).
 
 Use the Authentik web UI at `https://auth.home.local`. Create users and assign to groups (`admins` or `engineering`). Users can authenticate immediately without pod restarts.
 
+## Organization and Webhook Questions
+
+### Why does the platform use two different domains?
+
+The platform uses two domain strategies for different purposes:
+
+**arbiter-dev.com (Public Domain)**:
+- Organization webhook endpoints accessible from the internet
+- GitHub webhooks can reach these endpoints
+- SSL/TLS termination at Cloudflare edge
+- Example: `acme-corp.arbiter-dev.com`
+
+**home.local (Local Domain)**:
+- Authentication and platform services accessible only within home network
+- ArgoCD, Authentik, Dex, Tekton Dashboard
+- Example: `argocd.home.local`, `auth.home.local`
+
+This separation ensures webhook endpoints are publicly accessible while keeping platform administration services private.
+
+### How do webhooks reach my local cluster?
+
+Webhooks use Cloudflare Tunnels to reach the cluster without exposing ports:
+
+1. **GitHub** sends webhook to `acme-corp.arbiter-dev.com`
+2. **Cloudflare DNS** resolves to Cloudflare edge servers
+3. **Cloudflare Edge** terminates SSL and routes through tunnel
+4. **Cloudflared Pod** in cluster receives request via outbound connection
+5. **EventListener** processes webhook and creates PipelineRun
+
+No inbound ports are opened on your network. The cloudflared pod maintains an outbound connection to Cloudflare.
+
+### What happens when I delete an organization?
+
+Organization deletion follows this sequence:
+
+1. Delete DNS CNAME record from Cloudflare
+2. Cleanup active tunnel connections via Cloudflare API
+3. Delete tunnel from Cloudflare
+4. Delete ClusterRoleBinding for EventListener
+5. Delete organization namespace (cascades all resources)
+
+This ensures complete cleanup with no orphaned resources in Cloudflare or Kubernetes.
+
+### How do I troubleshoot webhook delivery issues?
+
+**Check DNS resolution**:
+```bash
+nslookup acme-corp.arbiter-dev.com
+```
+
+**Verify tunnel is running**:
+```bash
+kubectl get pods -n org-acme-corp | grep cloudflared
+kubectl logs -n org-acme-corp -l app=cloudflared
+```
+
+**Check EventListener logs**:
+```bash
+kubectl logs -n org-acme-corp -l eventlistener=github-listener -f
+```
+
+**Verify GitHub webhook configuration**:
+- Payload URL matches organization webhook URL
+- Secret matches the secret in cluster
+- Recent deliveries show successful responses (200 OK)
+
+For detailed troubleshooting, see [operations.md](operations.md).
+
 For user management procedures, see [operations.md](operations.md).
 
 ### How do I get admin credentials?

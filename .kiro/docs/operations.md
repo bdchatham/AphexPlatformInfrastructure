@@ -239,40 +239,50 @@ kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-pa
 
 ## Organization and Repository Registration
 
+### Prerequisites for Organization Bootstrap
+
+Before creating organizations, ensure:
+
+1. **Cloudflare Account Setup**:
+   - Domain `arbiter-dev.com` added to Cloudflare account
+   - Nameservers updated at domain registrar to point to Cloudflare
+   - API token created with permissions: Zone.DNS (Edit), Account.Cloudflare Tunnel (Edit)
+   - API token stored in cluster secret: `cloudflare-api-token` in `platform-system` namespace
+
+2. **Platform Bootstrap Complete**:
+   - ArgoCD and all platform components deployed
+   - Onboarding controller running in `platform-system` namespace
+
 ### Bootstrap Organization
 
-Organizations must be bootstrapped before repositories can be onboarded. This creates the organization namespace, webhook infrastructure, and admin RBAC.
+Organizations provide multi-tenant isolation with dedicated namespaces, EventListeners, and public webhook endpoints.
 
 **Using AphexCLI (Recommended)**:
 ```bash
-# Bootstrap organization with AphexCLI
-aphex organization bootstrap --admin-email admin@acme.com acme
-
-# Verify organization status
-kubectl get organization acme -n platform-system
+aphex organization bootstrap --admin-email admin@acme-corp.com acme-corp
 ```
 
 **Manual YAML Application**:
 ```bash
-# Create Organization resource manually
 kubectl apply -f - <<EOF
 apiVersion: arbiter.io/v1alpha1
 kind: Organization
 metadata:
-  name: acme
+  name: acme-corp
   namespace: platform-system
 spec:
-  displayName: "Acme Corporation"
-  adminUsers: ["admin@acme.com", "devops@acme.com"]
-  webhookSecret: "wh_abc123def456"  # Optional - auto-generated if omitted
+  adminEmail: admin@acme-corp.com
 EOF
 ```
 
-**Field Descriptions**:
-- `name`: Organization identifier (lowercase, alphanumeric, hyphens)
-- `displayName`: Human-readable organization name
-- `adminUsers`: List of admin email addresses for RBAC
-- `webhookSecret`: GitHub webhook secret (auto-generated if not provided)
+**What Gets Created**:
+1. Namespace: `org-acme-corp`
+2. Cloudflare tunnel via API
+3. DNS CNAME record: `acme-corp.arbiter-dev.com → {tunnel-id}.cfargotunnel.com`
+4. Cloudflared tunnel deployment
+5. EventListener with dedicated ServiceAccount and ClusterRoleBinding
+6. Organization admin RBAC
+7. Webhook secret for GitHub integration
 
 ### Verify Organization Bootstrap
 
@@ -282,18 +292,56 @@ kubectl get organization acme -n platform-system
 kubectl describe organization acme -n platform-system
 
 # Verify organization namespace
-kubectl get namespace org-acme
+kubectl get namespace org-acme-corp
 
 # Verify webhook secret
-kubectl get secret github-webhook-secret -n org-acme
+kubectl get secret github-webhook-secret -n org-acme-corp
 
 # Verify Cloudflared tunnel
-kubectl get deployment cloudflared -n org-acme
-kubectl get configmap cloudflared-config -n org-acme
+kubectl get deployment -n org-acme-corp | grep cloudflared
+kubectl get configmap cloudflared-config -n org-acme-corp
+
+# Verify EventListener
+kubectl get eventlisteners -n org-acme-corp
+kubectl get clusterrolebinding eventlistener-acme-corp
 
 # Verify admin RBAC
-kubectl get role,rolebinding -n org-acme
+kubectl get role,rolebinding -n org-acme-corp
 ```
+
+### Test Webhook Endpoint
+
+Verify the public webhook endpoint is accessible:
+
+```bash
+# Test DNS resolution
+nslookup acme-corp.arbiter-dev.com
+
+# Test HTTPS connectivity (expect 404 for GET request)
+curl -k https://acme-corp.arbiter-dev.com
+
+# Get webhook secret for GitHub configuration
+kubectl get secret github-webhook-secret -n org-acme-corp -o jsonpath='{.data.secret}' | base64 -d
+```
+
+**Configure GitHub Webhook**:
+1. Go to repository Settings → Webhooks → Add webhook
+2. Payload URL: `https://acme-corp.arbiter-dev.com`
+3. Content type: `application/json`
+4. Secret: (use secret from command above)
+5. Events: Select "Push events"
+
+**Verify Webhook Delivery**:
+```bash
+# Watch EventListener logs
+kubectl logs -n org-acme-corp -l eventlistener=github-listener -f
+
+# Check for PipelineRuns after push
+kubectl get pipelineruns -n org-acme-corp
+```
+
+**Source**
+- `platform/onboarding/controller/controllers/organization_controller.go` - Organization provisioning logic
 
 ### Create RepoBinding
 

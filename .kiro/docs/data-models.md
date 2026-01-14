@@ -20,23 +20,22 @@ For operational procedures, see [operations.md](operations.md).
 
 ```typescript
 interface OrganizationSpec {
-  displayName: string;          // Human-readable organization name
-  adminUsers: string[];         // List of admin email addresses
-  webhookSecret?: string;       // GitHub webhook secret (auto-generated if not provided)
+  adminEmail: string;           // Primary admin email address
 }
 ```
 
 **Validation Rules**:
-- `displayName`: Must match pattern `^[a-zA-Z0-9\s\-\.]+$`
-- `adminUsers`: Array of valid email addresses
-- `webhookSecret`: Must match pattern `^[a-zA-Z0-9_-]+$`
+- `adminEmail`: Must be a valid email address format
 
 **Example**:
 ```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: Organization
+metadata:
+  name: acme-corp
+  namespace: platform-system
 spec:
-  displayName: "Acme Corporation"
-  adminUsers: ["admin@acme.com", "devops@acme.com"]
-  webhookSecret: "wh_abc123def456"  # Optional - auto-generated
+  adminEmail: "admin@acme-corp.com"
 ```
 
 ### Organization Status
@@ -44,20 +43,69 @@ spec:
 ```typescript
 interface OrganizationStatus {
   namespace: string;            // Organization namespace (org-{name})
-  webhookURL: string;          // External webhook URL
+  webhookURL: string;           // Public webhook URL via Cloudflare tunnel
   phase: "Pending" | "Active" | "Failed";
-  message: string;             // Human-readable status message
+  message?: string;             // Human-readable status message
 }
 ```
 
 **Example**:
 ```yaml
 status:
-  namespace: "org-acme"
-  webhookURL: "https://webhooks-acme.homelab.local"
+  namespace: "org-acme-corp"
+  webhookURL: "https://acme-corp.arbiter-dev.com"
   phase: "Active"
-  message: "Organization provisioned successfully"
 ```
+
+### Cloudflare Tunnel Credentials
+
+Stored as a Secret in the organization namespace:
+
+```typescript
+interface TunnelCredentials {
+  AccountTag: string;           // Cloudflare account ID
+  TunnelID: string;             // Unique tunnel identifier
+  TunnelSecret: string;         // Base64-encoded tunnel secret
+}
+```
+
+**Secret Name**: `cloudflared-credentials-{org-name}`
+
+**Example**:
+```json
+{
+  "AccountTag": "65671c123fa015f89bfb9f110d0000fd",
+  "TunnelID": "1280a396-767b-4e77-9425-735765b5f1ae",
+  "TunnelSecret": "Wl0r8cioWrFIUVb625PfPDOG6rYAgkBkRxzA3QoqGCo="
+}
+```
+
+### DNS Record Model
+
+Automatically created in Cloudflare for each organization:
+
+```typescript
+interface DNSRecord {
+  type: "CNAME";
+  name: string;                 // {org-name}.arbiter-dev.com
+  content: string;              // {tunnel-id}.cfargotunnel.com
+  proxied: boolean;             // true (enables Cloudflare edge features)
+}
+```
+
+**Example**:
+```json
+{
+  "type": "CNAME",
+  "name": "acme-corp.arbiter-dev.com",
+  "content": "1280a396-767b-4e77-9425-735765b5f1ae.cfargotunnel.com",
+  "proxied": true
+}
+```
+
+**Source**
+- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
+- `platform/onboarding/controller/controllers/organization_controller.go` - Status management and tunnel provisioning
 
 ## RepoBinding Data Model
 
