@@ -622,6 +622,32 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 	return nil
 }
 
+func (r *RepoBindingReconciler) updateEventListenerNamespaces(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
+	eventListener := &triggersv1beta1.EventListener{}
+	
+	if err := r.Get(ctx, client.ObjectKey{Name: "github-listener", Namespace: orgNamespace}, eventListener); err != nil {
+		return fmt.Errorf("failed to get EventListener: %w", err)
+	}
+	
+	for _, ns := range eventListener.Spec.NamespaceSelector.MatchNames {
+		if ns == rb.Spec.TenantName {
+			return nil
+		}
+	}
+	
+	eventListener.Spec.NamespaceSelector.MatchNames = append(
+		eventListener.Spec.NamespaceSelector.MatchNames,
+		rb.Spec.TenantName,
+	)
+	
+	if err := r.Update(ctx, eventListener); err != nil {
+		return fmt.Errorf("failed to update EventListener: %w", err)
+	}
+	
+	return nil
+}
+
 
 // provisionTriggerBinding creates or updates the TriggerBinding for GitHub webhooks
 func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {

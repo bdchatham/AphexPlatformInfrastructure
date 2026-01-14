@@ -634,7 +634,7 @@ ingress:
 		Spec: triggersv1beta1.EventListenerSpec{
 			ServiceAccountName: "eventlistener",
 			NamespaceSelector: triggersv1beta1.NamespaceSelector{
-				MatchNames: []string{"*"},
+				MatchNames: []string{},
 			},
 			TriggerGroups: []triggersv1beta1.EventListenerTriggerGroup{
 				{

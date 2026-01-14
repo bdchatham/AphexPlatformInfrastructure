@@ -97,6 +97,7 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 		{name: "resource limits", statusField: &repoBinding.Status.QuotasCreated, provisionFunc: r.provisionResourceLimits},
 		{name: "network policy", statusField: &repoBinding.Status.NetworkPolicyCreated, provisionFunc: r.provisionNetworkPolicy},
 		{name: "Terraform backend secret", statusField: &repoBinding.Status.TerraformSecretCreated, provisionFunc: r.provisionTerraformBackendSecret},
+		{name: "EventListener namespace", statusField: &repoBinding.Status.TriggerBindingCreated, provisionFunc: r.updateEventListenerNamespaces},
 		{name: "TriggerBinding", statusField: &repoBinding.Status.TriggerBindingCreated, provisionFunc: r.provisionTriggerBinding},
 		{name: "TriggerTemplate", statusField: &repoBinding.Status.TriggerTemplateCreated, provisionFunc: r.provisionTriggerTemplate},
 		{name: "Trigger", statusField: &repoBinding.Status.TriggerCreated, provisionFunc: r.provisionTrigger},
