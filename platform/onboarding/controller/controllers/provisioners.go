@@ -762,6 +762,38 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	return nil
 }
 
+func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	trigger := &triggersv1beta1.Trigger{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "triggers.tekton.dev/v1beta1",
+			Kind:       "Trigger",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-trigger", rb.Spec.TenantName),
+			Namespace: rb.Spec.TenantName,
+			Labels: map[string]string{
+				"platform.arbiter.io/tenant":       rb.Spec.TenantName,
+				"platform.arbiter.io/managed-by":   "onboarding-controller",
+				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
+			},
+		},
+		Spec: triggersv1beta1.TriggerSpec{
+			Bindings: []*triggersv1beta1.TriggerSpecBinding{
+				{Ref: "github-push-binding"},
+			},
+			Template: triggersv1beta1.TriggerSpecTemplate{
+				Ref: stringPtr(fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName)),
+			},
+		},
+	}
+
+	if err := r.Client.Patch(ctx, trigger, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
+		return fmt.Errorf("failed to apply Trigger: %w", err)
+	}
+
+	return nil
+}
+
 // stringPtr returns a pointer to a string
 func stringPtr(s string) *string {
 	return &s

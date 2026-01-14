@@ -76,6 +76,9 @@ type RepoBindingStatus struct {
 	// TriggerTemplateCreated indicates if the TriggerTemplate was created
 	TriggerTemplateCreated bool `json:"triggerTemplateCreated,omitempty"`
 
+	// TriggerCreated indicates if the Trigger was created
+	TriggerCreated bool `json:"triggerCreated,omitempty"`
+
 	// WebhookSecret is the generated webhook secret for GitHub webhook configuration
 	WebhookSecret string `json:"webhookSecret,omitempty"`
 

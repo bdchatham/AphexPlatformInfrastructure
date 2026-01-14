@@ -116,6 +116,9 @@ spec:
                 triggerTemplateCreated:
                   type: boolean
                   description: Whether TriggerTemplate has been created
+                triggerCreated:
+                  type: boolean
+                  description: Whether Trigger has been created
                 lastReconcileTime:
                   type: string
                   format: date-time
