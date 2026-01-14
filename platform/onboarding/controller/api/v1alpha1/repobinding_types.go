@@ -6,6 +6,11 @@ import (
 
 // RepoBindingSpec defines the desired state of RepoBinding
 type RepoBindingSpec struct {
+	// AphexOrg is the name of the Organization resource to bind to
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
+	AphexOrg string `json:"aphexOrg"`
+
 	// RepoOrg is the GitHub organization name
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`

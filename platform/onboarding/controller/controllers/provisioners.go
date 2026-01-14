@@ -883,7 +883,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 // updateRepoBindingStatusWithWebhookInfo updates the RepoBinding status with webhook configuration details
 func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// First, try to get webhook secret from organization namespace
-	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.RepoOrg)
+	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
 	orgSecret := &corev1.Secret{}
 	err := r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: orgNamespace}, orgSecret)
 	if err != nil {
@@ -923,7 +923,7 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 	}
 	
 	// Use organization-specific webhook URL
-	rb.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", rb.Spec.RepoOrg)
+	rb.Status.WebhookURL = fmt.Sprintf("https://%s.arbiter-dev.com", rb.Spec.RepoOrg)
 	
 	// Update RepoBinding status with webhook information
 	rb.Status.WebhookSecret = string(webhookSecret)
