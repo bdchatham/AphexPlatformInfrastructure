@@ -10,7 +10,8 @@ resources:
   - https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/interceptors.yaml
   # Tekton Dashboard v0.64.0
   - https://github.com/tektoncd/dashboard/releases/download/v0.64.0/release.yaml
-  # Debug logging config
+
+patchesStrategicMerge:
   - config-logging-triggers.yaml
 
 # Replace all gcr.io/tekton-releases images with ghcr.io/tektoncd equivalents
