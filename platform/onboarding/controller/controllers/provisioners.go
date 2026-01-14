@@ -707,7 +707,6 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 				},
 				"spec": map[string]interface{}{
 					"pipelineRef": map[string]interface{}{
-						"name": rb.Spec.PipelineName,
 						"resolver": "cluster",
 						"params": []interface{}{
 							map[string]interface{}{
