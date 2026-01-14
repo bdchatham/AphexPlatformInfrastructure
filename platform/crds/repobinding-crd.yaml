@@ -24,11 +24,16 @@ spec:
             spec:
               type: object
               required:
+                - aphexOrg
                 - repoOrg
                 - repoName
                 - tenantName
                 - pipelineName
               properties:
+                aphexOrg:
+                  type: string
+                  pattern: '^[a-z0-9-]+$'
+                  description: Aphex organization name (maps to org-{aphexOrg} namespace)
                 repoOrg:
                   type: string
                   pattern: '^[a-zA-Z0-9-]+$'
