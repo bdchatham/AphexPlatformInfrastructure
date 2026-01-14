@@ -90,7 +90,7 @@ func (r *OrganizationReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if org.Status.Phase == "" {
 		org.Status.Phase = "Pending"
 		org.Status.Namespace = fmt.Sprintf("org-%s", org.Name)
-		org.Status.WebhookURL = fmt.Sprintf("https://webhooks-%s.homelab.local", org.Name)
+		org.Status.WebhookURL = fmt.Sprintf("https://%s.arbiter-dev.com", org.Name)
 		needsStatusUpdate = true
 	}
 
@@ -442,6 +442,10 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 			return fmt.Errorf("failed to get or create Cloudflare tunnel: %w", err)
 		}
 		tunnelSecret = tunnel.Secret
+
+		if err := r.createTunnelDNSRecord(ctx, api, accountID, org.Name, tunnel.ID); err != nil {
+			return fmt.Errorf("failed to create DNS record: %w", err)
+		}
 	}
 
 	// Create tunnel credentials
@@ -503,7 +507,7 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 credentials-file: /etc/cloudflared/credentials/credentials.json
 
 ingress:
-  - hostname: webhooks-%s.homelab.local
+  - hostname: %s.arbiter-dev.com
     service: http://el-github-listener:8080
   - service: http_status:404`, tunnel.ID, org.Name),
 		},
@@ -785,16 +789,73 @@ func (r *OrganizationReconciler) deleteCloudflaredTunnel(ctx context.Context, or
 		return fmt.Errorf("failed to create Cloudflare API client: %w", err)
 	}
 
-	// Clean up tunnel connections first
+	if err := r.deleteTunnelDNSRecord(ctx, api, accountID, org.Name); err != nil {
+		return fmt.Errorf("failed to delete DNS record: %w", err)
+	}
+
 	err = api.CleanupTunnelConnections(ctx, cloudflare.AccountIdentifier(accountID), tunnelID)
 	if err != nil {
 		return fmt.Errorf("failed to cleanup tunnel connections for %s: %w", tunnelID, err)
 	}
 
-	// Delete tunnel
 	err = api.DeleteTunnel(ctx, cloudflare.AccountIdentifier(accountID), tunnelID)
 	if err != nil {
 		return fmt.Errorf("failed to delete Cloudflare tunnel %s: %w", tunnelID, err)
+	}
+
+	return nil
+}
+
+func (r *OrganizationReconciler) deleteTunnelDNSRecord(ctx context.Context, api *cloudflare.API, accountID, orgName string) error {
+	zones, err := api.ListZones(ctx, "arbiter-dev.com")
+	if err != nil {
+		return fmt.Errorf("failed to list zones: %w", err)
+	}
+	if len(zones) == 0 {
+		return fmt.Errorf("zone arbiter-dev.com not found")
+	}
+	zoneID := zones[0].ID
+
+	hostname := fmt.Sprintf("%s.arbiter-dev.com", orgName)
+
+	records, _, err := api.ListDNSRecords(ctx, cloudflare.ZoneIdentifier(zoneID), cloudflare.ListDNSRecordsParams{
+		Name: hostname,
+		Type: "CNAME",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to list DNS records: %w", err)
+	}
+
+	for _, record := range records {
+		if err := api.DeleteDNSRecord(ctx, cloudflare.ZoneIdentifier(zoneID), record.ID); err != nil {
+			return fmt.Errorf("failed to delete DNS record: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (r *OrganizationReconciler) createTunnelDNSRecord(ctx context.Context, api *cloudflare.API, accountID, orgName, tunnelID string) error {
+	zones, err := api.ListZones(ctx, "arbiter-dev.com")
+	if err != nil {
+		return fmt.Errorf("failed to list zones: %w", err)
+	}
+	if len(zones) == 0 {
+		return fmt.Errorf("zone arbiter-dev.com not found")
+	}
+	zoneID := zones[0].ID
+
+	hostname := fmt.Sprintf("%s.arbiter-dev.com", orgName)
+	tunnelHostname := fmt.Sprintf("%s.cfargotunnel.com", tunnelID)
+
+	_, err = api.CreateDNSRecord(ctx, cloudflare.ZoneIdentifier(zoneID), cloudflare.CreateDNSRecordParams{
+		Type:    "CNAME",
+		Name:    hostname,
+		Content: tunnelHostname,
+		Proxied: cloudflare.BoolPtr(true),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create DNS record: %w", err)
 	}
 
 	return nil
