@@ -52,12 +52,11 @@ func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 		return r.handleFetchError(logger, err)
 	}
 
-	if r.shouldSkipReconciliation(repoBinding) {
+	if !repoBinding.ObjectMeta.DeletionTimestamp.IsZero() {
+		if err := r.handleDeletion(ctx, logger, repoBinding); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
-	}
-
-	if err := r.handleDeletion(ctx, logger, repoBinding); err != nil {
-		return ctrl.Result{}, err
 	}
 
 	if err := r.ensureFinalizer(ctx, repoBinding); err != nil {
