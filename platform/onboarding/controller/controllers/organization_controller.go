@@ -672,6 +672,41 @@ ingress:
 		}
 	}
 
+	triggerBinding := &triggersv1beta1.TriggerBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "github-push-binding",
+			Namespace: orgNamespace,
+			Labels: map[string]string{
+				"platform.arbiter.io/organization": org.Name,
+				"platform.arbiter.io/managed-by":   "organization-controller",
+			},
+		},
+		Spec: triggersv1beta1.TriggerBindingSpec{
+			Params: []triggersv1beta1.Param{
+				{
+					Name:  "git-url",
+					Value: "$(body.repository.clone_url)",
+				},
+				{
+					Name:  "git-revision",
+					Value: "$(body.after)",
+				},
+			},
+		},
+	}
+
+	existingBinding := &triggersv1beta1.TriggerBinding{}
+	err = r.Get(ctx, client.ObjectKey{Name: triggerBinding.Name, Namespace: triggerBinding.Namespace}, existingBinding)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, triggerBinding); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
 	return nil
 }
 
