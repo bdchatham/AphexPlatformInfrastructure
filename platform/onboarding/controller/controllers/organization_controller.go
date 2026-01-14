@@ -646,6 +646,10 @@ ingress:
 					Interceptors: []*triggersv1beta1.TriggerInterceptor{
 						{
 							Name: stringPtr("github"),
+							Ref: triggersv1beta1.InterceptorRef{
+								Name: "github",
+								Kind: triggersv1beta1.ClusterInterceptorKind,
+							},
 						},
 					},
 				},
