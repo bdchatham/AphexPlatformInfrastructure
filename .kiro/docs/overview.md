@@ -12,7 +12,7 @@ This repository contains:
 4. **Authentication System**: Authentik Identity Provider with Dex OIDC connector providing centralized SSO for all platform services
 5. **Onboarding Controller**: Kubernetes controller enabling self-service repository onboarding via CRDs
 6. **Pipeline Catalog**: Shared, versioned Tekton Tasks and Pipelines for CI/CD workflows
-7. **Tenant Isolation**: Namespace-per-team with RBAC, network policies, and resource quotas
+7. **Multi-Tenant Isolation**: Organization-level and pipeline-level namespaces with RBAC, network policies, and resource quotas
 
 ## Archon Integration
 
@@ -26,7 +26,7 @@ Documentation follows the Archon contract defined in `CLAUDE.md` with exactly 6 
 ArgoCD manages all platform components declaratively from Git using the app-of-apps pattern. After bootstrap, the platform is entirely self-managing with automatic drift correction and self-healing capabilities.
 
 ### Organizations
-Organizations provide multi-tenant isolation with dedicated namespaces, EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels.
+Organizations provide multi-tenant isolation with dedicated namespaces (`org-{name}`), EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels. Multiple pipelines can belong to a single organization, sharing the webhook infrastructure.
 
 **Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/crds/organization-crd.yaml`
 
@@ -44,13 +44,13 @@ One-time initialization script that generates all secrets automatically and achi
 ### Centralized Authentication
 Authentik Identity Provider with Dex OIDC connector provides SSO for all platform services. See [architecture.md](architecture.md#authentication-system-architecture) for authentication flow details.
 
-### Tenant Isolation
-Each product team receives a dedicated namespace with RBAC boundaries, resource quotas, network policies, and isolated pipeline execution. See [api.md](api.md#repobinding-api) for onboarding details.
+### Multi-Tenant Isolation
+Organizations (tenants) receive dedicated namespaces (`org-{name}`) with shared webhook infrastructure. Each pipeline within an organization gets its own namespace (`{pipeline-name}`) with RBAC boundaries, resource quotas, network policies, and isolated pipeline execution. See [api.md](api.md#repobinding-api) for onboarding details.
 
-**Source**: `platform/onboarding/controller/controllers/repobinding_controller.go`, `platform/tenancy/templates/`
+**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/onboarding/controller/controllers/repobinding_controller.go`
 
 ### Self-Service Onboarding
-Users create Organization or RepoBinding resources to automatically provision tenant infrastructure. The onboarding controller reconciles these CRDs and creates all necessary Kubernetes resources.
+Users create Organization or RepoBinding resources to automatically provision organization and pipeline infrastructure. The onboarding controller reconciles these CRDs and creates all necessary Kubernetes resources.
 
 For operational procedures, see [operations.md](operations.md#organization-and-repository-registration).
 
@@ -65,7 +65,7 @@ For operational procedures, see [operations.md](operations.md#organization-and-r
 5. **Production Ready**: Robust error handling, validation, and monitoring
 6. **Maintainable**: Standard components with minimal customization
 7. **Upgradeable**: Version-pinned components with clear upgrade paths
-8. **Tenant Isolation**: Strong security boundaries between teams
+8. **Multi-Tenant Isolation**: Strong security boundaries between organizations and pipelines
 9. **Self-Service**: Users manage repositories and authentication independently
 
 ## Architecture Highlights

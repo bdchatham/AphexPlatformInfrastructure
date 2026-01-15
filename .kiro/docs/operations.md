@@ -268,7 +268,7 @@ Before creating organizations, ensure:
 
 ### Bootstrap Organization
 
-Organizations provide multi-tenant isolation with dedicated namespaces, EventListeners, and public webhook endpoints.
+Organizations provide multi-tenant isolation with dedicated namespaces (`org-{name}`), EventListeners, and public webhook endpoints.
 
 **Using AphexCLI (Recommended)**:
 ```bash
@@ -399,26 +399,26 @@ EOF
 kubectl get repobinding my-repo-binding -n pipeline-system
 kubectl describe repobinding my-repo-binding -n pipeline-system
 
-# Verify tenant namespace
-kubectl get namespace my-tenant
+# Verify organization namespace
+kubectl get namespace org-my-org
 
-# Verify service account
-kubectl get serviceaccount pipeline-runner -n my-tenant
+# Verify service account in pipeline namespace
+kubectl get serviceaccount pipeline-runner -n my-pipeline
 
-# Verify RBAC
-kubectl get role,rolebinding -n my-tenant
+# Verify RBAC in pipeline namespace
+kubectl get role,rolebinding -n my-pipeline
 
-# Verify resource limits
-kubectl get resourcequota,limitrange -n my-tenant
+# Verify resource limits in pipeline namespace
+kubectl get resourcequota,limitrange -n my-pipeline
 
-# Verify network policy
-kubectl get networkpolicy -n my-tenant
+# Verify network policy in pipeline namespace
+kubectl get networkpolicy -n my-pipeline
 
-# Verify EventListener
-kubectl get eventlistener -n my-tenant
+# Verify EventListener in organization namespace
+kubectl get eventlistener -n org-my-org
 
-# Verify Ingress
-kubectl get ingress -n my-tenant
+# Verify Ingress in organization namespace
+kubectl get ingress -n org-my-org
 ```
 
 ### Configure GitHub Webhook
@@ -1028,26 +1028,26 @@ kubectl get application -n argocd -o json | jq '.items[] | select(.status.sync.s
 kubectl get pipelineruns --all-namespaces
 
 # Get PipelineRun details
-kubectl describe pipelinerun <name> -n <tenant-namespace>
+kubectl describe pipelinerun <name> -n <pipeline-namespace>
 
 # View PipelineRun logs
-kubectl logs -n <tenant-namespace> -l tekton.dev/pipelineRun=<name>
+kubectl logs -n <pipeline-namespace> -l tekton.dev/pipelineRun=<name>
 
 # Watch PipelineRun status
-kubectl get pipelinerun <name> -n <tenant-namespace> -w
+kubectl get pipelinerun <name> -n <pipeline-namespace> -w
 ```
 
 ### EventListener Logs
 
 ```bash
-# View EventListener logs for a tenant
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=100
+# View EventListener logs for an organization
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener --tail=100
 
 # Stream EventListener logs
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener -f
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener -f
 
 # Search for specific webhook events
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener | grep "webhook"
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener | grep "webhook"
 ```
 
 ### Onboarding Controller Logs
@@ -1076,11 +1076,11 @@ kubectl logs -n platform-system -l app=onboarding-controller | grep "repobinding
 **Diagnosis**:
 
 ```bash
-# Check EventListener pod status
-kubectl get pods -n <tenant-namespace> -l eventlistener=github-listener
+# Check EventListener pod status in organization namespace
+kubectl get pods -n org-<organization-name> -l eventlistener=github-listener
 
 # Check EventListener logs
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=50
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener --tail=50
 
 # Check if ClusterInterceptors exist
 kubectl get clusterinterceptors
@@ -1101,10 +1101,10 @@ kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.29.0/
 kubectl get clusterinterceptors
 
 # Delete EventListener pod to restart
-kubectl delete pod -n <tenant-namespace> -l eventlistener=github-listener
+kubectl delete pod -n org-<organization-name> -l eventlistener=github-listener
 
 # Verify EventListener is running
-kubectl get pods -n <tenant-namespace> -l eventlistener=github-listener
+kubectl get pods -n org-<organization-name> -l eventlistener=github-listener
 ```
 
 **Prevention**: Ensure bootstrap script installs Core Interceptors, or ensure `platform-tekton` ArgoCD Application includes interceptors.yaml.
@@ -1117,13 +1117,13 @@ kubectl get pods -n <tenant-namespace> -l eventlistener=github-listener
 
 ```bash
 # Check EventListener logs
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=50
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener --tail=50
 
-# Check if ClusterRole exists for tenant
-kubectl get clusterrole pipeline-runner-<tenant-name>
+# Check if ClusterRole exists for pipeline
+kubectl get clusterrole pipeline-runner-<pipeline-name>
 
-# Check if ClusterRoleBinding exists for tenant
-kubectl get clusterrolebinding pipeline-runner-<tenant-name>
+# Check if ClusterRoleBinding exists for pipeline
+kubectl get clusterrolebinding pipeline-runner-<pipeline-name>
 ```
 
 **Resolution**:
@@ -1132,19 +1132,19 @@ EventListener pods need cluster-scoped read permissions for ClusterInterceptor a
 
 ```bash
 # Check if controller provisioned cluster-scoped RBAC
-kubectl describe clusterrole pipeline-runner-<tenant-name>
-kubectl describe clusterrolebinding pipeline-runner-<tenant-name>
+kubectl describe clusterrole pipeline-runner-<pipeline-name>
+kubectl describe clusterrolebinding pipeline-runner-<pipeline-name>
 
 # If missing, delete and recreate RepoBinding to trigger reprovisioning
 kubectl delete repobinding <name> -n platform-system
 kubectl apply -f repobinding.yaml
 
 # Verify cluster-scoped RBAC was created
-kubectl get clusterrole pipeline-runner-<tenant-name>
-kubectl get clusterrolebinding pipeline-runner-<tenant-name>
+kubectl get clusterrole pipeline-runner-<pipeline-name>
+kubectl get clusterrolebinding pipeline-runner-<pipeline-name>
 
 # Delete EventListener pod to restart with new permissions
-kubectl delete pod -n <tenant-namespace> -l eventlistener=github-listener
+kubectl delete pod -n org-<organization-name> -l eventlistener=github-listener
 ```
 
 **Prevention**: Ensure onboarding controller has permissions to create ClusterRoles and ClusterRoleBindings (check `platform/onboarding/controller-rbac.yaml`).
@@ -1154,17 +1154,17 @@ kubectl delete pod -n <tenant-namespace> -l eventlistener=github-listener
 **Diagnosis**:
 
 ```bash
-# Check if EventListener exists
-kubectl get eventlistener -n <tenant-namespace>
+# Check if EventListener exists in organization namespace
+kubectl get eventlistener -n org-<organization-name>
 
 # Check EventListener logs for webhook events
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener | grep "webhook"
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener | grep "webhook"
 
 # Check if Ingress exists
-kubectl get ingress -n <tenant-namespace>
+kubectl get ingress -n org-<organization-name>
 
-# Check if webhook secret exists
-kubectl get secret webhook-<tenant-name> -n <tenant-namespace>
+# Check if webhook secret exists in organization namespace
+kubectl get secret github-webhook-secret -n org-<organization-name>
 ```
 
 **Resolution**:
@@ -1179,16 +1179,16 @@ kubectl get secret webhook-<tenant-name> -n <tenant-namespace>
 
 ```bash
 # Get PipelineRun status
-kubectl get pipelinerun <name> -n <tenant-namespace>
+kubectl get pipelinerun <name> -n <pipeline-namespace>
 
 # Get detailed status
-kubectl describe pipelinerun <name> -n <tenant-namespace>
+kubectl describe pipelinerun <name> -n <pipeline-namespace>
 
 # Get pod logs
-kubectl logs -n <tenant-namespace> -l tekton.dev/pipelineRun=<name>
+kubectl logs -n <pipeline-namespace> -l tekton.dev/pipelineRun=<name>
 
 # Check pod events
-kubectl get events -n <tenant-namespace> --sort-by='.lastTimestamp'
+kubectl get events -n <pipeline-namespace> --sort-by='.lastTimestamp'
 ```
 
 **Common Issues**:
@@ -1304,7 +1304,7 @@ kubectl get pods -n argocd
 kubectl get pods -n tekton-pipelines
 kubectl get pods -n platform-system
 
-# Check tenant namespaces
+# Check organization namespaces
 kubectl get namespaces -l arbiter.io/managed-by=onboarding-controller
 
 # Check ArgoCD sync status
@@ -1324,14 +1324,14 @@ kubectl get application -n argocd
 **Diagnosis**:
 
 ```bash
-# Check EventListener logs
-kubectl logs -n <tenant-namespace> -l eventlistener=github-listener --tail=100
+# Check EventListener logs in organization namespace
+kubectl logs -n org-<organization-name> -l eventlistener=github-listener --tail=100
 
 # Check Ingress configuration
-kubectl get ingress -n <tenant-namespace> -o yaml
+kubectl get ingress -n org-<organization-name> -o yaml
 
-# Check webhook secret
-kubectl get secret webhook-<tenant-name> -n <tenant-namespace>
+# Check webhook secret in organization namespace
+kubectl get secret github-webhook-secret -n org-<organization-name>
 
 # Check GitHub webhook delivery logs
 # Go to GitHub repository Settings → Webhooks → Recent Deliveries
@@ -1508,18 +1508,18 @@ kubectl get pipelineruns --all-namespaces -o json | \
 
 ### Rotate Webhook Secrets
 
-Webhook secrets are generated by the Onboarding Controller and stored in tenant namespaces. To rotate:
+Webhook secrets are generated by the Onboarding Controller and stored in organization namespaces. To rotate:
 
 ```bash
-# Delete existing secret
-kubectl delete secret webhook-<tenant-name> -n <tenant-namespace>
+# Delete existing secret in organization namespace
+kubectl delete secret github-webhook-secret -n org-<organization-name>
 
-# Delete and recreate RepoBinding to regenerate secret
-kubectl delete repobinding <name> -n platform-system
-kubectl apply -f repobinding.yaml
+# Delete and recreate Organization to regenerate secret
+kubectl delete organization <organization-name> -n platform-system
+kubectl apply -f organization.yaml
 
-# Get new webhook secret from RepoBinding status
-kubectl get repobinding <name> -n platform-system -o yaml
+# Get new webhook secret from Organization status
+kubectl get organization <organization-name> -n platform-system -o yaml
 
 # Update GitHub webhook with new secret
 ```
@@ -1527,14 +1527,14 @@ kubectl get repobinding <name> -n platform-system -o yaml
 ### Audit RBAC Permissions
 
 ```bash
-# List all Roles in tenant namespaces
+# List all Roles in pipeline namespaces
 kubectl get roles --all-namespaces | grep -v "kube-"
 
-# Review specific Role
-kubectl get role pipeline-runner -n <tenant-namespace> -o yaml
+# Review specific Role in pipeline namespace
+kubectl get role pipeline-runner -n <pipeline-namespace> -o yaml
 
 # Check what a service account can do
-kubectl auth can-i --list --as=system:serviceaccount:<tenant-namespace>:pipeline-runner -n <tenant-namespace>
+kubectl auth can-i --list --as=system:serviceaccount:<pipeline-namespace>:pipeline-runner -n <pipeline-namespace>
 ```
 
 ### Review Network Policies
@@ -1543,11 +1543,11 @@ kubectl auth can-i --list --as=system:serviceaccount:<tenant-namespace>:pipeline
 # List all NetworkPolicies
 kubectl get networkpolicies --all-namespaces
 
-# Review specific NetworkPolicy
-kubectl get networkpolicy tenant-isolation -n <tenant-namespace> -o yaml
+# Review specific NetworkPolicy in pipeline namespace
+kubectl get networkpolicy pipeline-isolation -n <pipeline-namespace> -o yaml
 
 # Test network connectivity
-kubectl run -it --rm debug --image=busybox --restart=Never -n <tenant-namespace> -- wget -O- http://<service>.<other-namespace>.svc.cluster.local
+kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespace> -- wget -O- http://<service>.<other-namespace>.svc.cluster.local
 ```
 
 **Source**
@@ -1620,11 +1620,11 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <tenant-namespace>
      name: my-repo-binding
      namespace: platform-system
    spec:
+     aphexOrg: "my-org"
      repoOrg: "your-github-org"
      repoName: "your-repo"
-     tenantName: "my-tenant"
-     permissionProfile: "standard"
-     ingressHost: "webhooks.example.com"
+     pipelineName: "my-pipeline"
+     templateRef: "run-pipeline-v1"
    EOF
    ```
 
@@ -1633,17 +1633,23 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <tenant-namespace>
    # Check RepoBinding status
    kubectl get repobinding my-repo-binding -n platform-system
 
-   # Verify tenant namespace
-   kubectl get namespace my-tenant
+   # Verify organization namespace
+   kubectl get namespace org-my-org
 
-   # Verify all resources
-   kubectl get all -n my-tenant
+   # Verify pipeline namespace
+   kubectl get namespace my-pipeline
+
+   # Verify all resources in organization namespace
+   kubectl get all -n org-my-org
    ```
 
 3. **Configure GitHub Webhook**:
    ```bash
-   # Get webhook URL and secret
-   kubectl get repobinding my-repo-binding -n platform-system -o yaml
+   # Get webhook URL from Organization status
+   kubectl get organization my-org -n platform-system -o jsonpath='{.status.webhookURL}'
+
+   # Get webhook secret from organization namespace
+   kubectl get secret github-webhook-secret -n org-my-org -o jsonpath='{.data.secret}' | base64 -d
 
    # Configure in GitHub repository Settings → Webhooks
    ```
@@ -1651,8 +1657,8 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <tenant-namespace>
 4. **Test Pipeline**:
    ```bash
    # Merge a commit to main branch
-   # Watch for PipelineRun creation
-   kubectl get pipelineruns -n my-tenant -w
+   # Watch for PipelineRun creation in pipeline namespace
+   kubectl get pipelineruns -n my-pipeline -w
    ```
 
 **Source**
