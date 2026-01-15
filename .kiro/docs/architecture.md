@@ -89,6 +89,332 @@ graph TB
     style Tenants fill:#f3e5f5
 ```
 
+## Product Team Onboarding Workflow
+
+This section explains how product teams use the platform to manage their organizations and pipelines.
+
+### Complete Onboarding Flow
+
+```mermaid
+sequenceDiagram
+    participant PlatformAdmin as Platform Admin
+    participant K8s as Kubernetes API
+    participant OrgCtrl as Organization Controller
+    participant Cloudflare as Cloudflare API
+    participant ProductTeam as Product Team
+    participant RepoCtrl as RepoBinding Controller
+    participant GitHub as GitHub
+    participant Webhook as Webhook Endpoint
+    participant Pipeline as Tekton Pipeline
+    
+    Note over PlatformAdmin,Cloudflare: Step 1: Organization Provisioning
+    PlatformAdmin->>K8s: Create Organization CRD
+    K8s->>OrgCtrl: Organization created event
+    OrgCtrl->>K8s: Create namespace (org-{name})
+    OrgCtrl->>K8s: Generate webhook secret
+    OrgCtrl->>Cloudflare: Create tunnel
+    OrgCtrl->>Cloudflare: Create DNS CNAME record
+    OrgCtrl->>K8s: Deploy cloudflared pod
+    OrgCtrl->>K8s: Create EventListener ServiceAccount
+    OrgCtrl->>K8s: Update Organization status
+    Note over OrgCtrl: Status: webhookURL = https://{org}.arbiter-dev.com
+    
+    Note over ProductTeam,Pipeline: Step 2: Repository Onboarding
+    ProductTeam->>K8s: Create RepoBinding CRD
+    K8s->>RepoCtrl: RepoBinding created event
+    RepoCtrl->>K8s: Validate Organization exists
+    RepoCtrl->>K8s: Create ServiceAccount (pipeline-runner)
+    RepoCtrl->>K8s: Create RBAC (Role, RoleBinding)
+    RepoCtrl->>K8s: Create ResourceQuota, NetworkPolicy
+    RepoCtrl->>K8s: Create TriggerBinding, TriggerTemplate
+    RepoCtrl->>K8s: Reference Organization webhook secret
+    RepoCtrl->>K8s: Update RepoBinding status
+    Note over RepoCtrl: Status: webhookURL from Organization
+    
+    Note over ProductTeam,Pipeline: Step 3: GitHub Webhook Configuration
+    ProductTeam->>ProductTeam: Read webhookURL from RepoBinding status
+    ProductTeam->>ProductTeam: Read webhookSecret from Organization
+    ProductTeam->>GitHub: Configure webhook in repo settings
+    Note over GitHub: Payload URL: https://{org}.arbiter-dev.com<br/>Secret: {webhookSecret}<br/>Events: push
+    
+    Note over GitHub,Pipeline: Step 4: Pipeline Execution
+    ProductTeam->>GitHub: Push code to main branch
+    GitHub->>Webhook: POST webhook event
+    Webhook->>Pipeline: EventListener creates PipelineRun
+    Pipeline->>GitHub: Clone repository
+    Pipeline->>Pipeline: Execute pipeline tasks
+    Pipeline->>K8s: Update PipelineRun status
+```
+
+**Key Points**:
+- **Organizations** provide webhook infrastructure (tunnel, DNS, EventListener)
+- **RepoBindings** provision pipeline resources and reference Organization webhooks
+- **Product teams** only need to configure GitHub webhook once
+- **Pipelines** execute automatically on code changes
+
+### Organization and RepoBinding Relationship
+
+```mermaid
+graph TB
+    subgraph Organization["Organization: acme-corp"]
+        OrgNS["Namespace: org-acme-corp"]
+        Tunnel["Cloudflared Tunnel"]
+        DNS["DNS: acme-corp.arbiter-dev.com"]
+        WebhookSecret["Webhook Secret"]
+        EventListener["EventListener ServiceAccount"]
+    end
+    
+    subgraph RepoBinding1["RepoBinding: app1"]
+        RB1["References: acme-corp"]
+        SA1["ServiceAccount: pipeline-runner"]
+        RBAC1["RBAC: Role + RoleBinding"]
+        Trigger1["TriggerBinding + TriggerTemplate"]
+    end
+    
+    subgraph RepoBinding2["RepoBinding: app2"]
+        RB2["References: acme-corp"]
+        SA2["ServiceAccount: pipeline-runner"]
+        RBAC2["RBAC: Role + RoleBinding"]
+        Trigger2["TriggerBinding + TriggerTemplate"]
+    end
+    
+    subgraph GitHub_Repos["GitHub Repositories"]
+        Repo1["acme-corp/app1<br/>Webhook: acme-corp.arbiter-dev.com"]
+        Repo2["acme-corp/app2<br/>Webhook: acme-corp.arbiter-dev.com"]
+    end
+    
+    Organization -->|Provides webhook infrastructure| RepoBinding1
+    Organization -->|Provides webhook infrastructure| RepoBinding2
+    
+    Repo1 -->|Sends webhooks to| DNS
+    Repo2 -->|Sends webhooks to| DNS
+    
+    DNS -->|Routes through| Tunnel
+    Tunnel -->|Delivers to| EventListener
+    
+    EventListener -->|Triggers| Trigger1
+    EventListener -->|Triggers| Trigger2
+    
+    style Organization fill:#e8f5e9
+    style RepoBinding1 fill:#fff4e1
+    style RepoBinding2 fill:#fff4e1
+    style GitHub_Repos fill:#e1f5ff
+```
+
+**Benefits of this Model**:
+- **Single webhook endpoint per organization**: All repos in an organization use the same webhook URL
+- **Shared infrastructure**: Tunnel, DNS, and EventListener are shared across repos
+- **Independent pipeline resources**: Each RepoBinding gets isolated RBAC and quotas
+- **Simplified management**: Add new repos without creating new tunnels
+
+For operational procedures on creating organizations and repo bindings, see [operations.md](operations.md#organization-and-repository-registration).
+
+**Source**
+- `platform/onboarding/controller/controllers/organization_controller.go` - Organization provisioning
+- `platform/onboarding/controller/controllers/repobinding_controller.go` - RepoBinding provisioning
+- `platform/crds/organization-crd.yaml` - Organization CRD
+- `platform/crds/repobinding-crd.yaml` - RepoBinding CRD
+
+## Networking Architecture
+
+The platform uses a dual-domain strategy to separate public webhook endpoints from private platform services.
+
+### Network Topology
+
+```mermaid
+graph TB
+    subgraph Internet["Internet"]
+        GitHub["GitHub<br/>(github.com)"]
+        CloudflareDNS["Cloudflare DNS<br/>(arbiter-dev.com)"]
+        CloudflareEdge["Cloudflare Edge<br/>(SSL Termination)"]
+    end
+    
+    subgraph HomeNetwork["Home Network / Data Center"]
+        subgraph K8s["Kubernetes Cluster"]
+            subgraph OrgNS["org-acme-corp namespace"]
+                Cloudflared["cloudflared Pod<br/>(Outbound Tunnel)"]
+                EL["EventListener<br/>(el-github-listener:8080)"]
+            end
+            
+            subgraph IngressNS["ingress-system namespace"]
+                IngressCtrl["Ingress Controller<br/>(nginx)"]
+            end
+            
+            subgraph AuthNS["auth-system namespace"]
+                Authentik["Authentik<br/>(auth.home.local)"]
+                Dex["Dex<br/>(dex.home.local)"]
+            end
+            
+            subgraph ArgoNS["argocd namespace"]
+                ArgoCD["ArgoCD<br/>(argocd.home.local)"]
+            end
+        end
+        
+        subgraph LocalDevices["Local Devices"]
+            Browser["Developer Browser"]
+            Router["Home Router<br/>(DNS: *.home.local)"]
+        end
+    end
+    
+    GitHub -->|1. Webhook POST| CloudflareDNS
+    CloudflareDNS -->|2. Resolve CNAME| CloudflareEdge
+    CloudflareEdge -->|3. Route through tunnel| Cloudflared
+    Cloudflared -->|4. Forward to Service| EL
+    EL -->|5. Create PipelineRun| K8s
+    
+    Browser -->|6. Access platform UI| Router
+    Router -->|7. Resolve *.home.local| IngressCtrl
+    IngressCtrl -->|8. Route to service| ArgoCD
+    IngressCtrl -->|Route to service| Authentik
+    IngressCtrl -->|Route to service| Dex
+    
+    ArgoCD -->|9. OIDC auth| Dex
+    Dex -->|10. OIDC auth| Authentik
+    
+    style Internet fill:#e1f5ff
+    style HomeNetwork fill:#fff4e1
+    style K8s fill:#f0f0f0
+    style OrgNS fill:#e8f5e9
+    style IngressNS fill:#ffe8e8
+    style AuthNS fill:#f0e8ff
+    style ArgoNS fill:#fff9c4
+```
+
+### Webhook Path Detail
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant GitHub as GitHub
+    participant DNS as Cloudflare DNS
+    participant Edge as Cloudflare Edge
+    participant Tunnel as Cloudflared Pod
+    participant EL as EventListener
+    participant Tekton as Tekton Controller
+    participant Pod as Pipeline Pod
+    
+    Dev->>GitHub: git push origin main
+    GitHub->>DNS: Webhook POST to acme-corp.arbiter-dev.com
+    Note over GitHub,DNS: Payload: push event JSON<br/>Header: X-Hub-Signature-256
+    
+    DNS->>Edge: Resolve CNAME to tunnel
+    Note over DNS,Edge: CNAME: {tunnel-id}.cfargotunnel.com
+    
+    Edge->>Edge: SSL/TLS termination
+    Note over Edge: Full TLS mode<br/>Cloudflare certificate
+    
+    Edge->>Tunnel: Route through tunnel
+    Note over Edge,Tunnel: Outbound connection<br/>No inbound ports required
+    
+    Tunnel->>EL: Forward to el-github-listener:8080
+    Note over Tunnel,EL: Internal cluster networking<br/>Service: el-github-listener
+    
+    EL->>EL: Validate webhook signature
+    Note over EL: Uses webhook secret from Organization
+    
+    EL->>EL: Check CEL filter
+    Note over EL: Filter: body.ref == 'refs/heads/main'
+    
+    EL->>Tekton: Create PipelineRun
+    Note over EL,Tekton: TriggerTemplate instantiation
+    
+    Tekton->>Pod: Start pipeline pod
+    Note over Tekton,Pod: ServiceAccount: pipeline-runner<br/>Namespace: org-acme-corp
+    
+    Pod->>GitHub: Clone repository
+    Pod->>Pod: Execute pipeline tasks
+    Pod->>Tekton: Report completion
+```
+
+### Domain Strategy
+
+**Public Domain (arbiter-dev.com)**:
+- **Purpose**: Organization webhook endpoints accessible from internet
+- **DNS**: Managed by Cloudflare
+- **SSL/TLS**: Terminated at Cloudflare edge (automatic)
+- **Access**: GitHub webhooks, external CI/CD triggers
+- **Example**: `acme-corp.arbiter-dev.com`, `engineering.arbiter-dev.com`
+
+**Local Domain (home.local)**:
+- **Purpose**: Platform services accessible only within home network
+- **DNS**: Managed by home router or Pi-hole
+- **SSL/TLS**: Terminated at Ingress controller (self-signed or Let's Encrypt)
+- **Access**: Platform administrators, developers on local network
+- **Example**: `argocd.home.local`, `auth.home.local`, `dex.home.local`
+
+**Benefits**:
+- **Security**: Platform administration services not exposed to internet
+- **Simplicity**: No port forwarding or firewall rules required
+- **Reliability**: Cloudflare provides DDoS protection and global edge network
+- **Flexibility**: Can use different domains for different environments
+
+### Cloudflare Tunnel Architecture
+
+```mermaid
+graph LR
+    subgraph Cloudflare["Cloudflare Infrastructure"]
+        DNS["DNS Zone<br/>arbiter-dev.com"]
+        Edge["Edge Network<br/>(Global PoPs)"]
+        TunnelService["Tunnel Service<br/>(Cloudflare API)"]
+    end
+    
+    subgraph Cluster["Kubernetes Cluster"]
+        subgraph Org1["org-acme-corp"]
+            CF1["cloudflared-acme-corp<br/>(Deployment)"]
+            Creds1["Tunnel Credentials<br/>(Secret)"]
+            Config1["Tunnel Config<br/>(ConfigMap)"]
+            EL1["EventListener"]
+        end
+        
+        subgraph Org2["org-engineering"]
+            CF2["cloudflared-engineering<br/>(Deployment)"]
+            Creds2["Tunnel Credentials<br/>(Secret)"]
+            Config2["Tunnel Config<br/>(ConfigMap)"]
+            EL2["EventListener"]
+        end
+    end
+    
+    DNS -->|CNAME record| Edge
+    Edge -->|Route by hostname| TunnelService
+    
+    TunnelService <-->|Outbound connection| CF1
+    TunnelService <-->|Outbound connection| CF2
+    
+    CF1 -->|Forward requests| EL1
+    CF2 -->|Forward requests| EL2
+    
+    Creds1 -.->|Mounted as volume| CF1
+    Config1 -.->|Mounted as volume| CF1
+    Creds2 -.->|Mounted as volume| CF2
+    Config2 -.->|Mounted as volume| CF2
+    
+    style Cloudflare fill:#f96854
+    style Cluster fill:#fff4e1
+    style Org1 fill:#e8f5e9
+    style Org2 fill:#e8f5e9
+```
+
+**Tunnel Lifecycle**:
+1. **Creation**: Organization controller calls Cloudflare API to create tunnel
+2. **DNS**: Controller creates CNAME record pointing to tunnel
+3. **Credentials**: Controller stores tunnel credentials in Secret
+4. **Configuration**: Controller creates ConfigMap with tunnel routing rules
+5. **Deployment**: Controller deploys cloudflared pod with credentials and config
+6. **Connection**: cloudflared establishes outbound connection to Cloudflare
+7. **Routing**: Cloudflare routes requests to tunnel based on hostname
+
+**No Inbound Ports Required**:
+- cloudflared maintains outbound connection to Cloudflare
+- No firewall rules or port forwarding needed
+- Works behind NAT and restrictive firewalls
+- Automatic reconnection on network changes
+
+For troubleshooting webhook delivery issues, see [operations.md](operations.md#test-webhook-endpoint).
+
+**Source**
+- `platform/onboarding/controller/controllers/organization_controller.go` - Tunnel provisioning
+- Cloudflare Tunnel documentation: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
+
 ## Layered cert-manager Architecture
 
 The platform implements a revolutionary **layered cert-manager architecture** that eliminates the classic "webhook chicken-and-egg" problem through proper dependency ordering and validation.
@@ -160,6 +486,14 @@ patchesJson6902:
         value: --leader-election-namespace=cert-manager
 ```
 
+For operational procedures on verifying cert-manager deployment, see [operations.md](operations.md#layered-cert-manager-deployment).
+
+**Source**
+- `platform/cert-manager/kustomization.yaml` - Kustomize patches for RBAC fix
+- `platform/cert-manager/webhook-readiness-hook.yaml` - PostSync validation hook
+- `platform/argocd/apps/platform-cert-manager.yaml` - ArgoCD Application with sync wave 10
+- `platform/argocd/apps/platform-cert-foundation.yaml` - ArgoCD Application with sync wave 20
+
 ## Authentication System Architecture
 
 The authentication system provides centralized SSO for all platform services using Authentik as the Identity Provider with Dex as an OIDC connector layer.
@@ -221,8 +555,16 @@ sequenceDiagram
 - Updates Authentik OIDC provider configuration via API
 - Scales Dex deployment after Authentik is ready
 
-For detailed authentication operations, see [operations.md](operations.md).
-For authentication data models, see [data-models.md](data-models.md).
+For detailed authentication operations, see [operations.md](operations.md#authentication-system-operations).
+For authentication data models, see [data-models.md](data-models.md#authentication-data-models).
+For authentication API details, see [api.md](api.md#authentication-api).
+
+**Source**
+- `platform/auth/authentik/server-deployment.yaml` - Authentik server deployment
+- `platform/auth/dex/deployment.yaml` - Dex deployment
+- `platform/auth/config-sync/job.yaml` - Config Sync Job
+- `platform/auth/ingress/` - Ingress resources for auth services
+- `platform/argocd/apps/platform-auth.yaml` - ArgoCD Application with sync wave 20
 
 ## Components
 
@@ -649,21 +991,21 @@ spec:
             spec:
               type: object
               required:
+                - aphexOrg
                 - repoOrg
                 - repoName
-                - tenantName
+                - pipelineName
+                - templateRef
               properties:
+                aphexOrg:
+                  type: string
                 repoOrg:
                   type: string
                 repoName:
                   type: string
-                tenantName:
+                pipelineName:
                   type: string
-                permissionProfile:
-                  type: string
-                  enum: ["standard", "elevated"]
-                  default: "standard"
-                ingressHost:
+                templateRef:
                   type: string
             status:
               type: object

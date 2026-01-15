@@ -28,25 +28,33 @@ ArgoCD manages all platform components declaratively from Git using the app-of-a
 ### Organizations
 Organizations provide multi-tenant isolation with dedicated namespaces, EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels.
 
+**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/crds/organization-crd.yaml`
+
 ### Public vs Local Domains
 The platform uses two domain strategies:
 - **arbiter-dev.com** (public): Organization webhook endpoints accessible from the internet via Cloudflare tunnels
 - **home.local** (local): Authentication and platform services accessible only within the home network
 
 ### Layered cert-manager Deployment
-Revolutionary approach that eliminates the "webhook chicken-and-egg" problem through sync waves and PostSync validation. See [architecture.md](architecture.md) for detailed design.
+Revolutionary approach that eliminates the "webhook chicken-and-egg" problem through sync waves and PostSync validation. See [architecture.md](architecture.md#layered-cert-manager-architecture) for detailed design.
 
 ### Zero-Touch Bootstrap
-One-time initialization script that generates all secrets automatically and achieves complete platform convergence without manual intervention. See [operations.md](operations.md) for deployment steps.
+One-time initialization script that generates all secrets automatically and achieves complete platform convergence without manual intervention. See [operations.md](operations.md#deployment) for deployment steps.
 
 ### Centralized Authentication
-Authentik Identity Provider with Dex OIDC connector provides SSO for all platform services. See [architecture.md](architecture.md) for authentication flow details.
+Authentik Identity Provider with Dex OIDC connector provides SSO for all platform services. See [architecture.md](architecture.md#authentication-system-architecture) for authentication flow details.
 
 ### Tenant Isolation
-Each product team receives a dedicated namespace with RBAC boundaries, resource quotas, and isolated pipeline execution. See [api.md](api.md) for onboarding details.
+Each product team receives a dedicated namespace with RBAC boundaries, resource quotas, network policies, and isolated pipeline execution. See [api.md](api.md#repobinding-api) for onboarding details.
+
+**Source**: `platform/onboarding/controller/controllers/repobinding_controller.go`, `platform/tenancy/templates/`
 
 ### Self-Service Onboarding
-Users create Organization or RepoBinding resources to automatically provision tenant infrastructure. See [operations.md](operations.md) for registration procedures.
+Users create Organization or RepoBinding resources to automatically provision tenant infrastructure. The onboarding controller reconciles these CRDs and creates all necessary Kubernetes resources.
+
+For operational procedures, see [operations.md](operations.md#organization-and-repository-registration).
+
+**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/onboarding/controller/controllers/repobinding_controller.go`
 
 ## Design Principles
 
@@ -70,18 +78,24 @@ platform-root (ArgoCD Application)
 ├── Wave 5: platform-crds, platform-rbac
 ├── Wave 10: platform-cert-manager, platform-auth
 ├── Wave 20: platform-cert-foundation, platform-controllers, platform-catalog
-└── Wave 30: platform-ingress
+└── Wave 30: platform-ingress, platform-pipeline-resources
 ```
+
+**Source**: `platform/argocd/apps/platform-*.yaml`
 
 ### Authentication Flow
 ```
 User → ArgoCD UI → Dex → Authentik → OIDC Token → ArgoCD Access
 ```
 
+**Source**: `platform/auth/dex/configmap.yaml`, `platform/auth/authentik/blueprints-configmap.yaml`
+
 ### Certificate Management Flow
 ```
 cert-manager (Wave 10) → Webhook Validation → Certificates (Wave 20) → Ingress (Wave 30)
 ```
+
+**Source**: `platform/argocd/apps/platform-cert-manager.yaml`, `platform/argocd/apps/platform-cert-foundation.yaml`, `platform/argocd/apps/platform-ingress.yaml`
 
 For detailed architecture, see [architecture.md](architecture.md).
 
@@ -109,6 +123,8 @@ The bootstrap script will:
 5. Wait for complete platform convergence
 6. Display access instructions
 
+**Source**: `platform/bootstrap/bootstrap.sh`
+
 ### Access Platform Services
 
 After bootstrap completes:
@@ -131,7 +147,10 @@ metadata:
   name: acme-corp
   namespace: platform-system
 spec:
-  adminEmail: admin@acme-corp.com
+  displayName: "ACME Corporation"
+  adminUsers:
+    - admin@acme-corp.com
+  webhookSecret: ""  # Auto-generated if empty
 ```
 
 This creates:
@@ -141,7 +160,10 @@ This creates:
 - EventListener for GitHub webhooks
 - Organization admin RBAC
 
-For detailed onboarding procedures, see [operations.md](operations.md).
+For detailed onboarding procedures, see [operations.md](operations.md#bootstrap-organization).
+For Organization API details, see [api.md](api.md#organization-api).
+
+**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
 
 ## System Benefits
 

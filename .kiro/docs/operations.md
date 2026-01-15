@@ -89,6 +89,8 @@ kubectl get certificates -A
 kubectl get ingress -A
 ```
 
+**Source**: `platform/cert-manager/`, `platform/cert-manager/webhook-readiness-hook.yaml`, `platform/argocd/apps/platform-cert-manager.yaml`
+
 For detailed cert-manager architecture, see [architecture.md](architecture.md).
 
 ### Verification Steps
@@ -117,6 +119,8 @@ curl -k https://auth.home.local/if/flow/initial-setup/
 curl -k https://dex.home.local/.well-known/openid-configuration
 ```
 
+**Source**: `platform/auth/authentik/`, `platform/auth/dex/`
+
 **Step 3: Access Platform Services**
 
 **Authentik UI (User Management)**:
@@ -142,6 +146,8 @@ kubectl get secret authentik-secrets -n auth-system \
 # Access: https://tekton.home.local
 # Authenticate via Dex/Authentik
 ```
+
+**Source**: `platform/auth/secrets/README.md`, `platform/integrations/argocd-oidc-config.yaml`
 
 ### Expected Final State
 
@@ -239,6 +245,13 @@ kubectl get secret authentik-secrets -n auth-system -o jsonpath='{.data.admin-pa
 
 ## Organization and Repository Registration
 
+> **Important: Dual-Domain Strategy**  
+> The platform uses two domain strategies:
+> - **arbiter-dev.com** (public): Organization webhook endpoints accessible from the internet via Cloudflare tunnels
+> - **home.local** (local): Authentication and platform services accessible only within the home network
+> 
+> This separation ensures webhook endpoints are publicly accessible while keeping platform administration services private. See [architecture.md](architecture.md#networking-architecture) for detailed networking architecture.
+
 ### Prerequisites for Organization Bootstrap
 
 Before creating organizations, ensure:
@@ -271,12 +284,15 @@ metadata:
   name: acme-corp
   namespace: platform-system
 spec:
-  adminEmail: admin@acme-corp.com
+  displayName: "ACME Corporation"
+  adminUsers:
+    - admin@acme-corp.com
+  webhookSecret: ""  # Auto-generated if empty
 EOF
 ```
 
 **What Gets Created**:
-1. Namespace: `org-acme-corp`
+1. Organization namespace: `org-acme-corp`
 2. Cloudflare tunnel via API
 3. DNS CNAME record: `acme-corp.arbiter-dev.com → {tunnel-id}.cfargotunnel.com`
 4. Cloudflared tunnel deployment
@@ -284,12 +300,14 @@ EOF
 6. Organization admin RBAC
 7. Webhook secret for GitHub integration
 
+**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
+
 ### Verify Organization Bootstrap
 
 ```bash
 # Check Organization status
-kubectl get organization acme -n platform-system
-kubectl describe organization acme -n platform-system
+kubectl get organization acme-corp -n platform-system
+kubectl describe organization acme-corp -n platform-system
 
 # Verify organization namespace
 kubectl get namespace org-acme-corp
@@ -340,8 +358,7 @@ kubectl logs -n org-acme-corp -l eventlistener=github-listener -f
 kubectl get pipelineruns -n org-acme-corp
 ```
 
-**Source**
-- `platform/onboarding/controller/controllers/organization_controller.go` - Organization provisioning logic
+**Source**: `platform/onboarding/controller/controllers/organization_controller.go`
 
 ### Create RepoBinding
 
@@ -356,20 +373,24 @@ metadata:
   name: my-repo-binding
   namespace: platform-system
 spec:
+  aphexOrg: "acme-corp"
   repoOrg: "acme"
   repoName: "my-application"
-  tenantName: "org-acme"
   pipelineName: "my-application-pipeline"
-  permissionProfile: "standard"
+  templateRef: "run-pipeline-v1"
+  ingressHost: ""  # Optional: defaults to cluster ingress
 EOF
 ```
 
 **Field Descriptions**:
+- `aphexOrg`: Organization name (maps to `org-{aphexOrg}` namespace)
 - `repoOrg`: GitHub organization name
 - `repoName`: Repository name
-- `tenantName`: Organization namespace name (must match existing Organization)
-- `pipelineName`: Name of existing Tekton Pipeline (discovered automatically across namespaces)
-- `permissionProfile`: Permission level (`standard` or `elevated`)
+- `pipelineName`: Name of Tekton Pipeline to trigger
+- `templateRef`: Dispatcher template name (e.g., `run-pipeline-v1`)
+- `ingressHost`: Optional webhook hostname (defaults to cluster ingress)
+
+**Source**: `platform/crds/repobinding-crd.yaml`, `platform/onboarding/controller/controllers/repobinding_controller.go`
 
 ### Verify Onboarding
 

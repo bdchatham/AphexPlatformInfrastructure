@@ -70,7 +70,10 @@ metadata:
   name: acme-corp
   namespace: platform-system
 spec:
-  adminEmail: admin@acme-corp.com
+  displayName: "ACME Corporation"
+  adminUsers:
+    - admin@acme-corp.com
+  webhookSecret: ""  # Auto-generated if empty
 ```
 
 **Behavior**:
@@ -87,6 +90,8 @@ spec:
 - `webhookURL`: Public webhook endpoint (e.g., `https://acme-corp.arbiter-dev.com`)
 - `phase`: `Pending`, `Active`, or `Failed`
 
+**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
+
 ### Delete Organization
 
 ```bash
@@ -100,9 +105,7 @@ kubectl delete organization acme-corp -n platform-system
 4. Deletes ClusterRoleBinding for EventListener
 5. Deletes organization namespace (cascades all resources)
 
-**Source**
-- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
-- `platform/onboarding/controller/controllers/organization_controller.go` - Controller implementation
+**Source**: `platform/onboarding/controller/controllers/organization_controller.go`
 
 ## RepoBinding API
 
@@ -110,7 +113,7 @@ kubectl delete organization acme-corp -n platform-system
 
 The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `pipeline.arbiter.local`  
+**API Group**: `arbiter.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
 **Scope**: Namespaced (must be created in `platform-system` namespace)
@@ -124,25 +127,33 @@ metadata:
   name: <binding-name>
   namespace: platform-system
 spec:
+  aphexOrg: <string>             # Required: Organization name (maps to org-{aphexOrg} namespace)
   repoOrg: <string>              # Required: GitHub organization
   repoName: <string>             # Required: Repository name
-  tenantName: <string>           # Required: Tenant namespace name
-  permissionProfile: <string>    # Optional: "standard" or "elevated" (default: "standard")
+  pipelineName: <string>         # Required: Tekton Pipeline name to trigger
+  templateRef: <string>          # Required: Dispatcher template (e.g., run-pipeline-v1)
+  ingressHost: <string>          # Optional: Webhook hostname (defaults to cluster ingress)
 ```
 
 **Field Descriptions**:
 
-| Field | Type | Required | Description | Validation |
-|-------|------|----------|-------------|------------|
-| `repoOrg` | string | Yes | GitHub organization name | Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$` |
-| `repoName` | string | Yes | Repository name | Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$` |
-| `tenantName` | string | Yes | Tenant namespace name | Must match Kubernetes namespace naming rules |
-| `permissionProfile` | string | No | Permission level | Must be "standard" or "elevated" (default: "standard") |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `aphexOrg` | string | Yes | Organization name (maps to `org-{aphexOrg}` namespace) |
+| `repoOrg` | string | Yes | GitHub organization name |
+| `repoName` | string | Yes | Repository name |
+| `pipelineName` | string | Yes | Tekton Pipeline name to trigger |
+| `templateRef` | string | Yes | Dispatcher template name (e.g., `run-pipeline-v1`) |
+| `ingressHost` | string | No | Optional webhook hostname (defaults to cluster ingress) |
 
 **Validation Rules**:
-- `tenantName` cannot be a system namespace (kube-system, platform-system, argocd, tekton-pipelines, cert-manager, auth-system, ingress-system)
-- `permissionProfile` determines RBAC permissions and resource quotas
-- Repository must exist and be accessible to the platform
+- `aphexOrg` must reference an existing Organization resource
+- `pipelineName` must reference an existing Tekton Pipeline
+- `templateRef` must reference an existing dispatcher template (e.g., `run-pipeline-v1`)
+
+For data model details, see [data-models.md](data-models.md#repobinding-data-model).
+
+**Source**: `platform/crds/repobinding-crd.yaml`, `platform/onboarding/controller/controllers/repobinding_controller.go`
 
 ### RepoBinding Status
 

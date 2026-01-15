@@ -20,12 +20,16 @@ For operational procedures, see [operations.md](operations.md).
 
 ```typescript
 interface OrganizationSpec {
-  adminEmail: string;           // Primary admin email address
+  displayName: string;          // Human-readable organization name
+  adminUsers: string[];         // List of admin email addresses
+  webhookSecret?: string;       // GitHub webhook secret (auto-generated if not provided)
 }
 ```
 
 **Validation Rules**:
-- `adminEmail`: Must be a valid email address format
+- `displayName`: Required, must match pattern `^[a-zA-Z0-9\s\-\.]+$`
+- `adminUsers`: Required array, each email must match pattern `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
+- `webhookSecret`: Optional, must match pattern `^[a-zA-Z0-9_-]+$` if provided
 
 **Example**:
 ```yaml
@@ -35,7 +39,11 @@ metadata:
   name: acme-corp
   namespace: platform-system
 spec:
-  adminEmail: "admin@acme-corp.com"
+  displayName: "ACME Corporation"
+  adminUsers:
+    - "admin@acme-corp.com"
+    - "ops@acme-corp.com"
+  webhookSecret: "my-custom-secret"  # Optional
 ```
 
 ### Organization Status
@@ -56,6 +64,8 @@ status:
   webhookURL: "https://acme-corp.arbiter-dev.com"
   phase: "Active"
 ```
+
+For operational procedures on creating and managing organizations, see [operations.md](operations.md#bootstrap-organization).
 
 ### Cloudflare Tunnel Credentials
 
@@ -104,7 +114,8 @@ interface DNSRecord {
 ```
 
 **Source**
-- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
+- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - Go type definition
+- `platform/crds/organization-crd.yaml` - CRD definition
 - `platform/onboarding/controller/controllers/organization_controller.go` - Status management and tunnel provisioning
 
 ## RepoBinding Data Model
@@ -113,26 +124,29 @@ interface DNSRecord {
 
 ```typescript
 interface RepoBindingSpec {
+  aphexOrg: string;             // Organization name (references Organization resource)
   repoOrg: string;              // GitHub organization (e.g., "acme-corp")
   repoName: string;             // Repository name (e.g., "my-application")
-  tenantName: string;           // Tenant namespace name (e.g., "my-app")
-  permissionProfile: "standard" | "elevated";  // Permission level (default: "standard")
+  pipelineName: string;         // Pipeline name to trigger (e.g., "cdktf-deploy-pipeline")
+  templateRef: string;          // TriggerTemplate name (e.g., "cdktf-deploy-trigger-template")
 }
 ```
 
 **Validation Rules**:
-- `repoOrg`: Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]$`
-- `repoName`: Must match pattern `^[a-zA-Z0-9][a-zA-Z0-9-_.]*[a-zA-Z0-9]$`
-- `tenantName`: Must match Kubernetes namespace naming rules
-- `permissionProfile`: Must be "standard" or "elevated"
+- `aphexOrg`: Required, must match pattern `^[a-z0-9-]+$`
+- `repoOrg`: Required, must match pattern `^[a-z0-9-]+$`
+- `repoName`: Required, must match pattern `^[a-z0-9-]+$`
+- `pipelineName`: Required, must match pattern `^[a-z0-9-]+$`
+- `templateRef`: Required, non-empty string
 
 **Example**:
 ```yaml
 spec:
+  aphexOrg: "acme-corp"
   repoOrg: "acme-corp"
   repoName: "my-application"
-  tenantName: "my-app"
-  permissionProfile: "standard"
+  pipelineName: "cdktf-deploy-pipeline"
+  templateRef: "cdktf-deploy-trigger-template"
 ```
 
 ### RepoBinding Status
@@ -180,6 +194,9 @@ Pending → Provisioning → Ready
 - `NetworkPolicyReady`: Network isolation policies applied
 - `EventListenerReady`: Tekton webhook handler configured
 - `WebhookReady`: GitHub webhook configuration available
+
+For operational procedures on creating and managing repo bindings, see [operations.md](operations.md#create-repobinding).
+For API details on RepoBinding resources, see [api.md](api.md#repobinding-api).
 
 ## ArgoCD Application Data Model
 
@@ -902,11 +919,11 @@ ArgoCD updates Application status
 
 ### RepoBinding Validation
 
+- `aphexOrg`: Must match `^[a-z0-9-]+$`
 - `repoOrg`: Must match `^[a-z0-9-]+$`
 - `repoName`: Must match `^[a-z0-9-]+$`
-- `tenantName`: Must match `^[a-z0-9-]+$`, cannot be privileged namespace
-- `permissionProfile`: Must be "standard" or "elevated"
-- `ingressHost`: Must be valid hostname format (if provided)
+- `pipelineName`: Must match `^[a-z0-9-]+$`
+- `templateRef`: Required, non-empty string
 
 ### Namespace Validation
 

@@ -69,15 +69,9 @@ This separation ensures webhook endpoints are publicly accessible while keeping 
 
 ### How do webhooks reach my local cluster?
 
-Webhooks use Cloudflare Tunnels to reach the cluster without exposing ports:
+Webhooks use Cloudflare Tunnels to reach the cluster without exposing ports. The cloudflared pod maintains an outbound connection to Cloudflare, so no inbound ports are opened on your network.
 
-1. **GitHub** sends webhook to `acme-corp.arbiter-dev.com`
-2. **Cloudflare DNS** resolves to Cloudflare edge servers
-3. **Cloudflare Edge** terminates SSL and routes through tunnel
-4. **Cloudflared Pod** in cluster receives request via outbound connection
-5. **EventListener** processes webhook and creates PipelineRun
-
-No inbound ports are opened on your network. The cloudflared pod maintains an outbound connection to Cloudflare.
+For detailed webhook flow and networking architecture, see [architecture.md](architecture.md#webhook-path-detail).
 
 ### What happens when I delete an organization?
 
@@ -93,28 +87,7 @@ This ensures complete cleanup with no orphaned resources in Cloudflare or Kubern
 
 ### How do I troubleshoot webhook delivery issues?
 
-**Check DNS resolution**:
-```bash
-nslookup acme-corp.arbiter-dev.com
-```
-
-**Verify tunnel is running**:
-```bash
-kubectl get pods -n org-acme-corp | grep cloudflared
-kubectl logs -n org-acme-corp -l app=cloudflared
-```
-
-**Check EventListener logs**:
-```bash
-kubectl logs -n org-acme-corp -l eventlistener=github-listener -f
-```
-
-**Verify GitHub webhook configuration**:
-- Payload URL matches organization webhook URL
-- Secret matches the secret in cluster
-- Recent deliveries show successful responses (200 OK)
-
-For detailed troubleshooting, see [operations.md](operations.md).
+For detailed webhook troubleshooting procedures, see [operations.md](operations.md#test-webhook-endpoint) and [operations.md](operations.md#webhook-not-delivered).
 
 For user management procedures, see [operations.md](operations.md).
 
@@ -147,10 +120,11 @@ metadata:
   name: my-repo-binding
   namespace: platform-system
 spec:
+  aphexOrg: "acme-corp"
   repoOrg: "acme-corp"
   repoName: "my-application"
-  tenantName: "my-app"
-  permissionProfile: "standard"
+  pipelineName: "cdktf-deploy-pipeline"
+  templateRef: "cdktf-deploy-trigger-template"
 ```
 
 For detailed onboarding procedures, see [operations.md](operations.md).
@@ -427,16 +401,6 @@ git push
 # Watch sync status
 kubectl get application -n argocd -w
 ```
-
-### How do I grant my tenant elevated permissions?
-
-Update your RepoBinding to use the elevated profile:
-
-```bash
-kubectl patch repobinding <name> -n pipeline-system --type merge -p '{"spec":{"permissionProfile":"elevated"}}'
-```
-
-The onboarding controller will reconcile and update the Role.
 
 ### How do I delete a tenant?
 
