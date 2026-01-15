@@ -622,108 +622,39 @@ func (r *RepoBindingReconciler) updateEventListenerNamespaces(ctx context.Contex
 func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
 	
-	// Find the pipeline's namespace by searching across all namespaces
-	pipelineNamespace, err := r.findPipelineNamespace(ctx, rb.Spec.PipelineName)
+	// Get template from catalog (default to run-pipeline-v1 for now)
+	templateName := "run-pipeline-v1"
+	template, err := r.TemplateCatalog.Get(templateName)
 	if err != nil {
-		return fmt.Errorf("failed to find pipeline %q: %w", rb.Spec.PipelineName, err)
-	}
-
-	r.Log.Info("Found pipeline in namespace", "pipeline", rb.Spec.PipelineName, "namespace", pipelineNamespace)
-
-	// Define the TriggerTemplate GVK
-	triggerTemplateGVK := schema.GroupVersionKind{
-		Group:   "triggers.tekton.dev",
-		Version: "v1beta1",
-		Kind:    "TriggerTemplate",
+		return fmt.Errorf("failed to get template from catalog: %w", err)
 	}
 	
-	// Build the TriggerTemplate spec
-	triggerTemplate := &unstructured.Unstructured{}
-	triggerTemplate.SetGroupVersionKind(triggerTemplateGVK)
+	// Convert to TriggerTemplate and materialize in org namespace
+	triggerTemplate := template.ToTriggerTemplate(orgNamespace, rb.Spec.AphexOrg)
 	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName))
-	triggerTemplate.SetNamespace(orgNamespace)
-	triggerTemplate.SetLabels(map[string]string{
-		"platform.arbiter.io/pipeline":     rb.Spec.PipelineName,
-		"platform.arbiter.io/managed-by":   "onboarding-controller",
-		"platform.arbiter.io/organization": rb.Spec.AphexOrg,
-	})
-	
-	// Set the spec
-	spec := map[string]interface{}{
-		"params": []interface{}{
-			map[string]interface{}{
-				"name": "git-url",
-			},
-			map[string]interface{}{
-				"name": "git-revision",
-			},
-		},
-		"resourcetemplates": []interface{}{
-			map[string]interface{}{
-				"apiVersion": "tekton.dev/v1beta1",
-				"kind":       "PipelineRun",
-				"metadata": map[string]interface{}{
-					"generateName": fmt.Sprintf("%s-run-", rb.Spec.PipelineName),
-					"namespace":    pipelineNamespace,
-				},
-				"spec": map[string]interface{}{
-					"pipelineRef": map[string]interface{}{
-						"resolver": "cluster",
-						"params": []interface{}{
-							map[string]interface{}{
-								"name":  "name",
-								"value": rb.Spec.PipelineName,
-							},
-							map[string]interface{}{
-								"name":  "namespace", 
-								"value": pipelineNamespace,
-							},
-						},
-					},
-					"params": []interface{}{
-						map[string]interface{}{
-							"name":  "git-url",
-							"value": "$(tt.params.git-url)",
-						},
-						map[string]interface{}{
-							"name":  "git-revision",
-							"value": "$(tt.params.git-revision)",
-						},
-					},
-					"workspaces": []interface{}{
-						map[string]interface{}{
-							"name": "source",
-							"volumeClaimTemplate": map[string]interface{}{
-								"spec": map[string]interface{}{
-									"accessModes": []interface{}{"ReadWriteOnce"},
-									"resources": map[string]interface{}{
-										"requests": map[string]interface{}{
-											"storage": "1Gi",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	
-	if err := unstructured.SetNestedMap(triggerTemplate.Object, spec, "spec"); err != nil {
-		return fmt.Errorf("failed to set TriggerTemplate spec: %w", err)
-	}
+	triggerTemplate.Labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
 	
 	// Apply the TriggerTemplate
 	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
 		return fmt.Errorf("failed to apply TriggerTemplate: %w", err)
 	}
 	
+	r.Log.Info("Materialized template from catalog", 
+		"template", templateName, 
+		"namespace", orgNamespace,
+		"name", triggerTemplate.Name)
+	
 	return nil
 }
 
 func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
+	
+	// Find the pipeline's namespace
+	pipelineNamespace, err := r.findPipelineNamespace(ctx, rb.Spec.PipelineName)
+	if err != nil {
+		return fmt.Errorf("failed to find pipeline %q: %w", rb.Spec.PipelineName, err)
+	}
 	
 	trigger := &triggersv1beta1.Trigger{
 		TypeMeta: metav1.TypeMeta{
@@ -742,6 +673,14 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 		Spec: triggersv1beta1.TriggerSpec{
 			Bindings: []*triggersv1beta1.TriggerSpecBinding{
 				{Ref: "github-push-binding"},
+				{
+					Name: "pipeline-params",
+					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "execution-profile": "%s", "org-name": "%s"}`,
+						rb.Spec.PipelineName,
+						pipelineNamespace,
+						rb.Spec.PermissionProfile,
+						rb.Spec.AphexOrg)),
+				},
 			},
 			Template: triggersv1beta1.TriggerSpecTemplate{
 				Ref: stringPtr(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName)),
@@ -752,6 +691,12 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 	if err := r.Client.Patch(ctx, trigger, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
 		return fmt.Errorf("failed to apply Trigger: %w", err)
 	}
+
+	r.Log.Info("Provisioned trigger with template parameters",
+		"trigger", trigger.Name,
+		"template", *trigger.Spec.Template.Ref,
+		"pipeline", rb.Spec.PipelineName,
+		"namespace", pipelineNamespace)
 
 	return nil
 }

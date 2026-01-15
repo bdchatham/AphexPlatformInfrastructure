@@ -24,8 +24,9 @@ const (
 // RepoBindingReconciler reconciles a RepoBinding object
 type RepoBindingReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Log    logr.Logger
+	Scheme          *runtime.Scheme
+	Log             logr.Logger
+	TemplateCatalog *TemplateCatalog
 }
 
 // +kubebuilder:rbac:groups=platform.arbiter.io,resources=repobindings,verbs=get;list;watch;create;update;patch;delete

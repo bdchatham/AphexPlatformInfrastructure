@@ -59,10 +59,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize template catalog
+	templateCatalog := controllers.NewTemplateCatalog()
+	setupLog.Info("template catalog initialized", "templates", templateCatalog.List())
+
 	if err = (&controllers.RepoBindingReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Log:    ctrl.Log.WithName("controllers").WithName("RepoBinding"),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Log:             ctrl.Log.WithName("controllers").WithName("RepoBinding"),
+		TemplateCatalog: templateCatalog,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "RepoBinding")
 		os.Exit(1)
