@@ -42,21 +42,13 @@ spec:
                   type: string
                   pattern: '^[a-zA-Z0-9_.-]+$'
                   description: GitHub repository name
-                tenantName:
-                  type: string
-                  pattern: '^[a-z0-9-]+$'
-                  description: Tenant namespace name (will be created with this name)
                 pipelineName:
                   type: string
                   pattern: '^[a-z0-9-]+$'
                   description: Name of the Pipeline to trigger when webhooks are received
-                permissionProfile:
+                templateRef:
                   type: string
-                  enum:
-                    - standard
-                    - elevated
-                  default: standard
-                  description: RBAC permission profile for the tenant (standard or elevated)
+                  description: Name of the dispatcher template to use (e.g. run-pipeline-v1)
                 ingressHost:
                   type: string
                   description: Optional ingress hostname for webhook endpoint (defaults to cluster ingress)
