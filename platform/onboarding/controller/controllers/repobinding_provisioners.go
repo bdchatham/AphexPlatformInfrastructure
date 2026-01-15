@@ -669,13 +669,13 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 		Spec: triggersv1beta1.TriggerSpec{
 			Bindings: []*triggersv1beta1.TriggerSpecBinding{
 				{Ref: "github-push-binding"},
-				{
-					Name: "pipeline-params",
-					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "org-name": "%s"}`,
-						rb.Spec.PipelineName,
-						pipelineNamespace,
-						rb.Spec.AphexOrg)),
-				},
+				{Name: "pipeline-name", Value: stringPtr(rb.Spec.PipelineName)},
+				{Name: "pipeline-namespace", Value: stringPtr(pipelineNamespace)},
+				{Name: "org-name", Value: stringPtr(rb.Spec.AphexOrg)},
+				{Name: "repo-full-name", Value: stringPtr(fmt.Sprintf("%s/%s", rb.Spec.RepoOrg, rb.Spec.RepoName))},
+				{Name: "event-type", Value: stringPtr("$(header.X-Github-Event)")},
+				{Name: "event-id", Value: stringPtr("$(header.X-Github-Delivery)")},
+				{Name: "triggered-at", Value: stringPtr("$(body.repository.pushed_at)")},
 			},
 			Template: triggersv1beta1.TriggerSpecTemplate{
 				Ref: stringPtr(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName)),

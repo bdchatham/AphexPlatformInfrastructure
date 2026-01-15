@@ -93,8 +93,12 @@ func buildPipelineRunTemplate() []byte {
 					{"name": "triggered-at", "value": "$(tt.params.triggered-at)"},
 					{"name": "org-name", "value": "$(tt.params.org-name)"}
 				],
-				"serviceAccountName": "pipeline-runner",
-				"timeout": "1h"
+				"taskRunTemplate": {
+					"serviceAccountName": "pipeline-runner"
+				},
+				"timeouts": {
+					"pipeline": "1h"
+				}
 			}
 		}`)
 }
