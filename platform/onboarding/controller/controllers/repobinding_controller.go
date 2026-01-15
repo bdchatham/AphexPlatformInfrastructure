@@ -93,6 +93,7 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 
 	steps := []provisioningStep{
 		{name: "namespace", statusField: &repoBinding.Status.NamespaceCreated, provisionFunc: r.provisionNamespace},
+		{name: "pipeline", statusField: &repoBinding.Status.PipelineCreated, provisionFunc: r.provisionPipeline},
 		{name: "service account", statusField: &repoBinding.Status.ServiceAccountCreated, provisionFunc: r.provisionServiceAccount},
 		{name: "RBAC", statusField: &repoBinding.Status.RBACCreated, provisionFunc: r.provisionRBAC},
 		{name: "resource limits", statusField: &repoBinding.Status.QuotasCreated, provisionFunc: r.provisionResourceLimits},

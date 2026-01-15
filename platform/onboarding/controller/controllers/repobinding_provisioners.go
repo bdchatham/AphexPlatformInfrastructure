@@ -57,6 +57,61 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 	return nil
 }
 
+// provisionPipeline creates the Tekton Pipeline resource from the spec
+func (r *RepoBindingReconciler) provisionPipeline(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	// Parse the pipeline YAML from the spec
+	pipeline := &unstructured.Unstructured{}
+	if err := yaml.Unmarshal([]byte(rb.Spec.PipelineSpec), pipeline); err != nil {
+		return fmt.Errorf("failed to parse pipeline YAML: %w", err)
+	}
+
+	// Validate it's a Tekton Pipeline
+	if pipeline.GetKind() != "Pipeline" {
+		return fmt.Errorf("pipelineSpec must contain a Tekton Pipeline resource (kind: Pipeline)")
+	}
+	apiVersion := pipeline.GetAPIVersion()
+	if apiVersion != "tekton.dev/v1beta1" && apiVersion != "tekton.dev/v1" {
+		return fmt.Errorf("pipelineSpec must have apiVersion tekton.dev/v1beta1 or tekton.dev/v1")
+	}
+
+	// Set name and namespace from RepoBinding
+	pipeline.SetName(rb.Spec.PipelineName)
+	pipeline.SetNamespace(rb.Spec.PipelineName)
+
+	// Add labels for tracking
+	labels := pipeline.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
+	labels["platform.arbiter.io/managed-by"] = "onboarding-controller"
+	pipeline.SetLabels(labels)
+
+	// Check if pipeline already exists
+	existingPipeline := &unstructured.Unstructured{}
+	existingPipeline.SetGroupVersionKind(pipeline.GroupVersionKind())
+	err := r.Get(ctx, client.ObjectKey{Name: rb.Spec.PipelineName, Namespace: rb.Spec.PipelineName}, existingPipeline)
+	
+	if err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating Pipeline resource", "name", rb.Spec.PipelineName, "namespace", rb.Spec.PipelineName)
+			if err := r.Create(ctx, pipeline); err != nil {
+				return fmt.Errorf("failed to create Pipeline: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get Pipeline: %w", err)
+	}
+
+	r.Log.Info("Pipeline already exists, updating", "name", rb.Spec.PipelineName, "namespace", rb.Spec.PipelineName)
+	pipeline.SetResourceVersion(existingPipeline.GetResourceVersion())
+	if err := r.Update(ctx, pipeline); err != nil {
+		return fmt.Errorf("failed to update Pipeline: %w", err)
+	}
+
+	return nil
+}
+
 // provisionServiceAccount creates or updates the tenant service account
 func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	serviceAccount := &corev1.ServiceAccount{

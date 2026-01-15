@@ -132,7 +132,7 @@ spec:
   repoName: <string>             # Required: Repository name
   pipelineName: <string>         # Required: Tekton Pipeline name to trigger
   templateRef: <string>          # Required: Dispatcher template (e.g., run-pipeline-v1)
-  ingressHost: <string>          # Optional: Webhook hostname (defaults to cluster ingress)
+  pipelineSpec: <string>         # Required: Raw YAML content of Tekton Pipeline to create
 ```
 
 **Field Descriptions**:
@@ -144,10 +144,11 @@ spec:
 | `repoName` | string | Yes | Repository name |
 | `pipelineName` | string | Yes | Tekton Pipeline name to trigger |
 | `templateRef` | string | Yes | Dispatcher template name (e.g., `run-pipeline-v1`) |
-| `ingressHost` | string | No | Optional webhook hostname (defaults to cluster ingress) |
+| `pipelineSpec` | string | Yes | Raw YAML content of Tekton Pipeline resource to create |
 
 **Validation Rules**:
 - `aphexOrg` must reference an existing Organization resource
+- `pipelineSpec` must contain valid Tekton Pipeline YAML (kind: Pipeline, apiVersion: tekton.dev/v1 or tekton.dev/v1beta1)
 - `pipelineName` must reference an existing Tekton Pipeline
 - `templateRef` must reference an existing dispatcher template (e.g., `run-pipeline-v1`)
 
@@ -275,15 +276,18 @@ kubectl logs -n <tenant-name> -l app.kubernetes.io/component=eventlistener
 The onboarding controller watches RepoBinding resources and provisions tenant infrastructure automatically.
 
 **Reconciliation Process**:
-1. **Validation**: Validates RepoBinding spec and checks repository accessibility
-2. **Namespace Creation**: Creates tenant namespace with proper labels and annotations
-3. **RBAC Setup**: Creates ServiceAccount, Role, and RoleBinding based on permission profile
-4. **Resource Quotas**: Applies resource limits based on permission profile
-5. **Network Policies**: Configures network isolation with ingress exceptions
-6. **EventListener**: Creates Tekton EventListener for webhook handling
-7. **Pipeline Resources**: Provisions pipeline templates and shared resources
-8. **Webhook Configuration**: Generates webhook URL and secret for GitHub setup
-9. **Status Updates**: Updates RepoBinding status with provisioning progress
+1. **Validation**: Validates RepoBinding spec and checks Organization exists
+2. **Namespace Creation**: Creates pipeline namespace (`{pipelineName}`) with proper labels
+3. **Pipeline Creation**: Parses `pipelineSpec` and creates Tekton Pipeline resource in pipeline namespace
+4. **RBAC Setup**: Creates ServiceAccount, Role, RoleBinding, ClusterRole, and ClusterRoleBinding
+5. **Resource Quotas**: Applies resource limits (CPU, memory, pods, PVCs)
+6. **Network Policies**: Configures network isolation with egress to internet and DNS
+7. **Terraform Secret**: Creates Terraform backend configuration secret
+8. **EventListener Update**: Adds pipeline namespace to organization EventListener's namespace selector
+9. **TriggerTemplate**: Materializes dispatcher template from catalog in organization namespace
+10. **Trigger**: Creates Trigger resource in organization namespace linking webhook to pipeline
+11. **Webhook Configuration**: Updates status with webhook URL and secret
+12. **Status Updates**: Updates RepoBinding status with provisioning progress
 
 **Error Handling**:
 - Validation errors result in `Failed` phase with descriptive error messages
@@ -293,8 +297,9 @@ The onboarding controller watches RepoBinding resources and provisions tenant in
 
 **Source**
 - `platform/crds/repobinding-crd.yaml` - RepoBinding CRD definition
-- `platform/onboarding/controller-deployment.yaml` - Controller implementation
-- `platform/onboarding/controller-rbac.yaml` - Controller RBAC permissions
+- `platform/onboarding/controller/api/v1alpha1/repobinding_types.go` - RepoBinding Go types
+- `platform/onboarding/controller/controllers/repobinding_controller.go` - Controller reconciliation logic
+- `platform/onboarding/controller/controllers/repobinding_provisioners.go` - Resource provisioning functions
 
 ## Platform Services API
 

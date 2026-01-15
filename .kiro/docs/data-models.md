@@ -128,7 +128,8 @@ interface RepoBindingSpec {
   repoOrg: string;              // GitHub organization (e.g., "acme-corp")
   repoName: string;             // Repository name (e.g., "my-application")
   pipelineName: string;         // Pipeline name to trigger (e.g., "cdktf-deploy-pipeline")
-  templateRef: string;          // TriggerTemplate name (e.g., "cdktf-deploy-trigger-template")
+  templateRef: string;          // Dispatcher template name (e.g., "run-pipeline-v1")
+  pipelineSpec: string;         // Raw YAML content of Tekton Pipeline to create
 }
 ```
 
@@ -138,6 +139,7 @@ interface RepoBindingSpec {
 - `repoName`: Required, must match pattern `^[a-z0-9-]+$`
 - `pipelineName`: Required, must match pattern `^[a-z0-9-]+$`
 - `templateRef`: Required, non-empty string
+- `pipelineSpec`: Required, must contain valid Tekton Pipeline YAML
 
 **Example**:
 ```yaml
@@ -146,7 +148,25 @@ spec:
   repoOrg: "acme-corp"
   repoName: "my-application"
   pipelineName: "cdktf-deploy-pipeline"
-  templateRef: "cdktf-deploy-trigger-template"
+  templateRef: "run-pipeline-v1"
+  pipelineSpec: |
+    apiVersion: tekton.dev/v1
+    kind: Pipeline
+    metadata:
+      name: cdktf-deploy-pipeline
+    spec:
+      params:
+        - name: git-url
+        - name: git-revision
+      tasks:
+        - name: deploy
+          taskRef:
+            name: cdktf-deploy
+          params:
+            - name: git-url
+              value: $(params.git-url)
+            - name: git-revision
+              value: $(params.git-revision)
 ```
 
 ### RepoBinding Status

@@ -29,6 +29,11 @@ type RepoBindingSpec struct {
 	// TemplateRef is the name of the dispatcher template to use
 	// +kubebuilder:validation:Required
 	TemplateRef string `json:"templateRef"`
+
+	// PipelineSpec is the raw YAML content of the Tekton Pipeline to create
+	// The controller will create this Pipeline resource in the pipeline namespace
+	// +kubebuilder:validation:Required
+	PipelineSpec string `json:"pipelineSpec"`
 }
 
 // RepoBindingStatus defines the observed state of RepoBinding
@@ -72,6 +77,9 @@ type RepoBindingStatus struct {
 
 	// TriggerCreated indicates if the Trigger was created
 	TriggerCreated bool `json:"triggerCreated,omitempty"`
+
+	// PipelineCreated indicates if the Pipeline resource was created
+	PipelineCreated bool `json:"pipelineCreated,omitempty"`
 
 	// WebhookSecret is the generated webhook secret for GitHub webhook configuration
 	WebhookSecret string `json:"webhookSecret,omitempty"`
