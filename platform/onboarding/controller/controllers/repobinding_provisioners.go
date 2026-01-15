@@ -85,11 +85,8 @@ func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb 
 
 // provisionRBAC creates or updates the pipeline RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding)
 func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Determine permission profile (default to "standard")
-	profile := rb.Spec.ExecutionRole
-	if profile == "" {
-		profile = "standard"
-	}
+	// Use standard profile for all pipelines
+	profile := "standard"
 
 	// Create namespace-scoped Role
 	if err := r.provisionRole(ctx, rb, profile); err != nil {
@@ -674,10 +671,9 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 				{Ref: "github-push-binding"},
 				{
 					Name: "pipeline-params",
-					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "execution-role": "%s", "org-name": "%s"}`,
+					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "org-name": "%s"}`,
 						rb.Spec.PipelineName,
 						pipelineNamespace,
-						rb.Spec.ExecutionRole,
 						rb.Spec.AphexOrg)),
 				},
 			},

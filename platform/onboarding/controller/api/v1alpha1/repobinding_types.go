@@ -28,13 +28,7 @@ type RepoBindingSpec struct {
 
 	// TemplateRef is the name of the dispatcher template to use
 	// +kubebuilder:validation:Required
-	// +kubebuilder:default=run-pipeline-v1
-	TemplateRef string `json:"templateRef,omitempty"`
-
-	// ExecutionRole defines the execution profile (standard or elevated)
-	// +kubebuilder:validation:Enum=standard;elevated
-	// +kubebuilder:default=standard
-	ExecutionRole string `json:"executionRole,omitempty"`
+	TemplateRef string `json:"templateRef"`
 }
 
 // RepoBindingStatus defines the observed state of RepoBinding

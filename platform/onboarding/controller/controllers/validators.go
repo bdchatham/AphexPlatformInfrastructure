@@ -32,9 +32,6 @@ var (
 
 	// Valid pipeline name pattern
 	pipelineNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
-
-	// Valid permission profiles
-	validExecutionRoles = []string{"standard", "elevated"}
 )
 
 // ValidationError represents a validation failure
@@ -61,11 +58,6 @@ func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding, catalog *TemplateCata
 
 	// Reject privileged namespace names
 	if err := validateNotPrivilegedNamespace(rb.Spec.PipelineName); err != nil {
-		return err
-	}
-
-	// Validate execution profile
-	if err := validateExecutionRole(rb.Spec.ExecutionRole); err != nil {
 		return err
 	}
 
@@ -117,24 +109,6 @@ func validateNotPrivilegedNamespace(name string) error {
 		}
 	}
 	return nil
-}
-
-// validateExecutionRole checks if the execution profile is valid
-func validateExecutionRole(profile string) error {
-	// Default to "standard" if empty
-	if profile == "" {
-		return nil
-	}
-
-	for _, validProfile := range validExecutionRoles {
-		if profile == validProfile {
-			return nil
-		}
-	}
-	return &ValidationError{
-		Field:   "executionRole",
-		Message: "Execution profile must be 'standard' or 'elevated'",
-	}
 }
 
 // validateTemplateRef checks if the template exists in the catalog

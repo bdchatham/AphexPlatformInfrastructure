@@ -89,7 +89,7 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 		"repoOrg", repoBinding.Spec.RepoOrg,
 		"repoName", repoBinding.Spec.RepoName,
 		"pipelineName", repoBinding.Spec.PipelineName,
-		"permissionProfile", repoBinding.Spec.ExecutionRole)
+		"templateRef", repoBinding.Spec.TemplateRef)
 
 	steps := []provisioningStep{
 		{name: "namespace", statusField: &repoBinding.Status.NamespaceCreated, provisionFunc: r.provisionNamespace},

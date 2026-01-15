@@ -28,7 +28,6 @@ func NewRunPipelineV1() *DispatcherTemplate {
 				{Name: "event-id", Description: "Unique event identifier"},
 				{Name: "pipeline-name", Description: "Name of the pipeline to run"},
 				{Name: "pipeline-namespace", Description: "Namespace where pipeline exists"},
-				{Name: "execution-role", Description: "Execution profile (standard/elevated)", Default: stringPtr("standard")},
 				{Name: "org-name", Description: "Organization name", Default: stringPtr("")},
 				{Name: "triggered-at", Description: "Webhook timestamp", Default: stringPtr("")},
 			},
@@ -74,8 +73,7 @@ func buildPipelineRunTemplate() []byte {
 				"labels": {
 					"platform.arbiter.io/triggered": "true",
 					"platform.arbiter.io/event-type": "$(tt.params.event-type)",
-					"platform.arbiter.io/event-id": "$(tt.params.event-id)",
-					"platform.arbiter.io/execution-role": "$(tt.params.execution-role)"
+					"platform.arbiter.io/event-id": "$(tt.params.event-id)"
 				}
 			},
 			"spec": {
@@ -92,7 +90,6 @@ func buildPipelineRunTemplate() []byte {
 					{"name": "repo-full-name", "value": ["$(tt.params.repo-full-name)"]},
 					{"name": "event-type", "value": "$(tt.params.event-type)"},
 					{"name": "event-id", "value": "$(tt.params.event-id)"},
-					{"name": "execution-role", "value": "$(tt.params.execution-role)"},
 					{"name": "triggered-at", "value": "$(tt.params.triggered-at)"},
 					{"name": "org-name", "value": "$(tt.params.org-name)"}
 				],
