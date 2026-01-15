@@ -22,28 +22,26 @@ import (
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
-// provisionNamespace creates or updates the tenant namespace
+// provisionNamespace creates or updates the pipeline namespace
 func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	repoLabel := fmt.Sprintf("%s-%s", rb.Spec.RepoOrg, rb.Spec.RepoName)
 	
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: rb.Spec.TenantName,
+			Name: rb.Spec.PipelineName,
 			Labels: map[string]string{
-				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
 				"platform.arbiter.io/repo":       repoLabel,
 				"platform.arbiter.io/managed-by": "onboarding-controller",
 			},
 		},
 	}
 
-	// Try to get existing namespace
 	existingNs := &corev1.Namespace{}
-	err := r.Get(ctx, client.ObjectKey{Name: rb.Spec.TenantName}, existingNs)
+	err := r.Get(ctx, client.ObjectKey{Name: rb.Spec.PipelineName}, existingNs)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new namespace
-			r.Log.Info("Creating tenant namespace", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating pipeline namespace", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, namespace); err != nil {
 				return fmt.Errorf("failed to create namespace: %w", err)
 			}
@@ -52,8 +50,7 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 		return fmt.Errorf("failed to get namespace: %w", err)
 	}
 
-	// Namespace exists, update labels if needed
-	r.Log.Info("Namespace already exists, updating labels", "namespace", rb.Spec.TenantName)
+	r.Log.Info("Namespace already exists, updating labels", "namespace", rb.Spec.PipelineName)
 	existingNs.Labels = namespace.Labels
 	if err := r.Update(ctx, existingNs); err != nil {
 		return fmt.Errorf("failed to update namespace labels: %w", err)
@@ -72,17 +69,15 @@ func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb 
 	serviceAccount := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pipeline-runner",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 	}
 
-	// Try to get existing service account
 	existingSA := &corev1.ServiceAccount{}
-	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.TenantName}, existingSA)
+	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.PipelineName}, existingSA)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new service account
-			r.Log.Info("Creating service account", "namespace", rb.Spec.TenantName, "name", "pipeline-runner")
+			r.Log.Info("Creating service account", "namespace", rb.Spec.PipelineName, "name", "pipeline-runner")
 			if err := r.Create(ctx, serviceAccount); err != nil {
 				return fmt.Errorf("failed to create service account: %w", err)
 			}
@@ -91,12 +86,11 @@ func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb 
 		return fmt.Errorf("failed to get service account: %w", err)
 	}
 
-	// Service account exists, nothing to update
-	r.Log.Info("Service account already exists", "namespace", rb.Spec.TenantName, "name", "pipeline-runner")
+	r.Log.Info("Service account already exists", "namespace", rb.Spec.PipelineName, "name", "pipeline-runner")
 	return nil
 }
 
-// provisionRBAC creates or updates the tenant RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding)
+// provisionRBAC creates or updates the pipeline RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding)
 func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// Determine permission profile (default to "standard")
 	profile := rb.Spec.PermissionProfile
@@ -128,17 +122,15 @@ func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv
 }
 
 
-// provisionRole creates or updates the tenant Role
+// provisionRole creates or updates the pipeline Role
 func (r *RepoBindingReconciler) provisionRole(ctx context.Context, rb *platformv1alpha1.RepoBinding, profile string) error {
-	role := r.buildRole(rb.Spec.TenantName, profile)
+	role := r.buildRole(rb.Spec.PipelineName, profile)
 
-	// Try to get existing role
 	existingRole := &rbacv1.Role{}
-	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.TenantName}, existingRole)
+	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.PipelineName}, existingRole)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new role
-			r.Log.Info("Creating role", "namespace", rb.Spec.TenantName, "profile", profile)
+			r.Log.Info("Creating role", "namespace", rb.Spec.PipelineName, "profile", profile)
 			if err := r.Create(ctx, role); err != nil {
 				return fmt.Errorf("failed to create role: %w", err)
 			}
@@ -147,8 +139,7 @@ func (r *RepoBindingReconciler) provisionRole(ctx context.Context, rb *platformv
 		return fmt.Errorf("failed to get role: %w", err)
 	}
 
-	// Role exists, update rules
-	r.Log.Info("Updating role", "namespace", rb.Spec.TenantName, "profile", profile)
+	r.Log.Info("Updating role", "namespace", rb.Spec.PipelineName, "profile", profile)
 	existingRole.Rules = role.Rules
 	if err := r.Update(ctx, existingRole); err != nil {
 		return fmt.Errorf("failed to update role: %w", err)
@@ -157,12 +148,12 @@ func (r *RepoBindingReconciler) provisionRole(ctx context.Context, rb *platformv
 	return nil
 }
 
-// provisionRoleBinding creates or updates the tenant RoleBinding
+// provisionRoleBinding creates or updates the pipeline RoleBinding
 func (r *RepoBindingReconciler) provisionRoleBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	roleBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pipeline-runner",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
@@ -173,18 +164,16 @@ func (r *RepoBindingReconciler) provisionRoleBinding(ctx context.Context, rb *pl
 			{
 				Kind:      "ServiceAccount",
 				Name:      "pipeline-runner",
-				Namespace: rb.Spec.TenantName,
+				Namespace: rb.Spec.PipelineName,
 			},
 		},
 	}
 
-	// Try to get existing rolebinding
 	existingRB := &rbacv1.RoleBinding{}
-	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.TenantName}, existingRB)
+	err := r.Get(ctx, client.ObjectKey{Name: "pipeline-runner", Namespace: rb.Spec.PipelineName}, existingRB)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new rolebinding
-			r.Log.Info("Creating rolebinding", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating rolebinding", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, roleBinding); err != nil {
 				return fmt.Errorf("failed to create rolebinding: %w", err)
 			}
@@ -193,20 +182,19 @@ func (r *RepoBindingReconciler) provisionRoleBinding(ctx context.Context, rb *pl
 		return fmt.Errorf("failed to get rolebinding: %w", err)
 	}
 
-	// RoleBinding exists, nothing to update
-	r.Log.Info("RoleBinding already exists", "namespace", rb.Spec.TenantName)
+	r.Log.Info("RoleBinding already exists", "namespace", rb.Spec.PipelineName)
 	return nil
 }
 
-// provisionClusterRole creates or updates the tenant ClusterRole for cluster-scoped Tekton Triggers resources
+// provisionClusterRole creates or updates the pipeline ClusterRole for cluster-scoped Tekton Triggers resources
 func (r *RepoBindingReconciler) provisionClusterRole(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
+	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.PipelineName)
 	
 	clusterRole := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: clusterRoleName,
 			Labels: map[string]string{
-				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
 				"platform.arbiter.io/managed-by": "onboarding-controller",
 			},
 		},
@@ -242,16 +230,16 @@ func (r *RepoBindingReconciler) provisionClusterRole(ctx context.Context, rb *pl
 	return nil
 }
 
-// provisionClusterRoleBinding creates or updates the tenant ClusterRoleBinding
+// provisionClusterRoleBinding creates or updates the pipeline ClusterRoleBinding
 func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
-	clusterRoleBindingName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.TenantName)
+	clusterRoleName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.PipelineName)
+	clusterRoleBindingName := fmt.Sprintf("pipeline-runner-%s", rb.Spec.PipelineName)
 	
 	clusterRoleBinding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: clusterRoleBindingName,
 			Labels: map[string]string{
-				"platform.arbiter.io/tenant":     rb.Spec.TenantName,
+				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
 				"platform.arbiter.io/managed-by": "onboarding-controller",
 			},
 		},
@@ -264,7 +252,7 @@ func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context,
 			{
 				Kind:      "ServiceAccount",
 				Name:      "pipeline-runner",
-				Namespace: rb.Spec.TenantName,
+				Namespace: rb.Spec.PipelineName,
 			},
 		},
 	}
@@ -380,12 +368,12 @@ func (r *RepoBindingReconciler) provisionResourceLimits(ctx context.Context, rb 
 	return nil
 }
 
-// provisionResourceQuota creates or updates the tenant ResourceQuota
+// provisionResourceQuota creates or updates the pipeline ResourceQuota
 func (r *RepoBindingReconciler) provisionResourceQuota(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	resourceQuota := &corev1.ResourceQuota{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tenant-quota",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 		Spec: corev1.ResourceQuotaSpec{
 			Hard: corev1.ResourceList{
@@ -399,13 +387,11 @@ func (r *RepoBindingReconciler) provisionResourceQuota(ctx context.Context, rb *
 		},
 	}
 
-	// Try to get existing resource quota
 	existingRQ := &corev1.ResourceQuota{}
-	err := r.Get(ctx, client.ObjectKey{Name: "tenant-quota", Namespace: rb.Spec.TenantName}, existingRQ)
+	err := r.Get(ctx, client.ObjectKey{Name: "tenant-quota", Namespace: rb.Spec.PipelineName}, existingRQ)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new resource quota
-			r.Log.Info("Creating resource quota", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating resource quota", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, resourceQuota); err != nil {
 				return fmt.Errorf("failed to create resource quota: %w", err)
 			}
@@ -414,8 +400,7 @@ func (r *RepoBindingReconciler) provisionResourceQuota(ctx context.Context, rb *
 		return fmt.Errorf("failed to get resource quota: %w", err)
 	}
 
-	// Resource quota exists, update if needed
-	r.Log.Info("Updating resource quota", "namespace", rb.Spec.TenantName)
+	r.Log.Info("Updating resource quota", "namespace", rb.Spec.PipelineName)
 	existingRQ.Spec.Hard = resourceQuota.Spec.Hard
 	if err := r.Update(ctx, existingRQ); err != nil {
 		return fmt.Errorf("failed to update resource quota: %w", err)
@@ -424,12 +409,12 @@ func (r *RepoBindingReconciler) provisionResourceQuota(ctx context.Context, rb *
 	return nil
 }
 
-// provisionLimitRange creates or updates the tenant LimitRange
+// provisionLimitRange creates or updates the pipeline LimitRange
 func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	limitRange := &corev1.LimitRange{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tenant-limits",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 		Spec: corev1.LimitRangeSpec{
 			Limits: []corev1.LimitRangeItem{
@@ -456,13 +441,11 @@ func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *pla
 		},
 	}
 
-	// Try to get existing limit range
 	existingLR := &corev1.LimitRange{}
-	err := r.Get(ctx, client.ObjectKey{Name: "tenant-limits", Namespace: rb.Spec.TenantName}, existingLR)
+	err := r.Get(ctx, client.ObjectKey{Name: "tenant-limits", Namespace: rb.Spec.PipelineName}, existingLR)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new limit range
-			r.Log.Info("Creating limit range", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating limit range", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, limitRange); err != nil {
 				return fmt.Errorf("failed to create limit range: %w", err)
 			}
@@ -471,8 +454,7 @@ func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *pla
 		return fmt.Errorf("failed to get limit range: %w", err)
 	}
 
-	// Limit range exists, update if needed
-	r.Log.Info("Updating limit range", "namespace", rb.Spec.TenantName)
+	r.Log.Info("Updating limit range", "namespace", rb.Spec.PipelineName)
 	existingLR.Spec.Limits = limitRange.Spec.Limits
 	if err := r.Update(ctx, existingLR); err != nil {
 		return fmt.Errorf("failed to update limit range: %w", err)
@@ -482,12 +464,12 @@ func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *pla
 }
 
 
-// provisionNetworkPolicy creates or updates the tenant NetworkPolicy
+// provisionNetworkPolicy creates or updates the pipeline NetworkPolicy
 func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	networkPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "tenant-isolation",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{},
@@ -550,13 +532,11 @@ func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *
 		},
 	}
 
-	// Try to get existing network policy
 	existingNP := &networkingv1.NetworkPolicy{}
-	err := r.Get(ctx, client.ObjectKey{Name: "tenant-isolation", Namespace: rb.Spec.TenantName}, existingNP)
+	err := r.Get(ctx, client.ObjectKey{Name: "tenant-isolation", Namespace: rb.Spec.PipelineName}, existingNP)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new network policy
-			r.Log.Info("Creating network policy", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating network policy", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, networkPolicy); err != nil {
 				return fmt.Errorf("failed to create network policy: %w", err)
 			}
@@ -565,8 +545,7 @@ func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *
 		return fmt.Errorf("failed to get network policy: %w", err)
 	}
 
-	// Network policy exists, update if needed
-	r.Log.Info("Updating network policy", "namespace", rb.Spec.TenantName)
+	r.Log.Info("Updating network policy", "namespace", rb.Spec.PipelineName)
 	existingNP.Spec = networkPolicy.Spec
 	if err := r.Update(ctx, existingNP); err != nil {
 		return fmt.Errorf("failed to update network policy: %w", err)
@@ -584,12 +563,12 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
     namespace        = "%s"
     in_cluster_config = true
   }
-}`, rb.Spec.TenantName, rb.Spec.TenantName)
+}`, rb.Spec.PipelineName, rb.Spec.PipelineName)
 
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "terraform-backend-config",
-			Namespace: rb.Spec.TenantName,
+			Namespace: rb.Spec.PipelineName,
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
@@ -597,13 +576,11 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 		},
 	}
 
-	// Try to get existing secret
 	existingSecret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Name: "terraform-backend-config", Namespace: rb.Spec.TenantName}, existingSecret)
+	err := r.Get(ctx, client.ObjectKey{Name: "terraform-backend-config", Namespace: rb.Spec.PipelineName}, existingSecret)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			// Create new secret
-			r.Log.Info("Creating Terraform backend secret", "namespace", rb.Spec.TenantName)
+			r.Log.Info("Creating Terraform backend secret", "namespace", rb.Spec.PipelineName)
 			if err := r.Create(ctx, secret); err != nil {
 				return fmt.Errorf("failed to create Terraform backend secret: %w", err)
 			}
@@ -612,8 +589,7 @@ func (r *RepoBindingReconciler) provisionTerraformBackendSecret(ctx context.Cont
 		return fmt.Errorf("failed to get Terraform backend secret: %w", err)
 	}
 
-	// Secret exists, update if needed
-	r.Log.Info("Updating Terraform backend secret", "namespace", rb.Spec.TenantName)
+	r.Log.Info("Updating Terraform backend secret", "namespace", rb.Spec.PipelineName)
 	existingSecret.StringData = secret.StringData
 	if err := r.Update(ctx, existingSecret); err != nil {
 		return fmt.Errorf("failed to update Terraform backend secret: %w", err)
@@ -631,14 +607,14 @@ func (r *RepoBindingReconciler) updateEventListenerNamespaces(ctx context.Contex
 	}
 	
 	for _, ns := range eventListener.Spec.NamespaceSelector.MatchNames {
-		if ns == rb.Spec.TenantName {
+		if ns == rb.Spec.PipelineName {
 			return nil
 		}
 	}
 	
 	eventListener.Spec.NamespaceSelector.MatchNames = append(
 		eventListener.Spec.NamespaceSelector.MatchNames,
-		rb.Spec.TenantName,
+		rb.Spec.PipelineName,
 	)
 	
 	if err := r.Update(ctx, eventListener); err != nil {
@@ -649,45 +625,10 @@ func (r *RepoBindingReconciler) updateEventListenerNamespaces(ctx context.Contex
 }
 
 
-// provisionTriggerBinding creates or updates the TriggerBinding for GitHub webhooks
-func (r *RepoBindingReconciler) provisionTriggerBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	triggerBinding := &triggersv1beta1.TriggerBinding{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "triggers.tekton.dev/v1beta1",
-			Kind:       "TriggerBinding",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "github-push-binding",
-			Namespace: rb.Spec.TenantName,
-			Labels: map[string]string{
-				"platform.arbiter.io/tenant":       rb.Spec.TenantName,
-				"platform.arbiter.io/managed-by":   "onboarding-controller",
-				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
-			},
-		},
-		Spec: triggersv1beta1.TriggerBindingSpec{
-			Params: []triggersv1beta1.Param{
-				{
-					Name:  "git-url",
-					Value: "$(body.repository.clone_url)",
-				},
-				{
-					Name:  "git-revision",
-					Value: "$(body.after)",
-				},
-			},
-		},
-	}
-
-	if err := r.Client.Patch(ctx, triggerBinding, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
-		return fmt.Errorf("failed to apply TriggerBinding: %w", err)
-	}
-
-	return nil
-}
-
 // provisionTriggerTemplate creates or updates the TriggerTemplate for pipeline execution
 func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
+	
 	// Find the pipeline's namespace by searching across all namespaces
 	pipelineNamespace, err := r.findPipelineNamespace(ctx, rb.Spec.PipelineName)
 	if err != nil {
@@ -706,10 +647,10 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	// Build the TriggerTemplate spec
 	triggerTemplate := &unstructured.Unstructured{}
 	triggerTemplate.SetGroupVersionKind(triggerTemplateGVK)
-	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName))
-	triggerTemplate.SetNamespace(rb.Spec.TenantName)
+	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName))
+	triggerTemplate.SetNamespace(orgNamespace)
 	triggerTemplate.SetLabels(map[string]string{
-		"platform.arbiter.io/tenant":       rb.Spec.TenantName,
+		"platform.arbiter.io/pipeline":     rb.Spec.PipelineName,
 		"platform.arbiter.io/managed-by":   "onboarding-controller",
 		"platform.arbiter.io/organization": rb.Spec.AphexOrg,
 	})
@@ -729,7 +670,8 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 				"apiVersion": "tekton.dev/v1beta1",
 				"kind":       "PipelineRun",
 				"metadata": map[string]interface{}{
-					"generateName": fmt.Sprintf("%s-run-", rb.Spec.TenantName),
+					"generateName": fmt.Sprintf("%s-run-", rb.Spec.PipelineName),
+					"namespace":    pipelineNamespace,
 				},
 				"spec": map[string]interface{}{
 					"pipelineRef": map[string]interface{}{
@@ -788,16 +730,18 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 }
 
 func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
+	
 	trigger := &triggersv1beta1.Trigger{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "triggers.tekton.dev/v1beta1",
 			Kind:       "Trigger",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-trigger", rb.Spec.TenantName),
-			Namespace: rb.Spec.TenantName,
+			Name:      fmt.Sprintf("%s-trigger", rb.Spec.PipelineName),
+			Namespace: orgNamespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/tenant":       rb.Spec.TenantName,
+				"platform.arbiter.io/pipeline":     rb.Spec.PipelineName,
 				"platform.arbiter.io/managed-by":   "onboarding-controller",
 				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
 			},
@@ -807,7 +751,7 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 				{Ref: "github-push-binding"},
 			},
 			Template: triggersv1beta1.TriggerSpecTemplate{
-				Ref: stringPtr(fmt.Sprintf("%s-trigger-template", rb.Spec.TenantName)),
+				Ref: stringPtr(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName)),
 			},
 		},
 	}
@@ -861,19 +805,19 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 	}
 
 	// Check if repository is already in the allowlist
-	webhookSecretRef := fmt.Sprintf("webhook-%s", rb.Spec.TenantName)
+	webhookSecretRef := fmt.Sprintf("webhook-%s", rb.Spec.PipelineName)
 	
 	for i, entry := range allowlist.Repos {
 		if entry.Org == rb.Spec.RepoOrg && entry.Name == rb.Spec.RepoName {
 			// Repository exists, update tenant mapping and webhook secret ref if different
 			updated := false
-			if entry.Tenant != rb.Spec.TenantName {
+			if entry.Tenant != rb.Spec.PipelineName {
 				r.Log.Info("Updating tenant mapping for repository", 
 					"org", rb.Spec.RepoOrg, 
 					"repo", rb.Spec.RepoName,
 					"oldTenant", entry.Tenant,
-					"newTenant", rb.Spec.TenantName)
-				allowlist.Repos[i].Tenant = rb.Spec.TenantName
+					"newTenant", rb.Spec.PipelineName)
+				allowlist.Repos[i].Tenant = rb.Spec.PipelineName
 				updated = true
 			}
 			if entry.WebhookSecretRef != webhookSecretRef {
@@ -890,7 +834,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 				r.Log.Info("Repository already in allowlist with correct configuration", 
 					"org", rb.Spec.RepoOrg, 
 					"repo", rb.Spec.RepoName,
-					"tenant", rb.Spec.TenantName)
+					"tenant", rb.Spec.PipelineName)
 				return nil
 			}
 			
@@ -913,7 +857,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 	newEntry := AllowlistEntry{
 		Org:              rb.Spec.RepoOrg,
 		Name:             rb.Spec.RepoName,
-		Tenant:           rb.Spec.TenantName,
+		Tenant:           rb.Spec.PipelineName,
 		Enabled:          true,
 		WebhookSecretRef: webhookSecretRef,
 	}
@@ -934,7 +878,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 	r.Log.Info("Added repository to allowlist", 
 		"org", rb.Spec.RepoOrg, 
 		"repo", rb.Spec.RepoName,
-		"tenant", rb.Spec.TenantName)
+		"tenant", rb.Spec.PipelineName)
 
 	return nil
 }
@@ -951,14 +895,14 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 	
 	// Copy the webhook secret to the pipeline namespace if it doesn't exist
 	pipelineSecret := &corev1.Secret{}
-	err = r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: rb.Spec.TenantName}, pipelineSecret)
+	err = r.Get(ctx, client.ObjectKey{Name: "github-webhook-secret", Namespace: rb.Spec.PipelineName}, pipelineSecret)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Create a copy of the secret in the pipeline namespace
 			pipelineSecret = &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "github-webhook-secret",
-					Namespace: rb.Spec.TenantName,
+					Namespace: rb.Spec.PipelineName,
 					Labels: map[string]string{
 						"platform.arbiter.io/managed-by": "repobinding-controller",
 						"platform.arbiter.io/organization": rb.Spec.RepoOrg,
@@ -1006,7 +950,7 @@ Next steps - Configure GitHub webhook:
 	rb.Status.Message = instructions
 	
 	r.Log.Info("Updated RepoBinding status with webhook information", 
-		"tenant", rb.Spec.TenantName,
+		"tenant", rb.Spec.PipelineName,
 		"webhookURL", rb.Status.WebhookURL)
 	
 	return nil

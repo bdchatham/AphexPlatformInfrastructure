@@ -25,7 +25,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "tenant-test",
+					PipelineName:      "tenant-test",
 					PermissionProfile: "standard",
 				},
 			},
@@ -41,7 +41,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "tenant-test",
+					PipelineName:      "tenant-test",
 					PermissionProfile: "elevated",
 				},
 			},
@@ -57,7 +57,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "tenant-test",
+					PipelineName:      "tenant-test",
 					PermissionProfile: "",
 				},
 			},
@@ -73,7 +73,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "unapproved-org",
 					RepoName:          "test-repo",
-					TenantName:        "tenant-test",
+					PipelineName:      "tenant-test",
 					PermissionProfile: "standard",
 				},
 			},
@@ -90,7 +90,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "Tenant-Test",
+					PipelineName:      "Tenant-Test",
 					PermissionProfile: "standard",
 				},
 			},
@@ -107,7 +107,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "tenant_test",
+					PipelineName:      "tenant_test",
 					PermissionProfile: "standard",
 				},
 			},
@@ -124,7 +124,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "kube-system",
+					PipelineName:      "kube-system",
 					PermissionProfile: "standard",
 				},
 			},
@@ -141,7 +141,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "default",
+					PipelineName:      "default",
 					PermissionProfile: "standard",
 				},
 			},
@@ -158,7 +158,7 @@ func TestValidateRepoBinding(t *testing.T) {
 				Spec: platformv1alpha1.RepoBindingSpec{
 					RepoOrg:           "bdchatham",
 					RepoName:          "test-repo",
-					TenantName:        "tenant-test",
+					PipelineName:      "tenant-test",
 					PermissionProfile: "admin",
 				},
 			},

@@ -87,7 +87,7 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 	logger.Info("Reconciling RepoBinding", 
 		"repoOrg", repoBinding.Spec.RepoOrg,
 		"repoName", repoBinding.Spec.RepoName,
-		"tenantName", repoBinding.Spec.TenantName,
+		"pipelineName", repoBinding.Spec.PipelineName,
 		"permissionProfile", repoBinding.Spec.PermissionProfile)
 
 	steps := []provisioningStep{
@@ -252,9 +252,11 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 		if controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
 			logger.Info("Cleaning up RepoBinding resources")
 			
+			orgNamespace := fmt.Sprintf("org-%s", repoBinding.Spec.AphexOrg)
+			
 			trigger := &triggersv1beta1.Trigger{}
-			triggerName := fmt.Sprintf("%s-trigger", repoBinding.Spec.TenantName)
-			if err := r.Get(ctx, client.ObjectKey{Name: triggerName, Namespace: repoBinding.Spec.TenantName}, trigger); err == nil {
+			triggerName := fmt.Sprintf("%s-trigger", repoBinding.Spec.PipelineName)
+			if err := r.Get(ctx, client.ObjectKey{Name: triggerName, Namespace: orgNamespace}, trigger); err == nil {
 				logger.Info("Deleting Trigger", "name", triggerName)
 				if err := r.Delete(ctx, trigger); err != nil && !errors.IsNotFound(err) {
 					return fmt.Errorf("failed to delete Trigger: %w", err)
@@ -262,20 +264,11 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 			}
 			
 			triggerTemplate := &triggersv1beta1.TriggerTemplate{}
-			templateName := fmt.Sprintf("%s-trigger-template", repoBinding.Spec.TenantName)
-			if err := r.Get(ctx, client.ObjectKey{Name: templateName, Namespace: repoBinding.Spec.TenantName}, triggerTemplate); err == nil {
+			templateName := fmt.Sprintf("%s-trigger-template", repoBinding.Spec.PipelineName)
+			if err := r.Get(ctx, client.ObjectKey{Name: templateName, Namespace: orgNamespace}, triggerTemplate); err == nil {
 				logger.Info("Deleting TriggerTemplate", "name", templateName)
 				if err := r.Delete(ctx, triggerTemplate); err != nil && !errors.IsNotFound(err) {
 					return fmt.Errorf("failed to delete TriggerTemplate: %w", err)
-				}
-			}
-			
-			triggerBinding := &triggersv1beta1.TriggerBinding{}
-			bindingName := "github-push-binding"
-			if err := r.Get(ctx, client.ObjectKey{Name: bindingName, Namespace: repoBinding.Spec.TenantName}, triggerBinding); err == nil {
-				logger.Info("Deleting TriggerBinding", "name", bindingName)
-				if err := r.Delete(ctx, triggerBinding); err != nil && !errors.IsNotFound(err) {
-					return fmt.Errorf("failed to delete TriggerBinding: %w", err)
 				}
 			}
 			

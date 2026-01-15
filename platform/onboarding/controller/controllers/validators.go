@@ -55,12 +55,12 @@ func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding) error {
 	}
 
 	// Validate namespace name pattern
-	if err := validateNamespacePattern(rb.Spec.TenantName); err != nil {
+	if err := validateNamespacePattern(rb.Spec.PipelineName); err != nil {
 		return err
 	}
 
 	// Reject privileged namespace names
-	if err := validateNotPrivilegedNamespace(rb.Spec.TenantName); err != nil {
+	if err := validateNotPrivilegedNamespace(rb.Spec.PipelineName); err != nil {
 		return err
 	}
 
@@ -94,7 +94,7 @@ func validateOrganization(org string) error {
 func validateNamespacePattern(name string) error {
 	if !namespacePattern.MatchString(name) {
 		return &ValidationError{
-			Field:   "tenantName",
+			Field:   "pipelineName",
 			Message: "Namespace name must match pattern ^[a-z0-9-]+$",
 		}
 	}
@@ -106,7 +106,7 @@ func validateNotPrivilegedNamespace(name string) error {
 	for _, privileged := range privilegedNamespaces {
 		if name == privileged || strings.HasPrefix(name, privileged+"-") {
 			return &ValidationError{
-				Field:   "tenantName",
+				Field:   "pipelineName",
 				Message: fmt.Sprintf("Cannot create namespace with privileged name '%s'", name),
 			}
 		}

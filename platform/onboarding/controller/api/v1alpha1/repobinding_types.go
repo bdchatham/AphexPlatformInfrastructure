@@ -21,11 +21,6 @@ type RepoBindingSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
 	RepoName string `json:"repoName"`
 
-	// TenantName is the tenant namespace name
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
-	TenantName string `json:"tenantName"`
-
 	// PipelineName is the name of the Pipeline to trigger when webhooks are received
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
