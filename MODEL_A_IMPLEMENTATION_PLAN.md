@@ -388,14 +388,16 @@ var Profiles = map[string]ExecutionProfile{
 - [ ] All tests pass
 - [ ] No functional changes
 
-### Phase 1 Complete
-- [ ] PipelineContract type defined
-- [ ] Documented in api.md
+### Phase 1 Complete ✅
+- [x] PipelineContract type defined in AphexPipelineResources
+- [x] Documented in PIPELINE_CONTRACT.md
+- [x] Multi-repo support with array-based repo-full-name
 
-### Phase 2 Complete
-- [ ] run-pipeline-v1.yaml exists in AphexPipelineResources
-- [ ] Template is thin (no workflow logic)
-- [ ] Template uses canonical params
+### Phase 2 Complete ✅
+- [x] run-pipeline-v1.yaml exists in AphexPipelineResources
+- [x] Template is thin (no workflow logic)
+- [x] Template uses canonical params
+- [x] Template catalog documented
 
 ### Phase 3 Complete
 - [ ] TemplateCatalog implemented
