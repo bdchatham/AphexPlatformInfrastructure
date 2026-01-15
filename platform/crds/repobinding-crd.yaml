@@ -27,8 +27,8 @@ spec:
                 - aphexOrg
                 - repoOrg
                 - repoName
-                - tenantName
                 - pipelineName
+                - templateRef
               properties:
                 aphexOrg:
                   type: string
@@ -124,12 +124,12 @@ spec:
         - name: Repo
           type: string
           jsonPath: .spec.repoName
-        - name: Tenant
-          type: string
-          jsonPath: .spec.tenantName
         - name: Pipeline
           type: string
           jsonPath: .spec.pipelineName
+        - name: Template
+          type: string
+          jsonPath: .spec.templateRef
         - name: Phase
           type: string
           jsonPath: .status.phase
