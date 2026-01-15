@@ -26,10 +26,15 @@ type RepoBindingSpec struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
 	PipelineName string `json:"pipelineName"`
 
-	// PermissionProfile defines the RBAC permission level
+	// TemplateRef is the name of the dispatcher template to use
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default=run-pipeline-v1
+	TemplateRef string `json:"templateRef,omitempty"`
+
+	// ExecutionRole defines the execution profile (standard or elevated)
 	// +kubebuilder:validation:Enum=standard;elevated
 	// +kubebuilder:default=standard
-	PermissionProfile string `json:"permissionProfile,omitempty"`
+	ExecutionRole string `json:"executionRole,omitempty"`
 }
 
 // RepoBindingStatus defines the observed state of RepoBinding

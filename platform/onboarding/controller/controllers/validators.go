@@ -34,7 +34,7 @@ var (
 	pipelineNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 	// Valid permission profiles
-	validPermissionProfiles = []string{"standard", "elevated"}
+	validExecutionRoles = []string{"standard", "elevated"}
 )
 
 // ValidationError represents a validation failure
@@ -48,7 +48,7 @@ func (e *ValidationError) Error() string {
 }
 
 // ValidateRepoBinding validates a RepoBinding spec
-func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding) error {
+func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding, catalog *TemplateCatalog) error {
 	// Validate repository organization
 	if err := validateOrganization(rb.Spec.RepoOrg); err != nil {
 		return err
@@ -64,8 +64,13 @@ func ValidateRepoBinding(rb *platformv1alpha1.RepoBinding) error {
 		return err
 	}
 
-	// Validate permission profile
-	if err := validatePermissionProfile(rb.Spec.PermissionProfile); err != nil {
+	// Validate execution profile
+	if err := validateExecutionRole(rb.Spec.ExecutionRole); err != nil {
+		return err
+	}
+
+	// Validate template reference
+	if err := validateTemplateRef(rb.Spec.TemplateRef, catalog); err != nil {
 		return err
 	}
 
@@ -114,22 +119,41 @@ func validateNotPrivilegedNamespace(name string) error {
 	return nil
 }
 
-// validatePermissionProfile checks if the permission profile is valid
-func validatePermissionProfile(profile string) error {
+// validateExecutionRole checks if the execution profile is valid
+func validateExecutionRole(profile string) error {
 	// Default to "standard" if empty
 	if profile == "" {
 		return nil
 	}
 
-	for _, validProfile := range validPermissionProfiles {
+	for _, validProfile := range validExecutionRoles {
 		if profile == validProfile {
 			return nil
 		}
 	}
 	return &ValidationError{
-		Field:   "permissionProfile",
-		Message: "Permission profile must be 'standard' or 'elevated'",
+		Field:   "executionRole",
+		Message: "Execution profile must be 'standard' or 'elevated'",
 	}
+}
+
+// validateTemplateRef checks if the template exists in the catalog
+func validateTemplateRef(templateRef string, catalog *TemplateCatalog) error {
+	if templateRef == "" {
+		return &ValidationError{
+			Field:   "templateRef",
+			Message: "Template reference is required",
+		}
+	}
+
+	if !catalog.Exists(templateRef) {
+		return &ValidationError{
+			Field:   "templateRef",
+			Message: fmt.Sprintf("Template %q not found in catalog (available: %v)", templateRef, catalog.List()),
+		}
+	}
+
+	return nil
 }
 
 // validatePipelineName checks if the pipeline name matches the required pattern

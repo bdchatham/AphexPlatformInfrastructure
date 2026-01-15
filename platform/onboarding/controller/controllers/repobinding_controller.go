@@ -89,7 +89,7 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 		"repoOrg", repoBinding.Spec.RepoOrg,
 		"repoName", repoBinding.Spec.RepoName,
 		"pipelineName", repoBinding.Spec.PipelineName,
-		"permissionProfile", repoBinding.Spec.PermissionProfile)
+		"permissionProfile", repoBinding.Spec.ExecutionRole)
 
 	steps := []provisioningStep{
 		{name: "namespace", statusField: &repoBinding.Status.NamespaceCreated, provisionFunc: r.provisionNamespace},
@@ -330,7 +330,7 @@ func (r *RepoBindingReconciler) isAlreadyReady(logger logr.Logger, repoBinding *
 
 func (r *RepoBindingReconciler) validateAndUpdatePhase(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) error {
 	if repoBinding.Status.Phase == "Pending" {
-		if err := ValidateRepoBinding(repoBinding); err != nil {
+		if err := ValidateRepoBinding(repoBinding, r.TemplateCatalog); err != nil {
 			logger.Error(err, "Validation failed")
 			return r.updateStatusToFailed(ctx, request, repoBinding, fmt.Sprintf("Validation failed: %s", err.Error()))
 		}

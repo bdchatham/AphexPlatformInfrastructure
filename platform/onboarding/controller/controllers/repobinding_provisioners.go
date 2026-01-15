@@ -86,7 +86,7 @@ func (r *RepoBindingReconciler) provisionServiceAccount(ctx context.Context, rb 
 // provisionRBAC creates or updates the pipeline RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding)
 func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	// Determine permission profile (default to "standard")
-	profile := rb.Spec.PermissionProfile
+	profile := rb.Spec.ExecutionRole
 	if profile == "" {
 		profile = "standard"
 	}
@@ -622,9 +622,8 @@ func (r *RepoBindingReconciler) updateEventListenerNamespaces(ctx context.Contex
 func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	orgNamespace := fmt.Sprintf("org-%s", rb.Spec.AphexOrg)
 	
-	// Get template from catalog (default to run-pipeline-v1 for now)
-	templateName := "run-pipeline-v1"
-	template, err := r.TemplateCatalog.Get(templateName)
+	// Get template from catalog
+	template, err := r.TemplateCatalog.Get(rb.Spec.TemplateRef)
 	if err != nil {
 		return fmt.Errorf("failed to get template from catalog: %w", err)
 	}
@@ -640,7 +639,7 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	}
 	
 	r.Log.Info("Materialized template from catalog", 
-		"template", templateName, 
+		"template", rb.Spec.TemplateRef, 
 		"namespace", orgNamespace,
 		"name", triggerTemplate.Name)
 	
@@ -675,10 +674,10 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 				{Ref: "github-push-binding"},
 				{
 					Name: "pipeline-params",
-					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "execution-profile": "%s", "org-name": "%s"}`,
+					Value: stringPtr(fmt.Sprintf(`{"pipeline-name": "%s", "pipeline-namespace": "%s", "execution-role": "%s", "org-name": "%s"}`,
 						rb.Spec.PipelineName,
 						pipelineNamespace,
-						rb.Spec.PermissionProfile,
+						rb.Spec.ExecutionRole,
 						rb.Spec.AphexOrg)),
 				},
 			},
