@@ -11,11 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"gopkg.in/yaml.v3"
 
 	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
@@ -57,11 +55,6 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 	}
 
 	return nil
-}
-
-// setOwnerReference sets the RepoBinding as the owner of a resource
-func setOwnerReference(rb *platformv1alpha1.RepoBinding, obj client.Object, scheme *runtime.Scheme) error {
-	return controllerutil.SetControllerReference(rb, obj, scheme)
 }
 
 // provisionServiceAccount creates or updates the tenant service account
@@ -762,12 +755,6 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 
 	return nil
 }
-
-// stringPtr returns a pointer to a string
-func stringPtr(s string) *string {
-	return &s
-}
-
 
 // AllowlistEntry represents a repository entry in the allowlist
 type AllowlistEntry struct {
