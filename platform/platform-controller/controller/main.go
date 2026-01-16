@@ -12,8 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/platform-controller/api/v1alpha1"
-	"github.com/arbiter/jenkinsx-platform/platform-controller/controllers"
+	platformv1alpha1 "github.com/bdchatham/arbiter-platform-controller/api/v1alpha1"
+	"github.com/bdchatham/arbiter-platform-controller/controllers"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 

@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/platform-controller/api/v1alpha1"
+	platformv1alpha1 "github.com/bdchatham/arbiter-platform-controller/api/v1alpha1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 

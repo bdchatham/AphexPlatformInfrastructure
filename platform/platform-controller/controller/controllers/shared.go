@@ -5,7 +5,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/platform-controller/api/v1alpha1"
+	platformv1alpha1 "github.com/bdchatham/arbiter-platform-controller/api/v1alpha1"
 )
 
 // Shared utility functions used by multiple controllers

@@ -1,4 +1,4 @@
-module github.com/arbiter/jenkinsx-platform/platform-controller
+module github.com/bdchatham/arbiter-platform-controller
 
 go 1.24.0
 
