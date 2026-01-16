@@ -147,3 +147,35 @@ func validatePipelineName(name string) error {
 	}
 	return nil
 }
+
+// isValidBranchName checks if a Git branch name is valid
+// Git branch names must not contain: spaces, ~, ^, :, ?, *, [, \, .., @{, //
+// and must not start or end with a slash or dot
+func isValidBranchName(branch string) bool {
+	if branch == "" {
+		return false
+	}
+
+	// Check for invalid characters
+	invalidChars := []string{" ", "~", "^", ":", "?", "*", "[", "\\", "..", "@{", "//"}
+	for _, char := range invalidChars {
+		if strings.Contains(branch, char) {
+			return false
+		}
+	}
+
+	// Check if starts or ends with slash or dot
+	if strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") {
+		return false
+	}
+	if strings.HasPrefix(branch, ".") || strings.HasSuffix(branch, ".") {
+		return false
+	}
+
+	// Check if ends with .lock
+	if strings.HasSuffix(branch, ".lock") {
+		return false
+	}
+
+	return true
+}

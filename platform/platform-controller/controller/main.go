@@ -83,6 +83,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.KnowledgeBaseReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "KnowledgeBase")
+		os.Exit(1)
+	}
+
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", func(req *http.Request) error { return nil }); err != nil {
 		setupLog.Error(err, "unable to set up health check")

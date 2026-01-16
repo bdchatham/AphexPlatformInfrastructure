@@ -46,6 +46,22 @@ rules:
   - get
   - update
   - patch
+
+# KnowledgeBase CRD permissions
+- apiGroups:
+  - arbiter.io
+  resources:
+  - knowledgebases
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - arbiter.io
+  resources:
+  - knowledgebases/status
   verbs:
   - get
   - update
