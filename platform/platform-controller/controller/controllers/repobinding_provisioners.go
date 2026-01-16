@@ -1,22 +1,23 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8syaml "sigs.k8s.io/yaml"
 
 	platformv1alpha1 "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/api/v1alpha1"
+	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
@@ -59,41 +60,29 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 
 // provisionPipeline creates the Tekton Pipeline resource from the spec
 func (r *RepoBindingReconciler) provisionPipeline(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
-	// Parse the pipeline YAML from the spec
-	pipeline := &unstructured.Unstructured{}
-	if err := yaml.Unmarshal([]byte(rb.Spec.PipelineSpec), pipeline); err != nil {
-		r.Log.Error(err, "Failed to parse pipeline YAML", "pipelineSpec", rb.Spec.PipelineSpec)
+	// Decode YAML using Kubernetes decoder (handles JSON tags properly)
+	pipeline := &tektonv1.Pipeline{}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(rb.Spec.PipelineSpec)), 4096)
+	if err := decoder.Decode(pipeline); err != nil {
+		r.Log.Error(err, "Failed to parse pipeline YAML")
 		return fmt.Errorf("failed to parse pipeline YAML: %w", err)
 	}
 
-	// Validate it's a Tekton Pipeline
-	kind := pipeline.GetKind()
-	r.Log.Info("Parsed pipeline", "kind", kind, "apiVersion", pipeline.GetAPIVersion())
+	r.Log.Info("Parsed pipeline", "originalName", pipeline.Name, "kind", pipeline.Kind, "apiVersion", pipeline.APIVersion)
 
-	if kind != "Pipeline" {
-		return fmt.Errorf("pipelineSpec must contain a Tekton Pipeline resource (kind: Pipeline), got: %s", kind)
-	}
-	apiVersion := pipeline.GetAPIVersion()
-	if apiVersion != "tekton.dev/v1beta1" && apiVersion != "tekton.dev/v1" {
-		return fmt.Errorf("pipelineSpec must have apiVersion tekton.dev/v1beta1 or tekton.dev/v1, got: %s", apiVersion)
-	}
-
-	// Set name and namespace from RepoBinding
-	pipeline.SetName(rb.Spec.PipelineName)
-	pipeline.SetNamespace(rb.Spec.PipelineName)
+	// Set name and namespace from RepoBinding (override whatever is in the YAML)
+	pipeline.Name = rb.Spec.PipelineName
+	pipeline.Namespace = rb.Spec.PipelineName
 
 	// Add labels for tracking
-	labels := pipeline.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
+	if pipeline.Labels == nil {
+		pipeline.Labels = make(map[string]string)
 	}
-	labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
-	labels["platform.arbiter.io/managed-by"] = "platform-controller"
-	pipeline.SetLabels(labels)
+	pipeline.Labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
+	pipeline.Labels["platform.arbiter.io/managed-by"] = "platform-controller"
 
 	// Check if pipeline already exists
-	existingPipeline := &unstructured.Unstructured{}
-	existingPipeline.SetGroupVersionKind(pipeline.GroupVersionKind())
+	existingPipeline := &tektonv1.Pipeline{}
 	err := r.Get(ctx, client.ObjectKey{Name: rb.Spec.PipelineName, Namespace: rb.Spec.PipelineName}, existingPipeline)
 
 	if err != nil {
@@ -108,7 +97,7 @@ func (r *RepoBindingReconciler) provisionPipeline(ctx context.Context, rb *platf
 	}
 
 	r.Log.Info("Pipeline already exists, updating", "name", rb.Spec.PipelineName, "namespace", rb.Spec.PipelineName)
-	pipeline.SetResourceVersion(existingPipeline.GetResourceVersion())
+	pipeline.ResourceVersion = existingPipeline.ResourceVersion
 	if err := r.Update(ctx, pipeline); err != nil {
 		return fmt.Errorf("failed to update Pipeline: %w", err)
 	}
@@ -820,7 +809,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 			}
 
 			// Marshal back to YAML and update ConfigMap
-			updatedYAML, err := yaml.Marshal(&allowlist)
+			updatedYAML, err := k8syaml.Marshal(&allowlist)
 			if err != nil {
 				return fmt.Errorf("failed to marshal updated allowlist: %w", err)
 			}
@@ -845,7 +834,7 @@ func (r *RepoBindingReconciler) provisionAllowlistEntry(ctx context.Context, rb 
 	allowlist.Repos = append(allowlist.Repos, newEntry)
 
 	// Marshal back to YAML
-	updatedYAML, err := yaml.Marshal(&allowlist)
+	updatedYAML, err := k8syaml.Marshal(&allowlist)
 	if err != nil {
 		return fmt.Errorf("failed to marshal updated allowlist: %w", err)
 	}
@@ -949,14 +938,8 @@ func (r *RepoBindingReconciler) findPipelineNamespace(ctx context.Context, pipel
 	for _, ns := range namespaceList.Items {
 		namespace := ns.Name
 
-		// Try to get the pipeline in this namespace using unstructured client
-		pipeline := &unstructured.Unstructured{}
-		pipeline.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   "tekton.dev",
-			Version: "v1",
-			Kind:    "Pipeline",
-		})
-
+		// Try to get the pipeline in this namespace using typed client
+		pipeline := &tektonv1.Pipeline{}
 		err := r.Get(ctx, client.ObjectKey{
 			Name:      pipelineName,
 			Namespace: namespace,
