@@ -3,14 +3,13 @@ name: Build and Push Platform Controller Image
 on:
   push:
     branches:
-      - main
-      - develop
+      - mainline
     paths:
       - 'platform/platform-controller/controller/**'
       - '.github/workflows/platform-controller-image.yaml'
   pull_request:
     branches:
-      - main
+      - mainline
     paths:
       - 'platform/platform-controller/controller/**'
   workflow_dispatch:
