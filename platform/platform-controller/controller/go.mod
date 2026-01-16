@@ -1,4 +1,4 @@
-module github.com/bdchatham/arbiter-platform-controller
+module github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller
 
 go 1.24.0
 
