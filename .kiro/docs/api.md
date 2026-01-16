@@ -278,7 +278,7 @@ The onboarding controller watches RepoBinding resources and provisions tenant in
 **Reconciliation Process**:
 1. **Validation**: Validates RepoBinding spec and checks Organization exists
 2. **Namespace Creation**: Creates pipeline namespace (`{pipelineName}`) with proper labels
-3. **Pipeline Creation**: Parses `pipelineSpec` and creates Tekton Pipeline resource in pipeline namespace
+3. **Pipeline Creation**: Parses `pipelineSpec` using Kubernetes YAML decoder and creates typed Tekton Pipeline resource in pipeline namespace. The controller uses `tektonv1.Pipeline` structs for compile-time type safety and proper handling of Tekton's custom JSON unmarshaling (e.g., `ParamValue` types).
 4. **RBAC Setup**: Creates ServiceAccount, Role, RoleBinding, ClusterRole, and ClusterRoleBinding
 5. **Resource Quotas**: Applies resource limits (CPU, memory, pods, PVCs)
 6. **Network Policies**: Configures network isolation with egress to internet and DNS

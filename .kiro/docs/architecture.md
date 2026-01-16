@@ -215,6 +215,26 @@ For operational procedures on creating organizations and repo bindings, see [ope
 - `platform/crds/organization-crd.yaml` - Organization CRD
 - `platform/crds/repobinding-crd.yaml` - RepoBinding CRD
 
+#### Controller Implementation
+
+The platform controller uses typed Kubernetes client libraries for type safety and proper resource handling:
+
+**Typed Tekton Pipeline Processing**:
+- Uses `tektonv1.Pipeline` structs instead of unstructured data
+- Kubernetes YAML decoder (`k8s.io/apimachinery/pkg/util/yaml`) handles Tekton's custom JSON unmarshaling
+- Registered Tekton v1 types in controller runtime scheme
+- Provides compile-time type safety and IDE support
+
+**Benefits**:
+- Compile-time validation of Pipeline structure
+- Proper handling of Tekton-specific types (e.g., `ParamValue`)
+- Better error messages and debugging
+- Clearer code that's easier to maintain
+
+**Source**
+- `platform/platform-controller/controller/controllers/repobinding_provisioners.go` - Typed Pipeline parsing
+- `platform/platform-controller/controller/main.go` - Scheme registration
+
 ## Networking Architecture
 
 The platform uses a dual-domain strategy to separate public webhook endpoints from private platform services.
