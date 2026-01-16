@@ -90,7 +90,7 @@ spec:
 - `webhookURL`: Public webhook endpoint (e.g., `https://acme-corp.arbiter-dev.com`)
 - `phase`: `Pending`, `Active`, or `Failed`
 
-**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
+**Source**: `platform/crds/organization-crd.yaml`, `platform/platform-controller/controller/controllers/organization_controller.go`
 
 ### Delete Organization
 
@@ -105,7 +105,7 @@ kubectl delete organization acme-corp -n platform-system
 4. Deletes ClusterRoleBinding for EventListener
 5. Deletes organization namespace (cascades all resources)
 
-**Source**: `platform/onboarding/controller/controllers/organization_controller.go`
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go`
 
 ## RepoBinding API
 
@@ -154,7 +154,7 @@ spec:
 
 For data model details, see [data-models.md](data-models.md#repobinding-data-model).
 
-**Source**: `platform/crds/repobinding-crd.yaml`, `platform/onboarding/controller/controllers/repobinding_controller.go`
+**Source**: `platform/crds/repobinding-crd.yaml`, `platform/platform-controller/controller/controllers/repobinding_controller.go`
 
 ### RepoBinding Status
 
@@ -297,9 +297,9 @@ The onboarding controller watches RepoBinding resources and provisions tenant in
 
 **Source**
 - `platform/crds/repobinding-crd.yaml` - RepoBinding CRD definition
-- `platform/onboarding/controller/api/v1alpha1/repobinding_types.go` - RepoBinding Go types
-- `platform/onboarding/controller/controllers/repobinding_controller.go` - Controller reconciliation logic
-- `platform/onboarding/controller/controllers/repobinding_provisioners.go` - Resource provisioning functions
+- `platform/platform-controller/controller/api/v1alpha1/repobinding_types.go` - RepoBinding Go types
+- `platform/platform-controller/controller/controllers/repobinding_controller.go` - Controller reconciliation logic
+- `platform/platform-controller/controller/controllers/repobinding_provisioners.go` - Resource provisioning functions
 
 ## Platform Services API
 
@@ -468,7 +468,7 @@ metadata:
   labels:
     platform.arbiter.io/tenant: "${TENANT_NAME}"
     platform.arbiter.io/repo: "${REPO_ORG}/${REPO_NAME}"
-    platform.arbiter.io/managed-by: "onboarding-controller"
+    platform.arbiter.io/managed-by: "platform-controller"
 ```
 
 ### Service Account
@@ -545,7 +545,7 @@ metadata:
   name: pipeline-runner-${TENANT_NAME}
   labels:
     platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/managed-by: "onboarding-controller"
+    platform.arbiter.io/managed-by: "platform-controller"
 rules:
   - apiGroups: ["triggers.tekton.dev"]
     resources: ["clusterinterceptors", "clustertriggerbindings"]
@@ -563,7 +563,7 @@ metadata:
   name: pipeline-runner-${TENANT_NAME}
   labels:
     platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/managed-by: "onboarding-controller"
+    platform.arbiter.io/managed-by: "platform-controller"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -1343,6 +1343,6 @@ contexts:
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`
 - `platform/crds/repobinding-crd.yaml`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/tenancy/templates/`
 - `platform/argocd/apps/`

@@ -210,8 +210,8 @@ graph TB
 For operational procedures on creating organizations and repo bindings, see [operations.md](operations.md#organization-and-repository-registration).
 
 **Source**
-- `platform/onboarding/controller/controllers/organization_controller.go` - Organization provisioning
-- `platform/onboarding/controller/controllers/repobinding_controller.go` - RepoBinding provisioning
+- `platform/platform-controller/controller/controllers/organization_controller.go` - Organization provisioning
+- `platform/platform-controller/controller/controllers/repobinding_controller.go` - RepoBinding provisioning
 - `platform/crds/organization-crd.yaml` - Organization CRD
 - `platform/crds/repobinding-crd.yaml` - RepoBinding CRD
 
@@ -412,7 +412,7 @@ graph LR
 For troubleshooting webhook delivery issues, see [operations.md](operations.md#test-webhook-endpoint).
 
 **Source**
-- `platform/onboarding/controller/controllers/organization_controller.go` - Tunnel provisioning
+- `platform/platform-controller/controller/controllers/organization_controller.go` - Tunnel provisioning
 - Cloudflare Tunnel documentation: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
 
 ## Layered cert-manager Architecture
@@ -749,7 +749,7 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 
 **Namespace**: `platform-system` (controllers), `org-{name}` (tenant resources)
 
-**Installation**: Managed by ArgoCD from `platform/onboarding/`
+**Installation**: Managed by ArgoCD from `platform/platform-controller/`
 
 #### Organization Controller
 
@@ -779,8 +779,8 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 5. Delete organization namespace (cascades all resources)
 
 **Source**
-- `platform/onboarding/controller/controllers/organization_controller.go` - Controller implementation
-- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - CRD definition
+- `platform/platform-controller/controller/controllers/organization_controller.go` - Controller implementation
+- `platform/platform-controller/controller/api/v1alpha1/organization_types.go` - CRD definition
 - `platform/rbac/eventlistener-rbac.yaml` - EventListener ClusterRole
 
 #### RepoBinding Controller
@@ -838,16 +838,16 @@ GitHub → {org}.arbiter-dev.com → Cloudflare DNS → Cloudflare Edge (SSL) �
 - No manual DNS configuration required
 
 **Source**
-- `platform/onboarding/controller/controllers/organization_controller.go` - Tunnel and DNS provisioning
+- `platform/platform-controller/controller/controllers/organization_controller.go` - Tunnel and DNS provisioning
 - `platform/rbac/eventlistener-rbac.yaml` - EventListener ClusterRole definition
 - No router port forwarding required
 - Independent scaling per organization
 
 **Source**
-- `platform/onboarding/controller/` (Go source code)
-- `platform/onboarding/controller-deployment.yaml`
-- `platform/onboarding/controller-rbac.yaml`
-- `platform/onboarding/controller-service-account.yaml`
+- `platform/platform-controller/controller/` (Go source code)
+- `platform/platform-controller/controller-deployment.yaml`
+- `platform/platform-controller/controller-rbac.yaml`
+- `platform/platform-controller/controller-service-account.yaml`
 
 ### 6. Tekton EventListener (Per Tenant)
 
@@ -1232,6 +1232,6 @@ Container images are versioned and immutable. Infrastructure changes are deploye
 - `platform/auth/config-sync/`
 - `platform/auth/ingress/`
 - `platform/crds/repobinding-crd.yaml`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/catalog/`
 - `platform/tenancy/templates/`

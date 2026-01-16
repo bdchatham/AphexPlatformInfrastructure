@@ -28,7 +28,7 @@ ArgoCD manages all platform components declaratively from Git using the app-of-a
 ### Organizations
 Organizations provide multi-tenant isolation with dedicated namespaces (`org-{name}`), EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels. Multiple pipelines can belong to a single organization, sharing the webhook infrastructure.
 
-**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/crds/organization-crd.yaml`
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go`, `platform/crds/organization-crd.yaml`
 
 ### Public vs Local Domains
 The platform uses two domain strategies:
@@ -47,14 +47,14 @@ Authentik Identity Provider with Dex OIDC connector provides SSO for all platfor
 ### Multi-Tenant Isolation
 Organizations (tenants) receive dedicated namespaces (`org-{name}`) with shared webhook infrastructure. Each pipeline within an organization gets its own namespace (`{pipeline-name}`) with RBAC boundaries, resource quotas, network policies, and isolated pipeline execution. See [api.md](api.md#repobinding-api) for onboarding details.
 
-**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/onboarding/controller/controllers/repobinding_controller.go`
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go`, `platform/platform-controller/controller/controllers/repobinding_controller.go`
 
 ### Self-Service Onboarding
-Users create Organization or RepoBinding resources to automatically provision organization and pipeline infrastructure. The onboarding controller reconciles these CRDs and creates all necessary Kubernetes resources.
+Users create Organization or RepoBinding resources to automatically provision organization and pipeline infrastructure. The platform controller reconciles these CRDs and creates all necessary Kubernetes resources.
 
 For operational procedures, see [operations.md](operations.md#organization-and-repository-registration).
 
-**Source**: `platform/onboarding/controller/controllers/organization_controller.go`, `platform/onboarding/controller/controllers/repobinding_controller.go`
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go`, `platform/platform-controller/controller/controllers/repobinding_controller.go`
 
 ## Design Principles
 
@@ -163,7 +163,7 @@ This creates:
 For detailed onboarding procedures, see [operations.md](operations.md#bootstrap-organization).
 For Organization API details, see [api.md](api.md#organization-api).
 
-**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
+**Source**: `platform/crds/organization-crd.yaml`, `platform/platform-controller/controller/controllers/organization_controller.go`
 
 ## System Benefits
 

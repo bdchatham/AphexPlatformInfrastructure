@@ -134,7 +134,7 @@ spec:
         - name: source
           workspace: source
 
-    - name: apply-onboarding-controller
+    - name: apply-platform-controller
       taskRef:
         name: kubectl-apply
         kind: Task
@@ -142,7 +142,7 @@ spec:
         - upgrade-lighthouse
       params:
         - name: manifest-dir
-          value: "platform/onboarding"
+          value: "platform/platform-controller"
         - name: recursive
           value: "false"
         - name: namespace
@@ -156,7 +156,7 @@ spec:
         name: kubectl-apply
         kind: Task
       runAfter:
-        - apply-onboarding-controller
+        - apply-platform-controller
       params:
         - name: manifest-dir
           value: "platform/catalog"

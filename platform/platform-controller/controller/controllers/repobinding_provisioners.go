@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"gopkg.in/yaml.v3"
 
-	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
+	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/platform-controller/api/v1alpha1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
@@ -30,7 +30,7 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 			Labels: map[string]string{
 				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
 				"platform.arbiter.io/repo":       repoLabel,
-				"platform.arbiter.io/managed-by": "onboarding-controller",
+				"platform.arbiter.io/managed-by": "platform-controller",
 			},
 		},
 	}
@@ -84,7 +84,7 @@ func (r *RepoBindingReconciler) provisionPipeline(ctx context.Context, rb *platf
 		labels = make(map[string]string)
 	}
 	labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
-	labels["platform.arbiter.io/managed-by"] = "onboarding-controller"
+	labels["platform.arbiter.io/managed-by"] = "platform-controller"
 	pipeline.SetLabels(labels)
 
 	// Check if pipeline already exists
@@ -240,7 +240,7 @@ func (r *RepoBindingReconciler) provisionClusterRole(ctx context.Context, rb *pl
 			Name: clusterRoleName,
 			Labels: map[string]string{
 				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by": "onboarding-controller",
+				"platform.arbiter.io/managed-by": "platform-controller",
 			},
 		},
 		Rules: []rbacv1.PolicyRule{
@@ -285,7 +285,7 @@ func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context,
 			Name: clusterRoleBindingName,
 			Labels: map[string]string{
 				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by": "onboarding-controller",
+				"platform.arbiter.io/managed-by": "platform-controller",
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
@@ -686,7 +686,7 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	triggerTemplate.Labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
 	
 	// Apply the TriggerTemplate
-	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
+	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("platform-controller")); err != nil {
 		return fmt.Errorf("failed to apply TriggerTemplate: %w", err)
 	}
 	
@@ -717,7 +717,7 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 			Namespace: orgNamespace,
 			Labels: map[string]string{
 				"platform.arbiter.io/pipeline":     rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by":   "onboarding-controller",
+				"platform.arbiter.io/managed-by":   "platform-controller",
 				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
 			},
 		},
@@ -738,7 +738,7 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 		},
 	}
 
-	if err := r.Client.Patch(ctx, trigger, client.Apply, client.ForceOwnership, client.FieldOwner("onboarding-controller")); err != nil {
+	if err := r.Client.Patch(ctx, trigger, client.Apply, client.ForceOwnership, client.FieldOwner("platform-controller")); err != nil {
 		return fmt.Errorf("failed to apply Trigger: %w", err)
 	}
 

@@ -390,7 +390,7 @@ The platform upgrades itself via ArgoCD when manifests change in Git:
 
 ```bash
 # Update component manifests in Git
-vi platform/onboarding/controller-deployment.yaml  # Update image tag
+vi platform/platform-controller/controller-deployment.yaml  # Update image tag
 
 # Commit changes
 git add .
@@ -545,13 +545,13 @@ kubectl patch application platform-root -n argocd --type merge -p '{"operation":
 **Resolution**:
 ```bash
 # Check controller logs
-kubectl logs -n platform-system -l app=onboarding-controller --tail=100
+kubectl logs -n platform-system -l app=platform-controller --tail=100
 
 # Check controller pod status
-kubectl get pods -n platform-system -l app=onboarding-controller
+kubectl get pods -n platform-system -l app=platform-controller
 
 # Restart controller if needed
-kubectl rollout restart deployment onboarding-controller -n platform-system
+kubectl rollout restart deployment platform-controller -n platform-system
 ```
 
 ### Why is my EventListener pod crashing?

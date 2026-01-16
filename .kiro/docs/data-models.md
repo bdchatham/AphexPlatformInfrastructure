@@ -114,9 +114,9 @@ interface DNSRecord {
 ```
 
 **Source**
-- `platform/onboarding/controller/api/v1alpha1/organization_types.go` - Go type definition
+- `platform/platform-controller/controller/api/v1alpha1/organization_types.go` - Go type definition
 - `platform/crds/organization-crd.yaml` - CRD definition
-- `platform/onboarding/controller/controllers/organization_controller.go` - Status management and tunnel provisioning
+- `platform/platform-controller/controller/controllers/organization_controller.go` - Status management and tunnel provisioning
 
 ## RepoBinding Data Model
 
@@ -674,7 +674,7 @@ terraform {
 interface NamespaceLabels {
   "arbiter.io/tenant": string;      // Tenant name
   "arbiter.io/repo": string;        // Repository (org/name)
-  "arbiter.io/managed-by": string;  // "onboarding-controller"
+  "arbiter.io/managed-by": string;  // "platform-controller"
 }
 ```
 
@@ -683,7 +683,7 @@ interface NamespaceLabels {
 labels:
   arbiter.io/tenant: "archon"
   arbiter.io/repo: "your-github-org/archon-agent"
-  arbiter.io/managed-by: "onboarding-controller"
+  arbiter.io/managed-by: "platform-controller"
 ```
 
 ### Resource Quota Spec
@@ -1580,6 +1580,6 @@ Config Sync Job uses API token to configure Authentik
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`
 - `platform/crds/repobinding-crd.yaml`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/tenancy/templates/`
 - `platform/argocd/apps/`

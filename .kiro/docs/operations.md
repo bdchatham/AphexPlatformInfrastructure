@@ -300,7 +300,7 @@ EOF
 6. Organization admin RBAC
 7. Webhook secret for GitHub integration
 
-**Source**: `platform/crds/organization-crd.yaml`, `platform/onboarding/controller/controllers/organization_controller.go`
+**Source**: `platform/crds/organization-crd.yaml`, `platform/platform-controller/controller/controllers/organization_controller.go`
 
 ### Verify Organization Bootstrap
 
@@ -358,7 +358,7 @@ kubectl logs -n org-acme-corp -l eventlistener=github-listener -f
 kubectl get pipelineruns -n org-acme-corp
 ```
 
-**Source**: `platform/onboarding/controller/controllers/organization_controller.go`
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go`
 
 ### Create RepoBinding
 
@@ -390,7 +390,7 @@ EOF
 - `templateRef`: Dispatcher template name (e.g., `run-pipeline-v1`)
 - `ingressHost`: Optional webhook hostname (defaults to cluster ingress)
 
-**Source**: `platform/crds/repobinding-crd.yaml`, `platform/onboarding/controller/controllers/repobinding_controller.go`
+**Source**: `platform/crds/repobinding-crd.yaml`, `platform/platform-controller/controller/controllers/repobinding_controller.go`
 
 ### Verify Onboarding
 
@@ -443,7 +443,7 @@ kubectl get repobinding my-repo-binding -n pipeline-system -o yaml
 
 **Source**
 - `platform/crds/repobinding-crd.yaml`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 
 ## Authentication System Operations
 
@@ -918,7 +918,7 @@ cd ArbiterPipelineInfrastructure
 
 # Update component manifests
 # Example: Update controller image
-vi platform/onboarding/controller-deployment.yaml  # Update image tag
+vi platform/platform-controller/controller-deployment.yaml  # Update image tag
 
 # Commit changes
 git add .
@@ -998,8 +998,8 @@ kubectl get pods -n argocd
 # Check Tekton controllers
 kubectl get pods -n tekton-pipelines
 
-# Check onboarding controller
-kubectl get pods -n platform-system -l app=onboarding-controller
+# Check platform controller
+kubectl get pods -n platform-system -l app=platform-controller
 
 # Check ArgoCD Applications
 kubectl get application -n argocd
@@ -1054,18 +1054,18 @@ kubectl logs -n org-<organization-name> -l eventlistener=github-listener | grep 
 
 ```bash
 # View controller logs
-kubectl logs -n platform-system -l app=onboarding-controller --tail=100
+kubectl logs -n platform-system -l app=platform-controller --tail=100
 
 # Stream controller logs
-kubectl logs -n platform-system -l app=onboarding-controller -f
+kubectl logs -n platform-system -l app=platform-controller -f
 
 # Search for specific RepoBinding
-kubectl logs -n platform-system -l app=onboarding-controller | grep "repobinding-name"
+kubectl logs -n platform-system -l app=platform-controller | grep "repobinding-name"
 ```
 
 **Source**
 - `platform/argocd/apps/`
-- `platform/onboarding/controller-deployment.yaml`
+- `platform/platform-controller/controller-deployment.yaml`
 
 ## Troubleshooting
 
@@ -1147,7 +1147,7 @@ kubectl get clusterrolebinding pipeline-runner-<pipeline-name>
 kubectl delete pod -n org-<organization-name> -l eventlistener=github-listener
 ```
 
-**Prevention**: Ensure onboarding controller has permissions to create ClusterRoles and ClusterRoleBindings (check `platform/onboarding/controller-rbac.yaml`).
+**Prevention**: Ensure platform controller has permissions to create ClusterRoles and ClusterRoleBindings (check `platform/platform-controller/controller-rbac.yaml`).
 
 ### Repository Not Triggering Pipelines
 
@@ -1208,7 +1208,7 @@ kubectl get repobinding <name> -n platform-system
 kubectl describe repobinding <name> -n platform-system
 
 # Check controller logs
-kubectl logs -n platform-system -l app=onboarding-controller | grep "<name>"
+kubectl logs -n platform-system -l app=platform-controller | grep "<name>"
 ```
 
 **Common Issues**:
@@ -1245,7 +1245,7 @@ kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller
 
 **Source**
 - `platform/argocd/apps/`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/catalog/`
 
 ## Disaster Recovery
@@ -1293,7 +1293,7 @@ kubectl apply -f repobindings-backup.yaml
 
 # Verify onboarding
 kubectl get repobindings -n platform-system
-kubectl get namespaces -l arbiter.io/managed-by=onboarding-controller
+kubectl get namespaces -l arbiter.io/managed-by=platform-controller
 ```
 
 **Step 4: Verify Platform**
@@ -1305,7 +1305,7 @@ kubectl get pods -n tekton-pipelines
 kubectl get pods -n platform-system
 
 # Check organization namespaces
-kubectl get namespaces -l arbiter.io/managed-by=onboarding-controller
+kubectl get namespaces -l arbiter.io/managed-by=platform-controller
 
 # Check ArgoCD sync status
 kubectl get application -n argocd
@@ -1374,10 +1374,10 @@ kubectl exec -n argocd -it <argocd-repo-server-pod> -- git ls-remote https://git
 
 ```bash
 # Check controller logs
-kubectl logs -n platform-system -l app=onboarding-controller --tail=100
+kubectl logs -n platform-system -l app=platform-controller --tail=100
 
 # Check controller pod status
-kubectl get pods -n platform-system -l app=onboarding-controller
+kubectl get pods -n platform-system -l app=platform-controller
 
 # Check RepoBinding status
 kubectl describe repobinding <name> -n platform-system
@@ -1387,10 +1387,10 @@ kubectl describe repobinding <name> -n platform-system
 1. Verify controller is running
 2. Check controller logs for errors
 3. Verify controller has RBAC permissions
-4. Restart controller if needed: `kubectl rollout restart deployment onboarding-controller -n platform-system`
+4. Restart controller if needed: `kubectl rollout restart deployment platform-controller -n platform-system`
 
 **Source**
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/argocd/apps/`
 - `platform/tenancy/templates/`
 
@@ -1449,17 +1449,17 @@ kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.0/manif
 
 ```bash
 # Build new version
-cd platform/onboarding/controller
-docker build -t your-registry/onboarding-controller:v1.1.0 .
-docker push your-registry/onboarding-controller:v1.1.0
+cd platform/platform-controller/controller
+docker build -t your-registry/platform-controller:v1.1.0 .
+docker push your-registry/platform-controller:v1.1.0
 
 # Update deployment manifest
-vi platform/onboarding/controller-deployment.yaml
+vi platform/platform-controller/controller-deployment.yaml
 # Update image tag to v1.1.0
 
 # Commit changes
-git add platform/onboarding/controller-deployment.yaml
-git commit -m "Update onboarding controller to v1.1.0"
+git add platform/platform-controller/controller-deployment.yaml
+git commit -m "Update platform controller to v1.1.0"
 git push
 
 # ArgoCD will automatically sync and update the controller
@@ -1501,7 +1501,7 @@ kubectl get pipelineruns --all-namespaces -o json | \
 
 **Source**
 - `platform/bootstrap/bootstrap.sh`
-- `platform/onboarding/controller-deployment.yaml`
+- `platform/platform-controller/controller-deployment.yaml`
 - `platform/catalog/`
 
 ## Security
@@ -1551,7 +1551,7 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 ```
 
 **Source**
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/tenancy/templates/`
 
 ## Runbooks
@@ -1663,13 +1663,13 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 
 **Source**
 - `platform/crds/repobinding-crd.yaml`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 
 **Source**
 - `.kiro/specs/argocd-tekton-platform/design.md`
 - `.kiro/specs/argocd-tekton-platform/requirements.md`
 - `platform/bootstrap/bootstrap.sh`
 - `platform/argocd/apps/`
-- `platform/onboarding/controller/`
+- `platform/platform-controller/controller/`
 - `platform/catalog/`
 - `platform/tenancy/templates/`

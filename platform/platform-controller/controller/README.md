@@ -1,6 +1,6 @@
-# Onboarding Controller
+# Platform Controller
 
-The onboarding controller is a Kubernetes operator that automates tenant provisioning for the Jenkins X platform. It watches for `RepoBinding` custom resources and provisions all necessary tenant infrastructure.
+The platform controller is a Kubernetes operator that automates tenant provisioning for the Arbiter Pipeline Infrastructure platform. It watches for `RepoBinding` and `Organization` custom resources and provisions all necessary tenant infrastructure.
 
 ## Features
 
@@ -20,10 +20,10 @@ The onboarding controller is a Kubernetes operator that automates tenant provisi
 make build
 
 # Build the Docker image
-make docker-build IMG=localhost:5000/onboarding-controller:latest
+make docker-build IMG=localhost:5000/platform-controller:latest
 
 # Push the Docker image
-make docker-push IMG=localhost:5000/onboarding-controller:latest
+make docker-push IMG=localhost:5000/platform-controller:latest
 ```
 
 ## Running Locally
@@ -156,7 +156,7 @@ Edit `controllers/validators.go` and add validation functions. Update the `Valid
 Check the controller logs:
 
 ```bash
-kubectl logs -n pipeline-system deployment/onboarding-controller
+kubectl logs -n pipeline-system deployment/platform-controller
 ```
 
 ### RepoBinding Stuck in Provisioning
@@ -170,7 +170,7 @@ kubectl describe repobinding <name> -n pipeline-system
 Check controller logs for errors:
 
 ```bash
-kubectl logs -n pipeline-system deployment/onboarding-controller | grep ERROR
+kubectl logs -n pipeline-system deployment/platform-controller | grep ERROR
 ```
 
 ### Validation Failures

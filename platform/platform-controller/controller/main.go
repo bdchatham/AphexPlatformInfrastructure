@@ -12,8 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/onboarding-controller/api/v1alpha1"
-	"github.com/arbiter/jenkinsx-platform/onboarding-controller/controllers"
+	platformv1alpha1 "github.com/arbiter/jenkinsx-platform/platform-controller/api/v1alpha1"
+	"github.com/arbiter/jenkinsx-platform/platform-controller/controllers"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )
 
@@ -52,7 +52,7 @@ func main() {
 		Metrics:                server.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "onboarding-controller.platform.arbiter.io",
+		LeaderElectionID:       "platform-controller.platform.arbiter.io",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

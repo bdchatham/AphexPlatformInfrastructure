@@ -5,7 +5,7 @@ metadata:
   namespace: {{TENANT_NAME}}
   labels:
     arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "onboarding-controller"
+    arbiter.io/managed-by: "platform-controller"
 spec:
   limits:
     # Container limits

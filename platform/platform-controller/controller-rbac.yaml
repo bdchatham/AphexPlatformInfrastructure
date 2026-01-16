@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: onboarding-controller
+  name: platform-controller
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 rules:
@@ -295,23 +295,23 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: onboarding-controller
+  name: platform-controller
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: onboarding-controller
+  name: platform-controller
 subjects:
 - kind: ServiceAccount
-  name: onboarding-controller
+  name: platform-controller
   namespace: platform-system
 ---
 # Additional Tekton triggers permissions for missing resources
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: onboarding-controller-additional
+  name: platform-controller-additional
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 rules:
@@ -331,14 +331,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: onboarding-controller-additional
+  name: platform-controller-additional
   annotations:
     argocd.argoproj.io/sync-wave: "1"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: onboarding-controller-additional
+  name: platform-controller-additional
 subjects:
 - kind: ServiceAccount
-  name: onboarding-controller
+  name: platform-controller
   namespace: platform-system

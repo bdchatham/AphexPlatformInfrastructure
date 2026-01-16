@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: onboarding-controller
+  name: platform-controller
   namespace: platform-system
   labels:
-    app: onboarding-controller
+    app: platform-controller
     component: controller
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -12,16 +12,16 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: onboarding-controller
+      app: platform-controller
   template:
     metadata:
       labels:
-        app: onboarding-controller
+        app: platform-controller
     spec:
-      serviceAccountName: onboarding-controller
+      serviceAccountName: platform-controller
       containers:
       - name: manager
-        image: ghcr.io/bdchatham/onboarding-controller:latest
+        image: ghcr.io/bdchatham/platform-controller:latest
         imagePullPolicy: Always
         command:
         - /manager

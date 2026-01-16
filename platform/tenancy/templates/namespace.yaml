@@ -4,6 +4,6 @@ metadata:
   name: {{TENANT_NAME}}
   labels:
     arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "onboarding-controller"
+    arbiter.io/managed-by: "platform-controller"
     arbiter.io/repo-org: "{{REPO_ORG}}"
     arbiter.io/repo-name: "{{REPO_NAME}}"
