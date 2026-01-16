@@ -9,8 +9,8 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cloudflare-go"
-	corev1 "k8s.io/api/core/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,9 +25,9 @@ import (
 )
 
 const (
-	organizationFinalizer     = "platform.arbiter.io/organization-finalizer"
-	cloudflareAPITokenSecret  = "cloudflare-api-token"
-	platformSystemNamespace   = "platform-system"
+	organizationFinalizer    = "platform.arbiter.io/organization-finalizer"
+	cloudflareAPITokenSecret = "cloudflare-api-token"
+	platformSystemNamespace  = "platform-system"
 )
 
 // OrganizationReconciler reconciles an Organization object
@@ -383,7 +383,7 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("failed to get Cloudflare API token secret: %w", err)
 	}
-	
+
 	apiToken := string(apiTokenSecret.Data["token"])
 	if apiToken == "" {
 		return fmt.Errorf("Cloudflare API token not found in secret")
@@ -412,10 +412,10 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 		Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
 		Namespace: org.Status.Namespace,
 	}, existingCredentialsSecret)
-	
+
 	var tunnel cloudflare.Tunnel
 	var tunnelSecret string
-	
+
 	if err == nil {
 		// We have existing credentials, parse them to get tunnel info
 		credentialsJSON := existingCredentialsSecret.Data["credentials.json"]
@@ -434,7 +434,7 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 			}
 		}
 	}
-	
+
 	// If we don't have valid existing credentials, get or create tunnel
 	if tunnel.ID == "" {
 		tunnel, err = r.createFreshTunnelWithSecret(ctx, api, accountID, tunnelName)
@@ -539,7 +539,7 @@ ingress:
 			Labels: map[string]string{
 				"platform.arbiter.io/organization": org.Name,
 				"platform.arbiter.io/managed-by":   "organization-controller",
-				"app":                               "cloudflared",
+				"app":                              "cloudflared",
 			},
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -788,7 +788,7 @@ func (r *OrganizationReconciler) deleteCloudflaredTunnel(ctx context.Context, or
 	if err != nil {
 		return fmt.Errorf("failed to get Cloudflare API token secret: %w", err)
 	}
-	
+
 	apiToken := string(apiTokenSecret.Data["token"])
 	if apiToken == "" {
 		return fmt.Errorf("Cloudflare API token not found in secret")

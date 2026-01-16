@@ -85,7 +85,7 @@ func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Requ
 }
 
 func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding) (ctrl.Result, error) {
-	logger.Info("Reconciling RepoBinding", 
+	logger.Info("Reconciling RepoBinding",
 		"repoOrg", repoBinding.Spec.RepoOrg,
 		"repoName", repoBinding.Spec.RepoName,
 		"pipelineName", repoBinding.Spec.PipelineName,
@@ -125,16 +125,16 @@ func (r *RepoBindingReconciler) executeProvisioningSteps(ctx context.Context, lo
 }
 
 type provisioningStep struct {
-	name           string
-	statusField    *bool
-	provisionFunc  func(context.Context, *platformv1alpha1.RepoBinding) error
+	name          string
+	statusField   *bool
+	provisionFunc func(context.Context, *platformv1alpha1.RepoBinding) error
 }
 
 func (r *RepoBindingReconciler) executeProvisioningStep(ctx context.Context, logger logr.Logger, request ctrl.Request, repoBinding *platformv1alpha1.RepoBinding, step provisioningStep) error {
 	logger.Info("Provisioning " + step.name)
-	
+
 	if err := step.provisionFunc(ctx, repoBinding); err != nil {
-		logger.Error(err, "Failed to provision " + step.name)
+		logger.Error(err, "Failed to provision "+step.name)
 		if refetchErr := r.Get(ctx, request.NamespacedName, repoBinding); refetchErr != nil {
 			logger.Error(refetchErr, "Failed to refetch RepoBinding")
 			return refetchErr
@@ -146,13 +146,13 @@ func (r *RepoBindingReconciler) executeProvisioningStep(ctx context.Context, log
 		logger.Error(err, "Failed to refetch RepoBinding")
 		return err
 	}
-	
+
 	*step.statusField = true
 	if err := r.Status().Update(ctx, repoBinding); err != nil {
 		logger.Error(err, "Failed to update RepoBinding status")
 		return err
 	}
-	
+
 	return nil
 }
 
@@ -164,7 +164,7 @@ func (r *RepoBindingReconciler) handleAllowlistUpdate(ctx context.Context, logge
 	logger.Info("Updating allowlist")
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, client.ObjectKey{Name: "repo-allowlist", Namespace: "pipeline-system"}, configMap)
-	
+
 	if err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("Allowlist ConfigMap not found, skipping (new architecture)")
@@ -253,9 +253,9 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 	if !repoBinding.ObjectMeta.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(repoBinding, repoBindingFinalizer) {
 			logger.Info("Cleaning up RepoBinding resources")
-			
+
 			orgNamespace := fmt.Sprintf("org-%s", repoBinding.Spec.AphexOrg)
-			
+
 			trigger := &triggersv1beta1.Trigger{}
 			triggerName := fmt.Sprintf("%s-trigger", repoBinding.Spec.PipelineName)
 			if err := r.Get(ctx, client.ObjectKey{Name: triggerName, Namespace: orgNamespace}, trigger); err == nil {
@@ -264,7 +264,7 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 					return fmt.Errorf("failed to delete Trigger: %w", err)
 				}
 			}
-			
+
 			triggerTemplate := &triggersv1beta1.TriggerTemplate{}
 			templateName := fmt.Sprintf("%s-trigger-template", repoBinding.Spec.PipelineName)
 			if err := r.Get(ctx, client.ObjectKey{Name: templateName, Namespace: orgNamespace}, triggerTemplate); err == nil {
@@ -273,7 +273,7 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 					return fmt.Errorf("failed to delete TriggerTemplate: %w", err)
 				}
 			}
-			
+
 			controllerutil.RemoveFinalizer(repoBinding, repoBindingFinalizer)
 			return r.Update(ctx, repoBinding)
 		}

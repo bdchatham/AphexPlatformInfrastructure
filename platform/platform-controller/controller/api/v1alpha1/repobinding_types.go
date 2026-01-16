@@ -13,12 +13,12 @@ type RepoBindingSpec struct {
 
 	// RepoOrg is the GitHub organization name
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9-]+$`
 	RepoOrg string `json:"repoOrg"`
 
 	// RepoName is the repository name
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^[a-z0-9-]+$`
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9_.-]+$`
 	RepoName string `json:"repoName"`
 
 	// PipelineName is the name of the Pipeline to trigger when webhooks are received

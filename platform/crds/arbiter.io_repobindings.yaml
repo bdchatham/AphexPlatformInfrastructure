@@ -1,0 +1,155 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.14.0
+  name: repobindings.arbiter.io
+spec:
+  group: arbiter.io
+  names:
+    kind: RepoBinding
+    listKind: RepoBindingList
+    plural: repobindings
+    singular: repobinding
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: RepoBinding is the Schema for the repobindings API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: RepoBindingSpec defines the desired state of RepoBinding
+            properties:
+              aphexOrg:
+                description: AphexOrg is the name of the Organization resource to
+                  bind to
+                pattern: ^[a-z0-9-]+$
+                type: string
+              pipelineName:
+                description: PipelineName is the name of the Pipeline to trigger when
+                  webhooks are received
+                pattern: ^[a-z0-9-]+$
+                type: string
+              pipelineSpec:
+                description: |-
+                  PipelineSpec is the raw YAML content of the Tekton Pipeline to create
+                  The controller will create this Pipeline resource in the pipeline namespace
+                type: string
+              repoName:
+                description: RepoName is the repository name
+                pattern: ^[a-zA-Z0-9_.-]+$
+                type: string
+              repoOrg:
+                description: RepoOrg is the GitHub organization name
+                pattern: ^[a-zA-Z0-9-]+$
+                type: string
+              templateRef:
+                description: TemplateRef is the name of the dispatcher template to
+                  use
+                type: string
+            required:
+            - aphexOrg
+            - pipelineName
+            - pipelineSpec
+            - repoName
+            - repoOrg
+            - templateRef
+            type: object
+          status:
+            description: RepoBindingStatus defines the observed state of RepoBinding
+            properties:
+              allowlistUpdated:
+                description: AllowlistUpdated indicates if the repository was added
+                  to the allowlist
+                type: boolean
+              eventListenerCreated:
+                description: EventListenerCreated indicates if the EventListener was
+                  created
+                type: boolean
+              lastReconcileTime:
+                description: LastReconcileTime is the timestamp of the last reconciliation
+                format: date-time
+                type: string
+              message:
+                description: Message provides additional context about the current
+                  phase
+                type: string
+              namespaceCreated:
+                description: NamespaceCreated indicates if the tenant namespace was
+                  created
+                type: boolean
+              networkPolicyCreated:
+                description: NetworkPolicyCreated indicates if the NetworkPolicy was
+                  created
+                type: boolean
+              phase:
+                description: Phase represents the current state of the onboarding
+                  process
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                type: string
+              pipelineCreated:
+                description: PipelineCreated indicates if the Pipeline resource was
+                  created
+                type: boolean
+              quotasCreated:
+                description: QuotasCreated indicates if ResourceQuota and LimitRange
+                  were created
+                type: boolean
+              rbacCreated:
+                description: RBACCreated indicates if RBAC was configured
+                type: boolean
+              serviceAccountCreated:
+                description: ServiceAccountCreated indicates if the service account
+                  was created
+                type: boolean
+              terraformSecretCreated:
+                description: TerraformSecretCreated indicates if the Terraform backend
+                  secret was created
+                type: boolean
+              triggerBindingCreated:
+                description: TriggerBindingCreated indicates if the TriggerBinding
+                  was created
+                type: boolean
+              triggerCreated:
+                description: TriggerCreated indicates if the Trigger was created
+                type: boolean
+              triggerTemplateCreated:
+                description: TriggerTemplateCreated indicates if the TriggerTemplate
+                  was created
+                type: boolean
+              webhookSecret:
+                description: WebhookSecret is the generated webhook secret for GitHub
+                  webhook configuration
+                type: string
+              webhookURL:
+                description: WebhookURL is the Lighthouse webhook endpoint URL
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
