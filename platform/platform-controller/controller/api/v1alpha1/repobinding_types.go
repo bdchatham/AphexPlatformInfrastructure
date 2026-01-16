@@ -92,9 +92,9 @@ type RepoBindingStatus struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
-// +genclient
 
 // RepoBinding is the Schema for the repobindings API
 type RepoBinding struct {
