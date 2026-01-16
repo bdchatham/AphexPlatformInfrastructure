@@ -112,7 +112,14 @@ The bootstrap script provides **zero-touch convergence**: run once and walk away
    
    See [Ingress Configuration](platform/auth/ingress/README.md) for detailed DNS setup.
 
-4. **Run bootstrap:**
+4. **Set Cloudflare API token (for organization webhooks):**
+   ```bash
+   export CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"
+   ```
+   
+   This is required for creating organization webhook tunnels. Get your token from the Cloudflare dashboard with permissions: Zone.DNS (Edit), Account.Cloudflare Tunnel (Edit).
+
+5. **Run bootstrap:**
    ```bash
    cd platform/bootstrap
    ./bootstrap.sh

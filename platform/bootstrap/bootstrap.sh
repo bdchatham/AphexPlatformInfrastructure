@@ -111,8 +111,8 @@ check_prerequisites() {
   fi
   
   # Check for Cloudflare API token
-  if [[ -z "${CLOUDFLARE_TUNNEL_CREDENTIALS:-}" ]]; then
-    log_error "CLOUDFLARE_TUNNEL_CREDENTIALS environment variable not set"
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    log_error "CLOUDFLARE_API_TOKEN environment variable not set"
     log_error "This is required for organization webhook tunnels"
     log_error "Set it in your environment or .env file"
     exit 1
@@ -276,7 +276,7 @@ create_auth_system_secrets() {
   else
     kubectl create secret generic cloudflare-api-token \
       -n "platform-system" \
-      --from-literal=token="$CLOUDFLARE_TUNNEL_CREDENTIALS"
+      --from-literal=token="$CLOUDFLARE_API_TOKEN"
     log_success "Created secret: cloudflare-api-token (in platform-system)"
   fi
   

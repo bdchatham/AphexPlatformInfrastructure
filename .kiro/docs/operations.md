@@ -11,6 +11,7 @@ Before deploying the platform, ensure you have:
 3. **Ingress Controller**: Deployed and accessible from your network
 4. **DNS Configuration**: For `*.home.local` (or your chosen domain)
 5. **Network Access**: Ability to reach ingress controller from your devices
+6. **Cloudflare API Token**: For organization webhook tunnels (set as `CLOUDFLARE_API_TOKEN` environment variable)
 
 ### DNS Setup for Home Network Access
 
@@ -46,6 +47,10 @@ The bootstrap script achieves complete platform convergence automatically with n
 ```bash
 git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
 cd ArbiterPipelineInfrastructure
+
+# Set Cloudflare API token for organization webhooks
+export CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"
+
 ./platform/bootstrap/bootstrap.sh
 ```
 
