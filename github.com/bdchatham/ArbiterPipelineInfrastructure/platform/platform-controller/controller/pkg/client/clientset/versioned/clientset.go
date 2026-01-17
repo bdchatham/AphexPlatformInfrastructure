@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net/http"
 
-	v1alpha1internalversion "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion"
+	v1alpha1internalversion "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion"
 	discovery "k8s.io/client-go/discovery"
 	rest "k8s.io/client-go/rest"
 	flowcontrol "k8s.io/client-go/util/flowcontrol"

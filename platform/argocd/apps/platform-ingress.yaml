@@ -11,7 +11,7 @@ spec:
   project: default
   
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure.git
     targetRevision: HEAD
     path: platform/ingress
   

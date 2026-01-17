@@ -6,8 +6,8 @@ import (
 	"context"
 	"time"
 
-	v1alpha1 "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/api/v1alpha1"
-	scheme "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/scheme"
+	v1alpha1 "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/api/v1alpha1"
+	scheme "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/scheme"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"

@@ -5,7 +5,7 @@ package internalversion
 import (
 	"net/http"
 
-	"github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/scheme"
+	"github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/scheme"
 	rest "k8s.io/client-go/rest"
 )
 

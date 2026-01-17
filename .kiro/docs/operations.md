@@ -45,8 +45,8 @@ The bootstrap script achieves complete platform convergence automatically with n
 **Run Bootstrap**
 
 ```bash
-git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
-cd ArbiterPipelineInfrastructure
+git clone https://github.com/bdchatham/AphexPlatformInfrastructure.git
+cd AphexPlatformInfrastructure
 
 # Set Cloudflare API token for organization webhooks
 export CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"
@@ -758,8 +758,8 @@ All authentication system components are managed by ArgoCD. To make changes:
 
 ```bash
 # Clone repository
-git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
-cd ArbiterPipelineInfrastructure
+git clone https://github.com/bdchatham/AphexPlatformInfrastructure.git
+cd AphexPlatformInfrastructure
 
 # Update authentication manifests
 # Example: Update Authentik image version
@@ -918,8 +918,8 @@ The platform upgrades itself via ArgoCD when manifests change in Git. No manual 
 
 ```bash
 # Clone platform repository
-git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
-cd ArbiterPipelineInfrastructure
+git clone https://github.com/bdchatham/AphexPlatformInfrastructure.git
+cd AphexPlatformInfrastructure
 
 # Update component manifests
 # Example: Update controller image
@@ -1275,7 +1275,7 @@ kubectl get applications -n argocd -o yaml > applications-backup.yaml
 ```bash
 # Run bootstrap on new cluster
 cd platform/bootstrap
-./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/ArbiterPipelineInfrastructure
+./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
 ```
 
 **Step 2: Wait for ArgoCD to Sync**
@@ -1362,7 +1362,7 @@ kubectl get application platform-root -n argocd
 kubectl logs -n argocd -l app.kubernetes.io/name=argocd-application-controller --tail=100
 
 # Check Git repository connectivity
-kubectl exec -n argocd -it <argocd-repo-server-pod> -- git ls-remote https://github.com/bdchatham/ArbiterPipelineInfrastructure
+kubectl exec -n argocd -it <argocd-repo-server-pod> -- git ls-remote https://github.com/bdchatham/AphexPlatformInfrastructure
 ```
 
 **Resolution**:
@@ -1572,14 +1572,14 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 
 1. **Clone Repository**:
    ```bash
-   git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
-   cd ArbiterPipelineInfrastructure
+   git clone https://github.com/bdchatham/AphexPlatformInfrastructure.git
+   cd AphexPlatformInfrastructure
    ```
 
 2. **Run Bootstrap**:
    ```bash
    cd platform/bootstrap
-   ./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/ArbiterPipelineInfrastructure
+   ./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
    ```
 
 3. **Verify Bootstrap**:

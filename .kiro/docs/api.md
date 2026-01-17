@@ -357,7 +357,7 @@ spec:
   displayName: "Platform Documentation"
   description: "Archon knowledge base for platform infrastructure and tooling"
   repositories:
-    - url: "https://github.com/bdchatham/ArbiterPipelineInfrastructure"
+    - url: "https://github.com/bdchatham/AphexPlatformInfrastructure"
       branch: "main"
       paths:
         - ".kiro/docs"
@@ -865,7 +865,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/argocd/apps
   destination:

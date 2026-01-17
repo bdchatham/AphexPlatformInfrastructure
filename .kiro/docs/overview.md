@@ -110,8 +110,8 @@ For detailed architecture, see [architecture.md](architecture.md).
 ### Bootstrap the Platform
 
 ```bash
-git clone https://github.com/bdchatham/ArbiterPipelineInfrastructure.git
-cd ArbiterPipelineInfrastructure
+git clone https://github.com/bdchatham/AphexPlatformInfrastructure.git
+cd AphexPlatformInfrastructure
 ./platform/bootstrap/bootstrap.sh
 ```
 

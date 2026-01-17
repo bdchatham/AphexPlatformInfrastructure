@@ -3,9 +3,9 @@
 package fake
 
 import (
-	clientset "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned"
-	v1alpha1internalversion "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion"
-	fakev1alpha1internalversion "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion/fake"
+	clientset "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned"
+	v1alpha1internalversion "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion"
+	fakev1alpha1internalversion "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/pkg/client/clientset/versioned/typed/v1alpha1/internalversion/fake"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/discovery"
