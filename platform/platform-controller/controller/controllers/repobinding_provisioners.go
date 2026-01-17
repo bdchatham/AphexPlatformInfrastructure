@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	k8syaml "sigs.k8s.io/yaml"
 
-	platformv1alpha1 "github.com/bdchatham/ArbiterPipelineInfrastructure/platform/platform-controller/controller/api/v1alpha1"
+	platformv1alpha1 "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/api/v1alpha1"
 	tektonv1 "github.com/tektoncd/pipeline/pkg/apis/pipeline/v1"
 	triggersv1beta1 "github.com/tektoncd/triggers/pkg/apis/triggers/v1beta1"
 )

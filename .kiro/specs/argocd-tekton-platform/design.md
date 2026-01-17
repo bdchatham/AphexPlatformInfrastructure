@@ -226,7 +226,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/argocd/apps
   destination:
@@ -256,7 +256,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/crds
   destination:
@@ -280,7 +280,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/infrastructure
   destination:
@@ -304,7 +304,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/onboarding
   destination:
@@ -326,7 +326,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform/catalog
   destination:
@@ -593,7 +593,7 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/ArbiterPipelineInfrastructure
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure
     targetRevision: main
     path: platform
     directory:
@@ -618,7 +618,7 @@ spec:
 ## Repository Structure
 
 ```
-ArbiterPipelineInfrastructure/
+AphexPlatformInfrastructure/
 ├── platform/
 │   ├── bootstrap/
 │   │   ├── bootstrap.sh                     # Main bootstrap script
