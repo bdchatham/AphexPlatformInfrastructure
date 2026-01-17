@@ -4,8 +4,8 @@ metadata:
   name: github-listener
   namespace: {{TENANT_NAME}}
   labels:
-    arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "platform-controller"
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
 spec:
   serviceAccountName: pipeline-runner
   triggers:

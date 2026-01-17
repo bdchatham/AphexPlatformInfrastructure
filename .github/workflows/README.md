@@ -1,6 +1,6 @@
 # GitHub Actions Workflows
 
-This directory contains CI/CD workflows for the Arbiter Pipeline Infrastructure platform.
+This directory contains CI/CD workflows for the Aphex Pipeline Infrastructure platform.
 
 ## Workflows
 

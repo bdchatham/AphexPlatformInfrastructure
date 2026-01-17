@@ -1,6 +1,6 @@
 # Custom Resource Definitions (CRDs)
 
-This directory contains Custom Resource Definitions for the Arbiter Pipeline Infrastructure platform.
+This directory contains Custom Resource Definitions for the Aphex Pipeline Infrastructure.
 
 ## RepoBinding CRD
 
@@ -52,7 +52,7 @@ See `example-repobinding.yaml` for complete examples.
 Basic example:
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: platform.aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding
@@ -83,13 +83,13 @@ kubectl apply -f repobinding.yaml
 Verify the CRD is registered:
 
 ```bash
-kubectl get crd repobindings.platform.arbiter.io
+kubectl get crd repobindings.platform.aphex
 ```
 
 Wait for the CRD to be established:
 
 ```bash
-kubectl wait --for condition=established --timeout=60s crd/repobindings.platform.arbiter.io
+kubectl wait --for condition=established --timeout=60s crd/repobindings.platform.aphex
 ```
 
 #### Automated Installation and Verification

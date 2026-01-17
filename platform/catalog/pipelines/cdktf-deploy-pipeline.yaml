@@ -19,7 +19,7 @@ spec:
     3. Deploy infrastructure with remote state management
     4. Upload artifacts for inspection and auditing
     
-    Designed for use in the Arbiter Pipeline Infrastructure with tenant isolation
+    Designed for use in the Aphex Platform Infrastructure with tenant isolation
     and comprehensive observability.
 
   params:

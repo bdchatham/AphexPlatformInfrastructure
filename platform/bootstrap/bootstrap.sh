@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Arbiter Pipeline Infrastructure Bootstrap Script
+# Aphex Platform Infrastructure Bootstrap Script
 # 
 # This script provides zero-touch convergence for the authentication platform:
 # 1. Creates/selects Kubernetes cluster
@@ -445,7 +445,7 @@ print_access_instructions() {
 main() {
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo -e "${BLUE}Arbiter Pipeline Infrastructure Bootstrap${NC}"
+  echo -e "${BLUE}Aphex Platform Infrastructure Bootstrap${NC}"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   

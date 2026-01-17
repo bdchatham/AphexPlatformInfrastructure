@@ -4,8 +4,8 @@ metadata:
   name: tenant-quota
   namespace: {{TENANT_NAME}}
   labels:
-    arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "platform-controller"
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
 spec:
   hard:
     # Compute resources

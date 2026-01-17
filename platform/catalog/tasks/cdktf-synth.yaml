@@ -15,7 +15,7 @@ metadata:
 spec:
   description: >-
     This Task runs cdktf synth to generate Terraform configuration from CDKTF code.
-    It is designed for use in the Arbiter Pipeline Infrastructure to synthesize
+    It is designed for use in the Aphex Pipeline Infrastructure to synthesize
     infrastructure-as-code before deployment.
 
   params:

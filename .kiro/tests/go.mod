@@ -1,4 +1,4 @@
-module github.com/arbiter/platform/tests
+module github.com/aphex/platform/tests
 
 go 1.21
 

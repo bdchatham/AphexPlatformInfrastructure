@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs), standard Kubernetes resources, and configuration data structures to manage platform state. All data is stored in Kubernetes etcd with GitOps-managed configuration.
+The Aphex Pipeline Infrastructure uses Kubernetes Custom Resource Definitions (CRDs), standard Kubernetes resources, and configuration data structures to manage platform state. All data is stored in Kubernetes etcd with GitOps-managed configuration.
 
 Data flows through the system in four main forms:
 1. **Organization Resources**: Multi-tenant organization management with webhook infrastructure
@@ -33,7 +33,7 @@ interface OrganizationSpec {
 
 **Example**:
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp
@@ -246,7 +246,7 @@ interface Repository {
 
 **Example**:
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: platform-docs
@@ -304,7 +304,7 @@ For API details on KnowledgeBase resources, see [api.md](api.md#knowledgebase-ap
 
 **Source**
 - `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - Go type definition
-- `platform/crds/arbiter.io_knowledgebases.yaml` - CRD definition
+- `platform/crds/aphex_knowledgebases.yaml` - CRD definition
 - `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller implementation
 
 ## ArgoCD Application Data Model
@@ -761,18 +761,18 @@ terraform {
 
 ```typescript
 interface NamespaceLabels {
-  "arbiter.io/tenant": string;      // Tenant name
-  "arbiter.io/repo": string;        // Repository (org/name)
-  "arbiter.io/managed-by": string;  // "platform-controller"
+  "aphex/tenant": string;      // Tenant name
+  "aphex/repo": string;        // Repository (org/name)
+  "aphex/managed-by": string;  // "platform-controller"
 }
 ```
 
 **Example**:
 ```yaml
 labels:
-  arbiter.io/tenant: "archon"
-  arbiter.io/repo: "your-github-org/archon-agent"
-  arbiter.io/managed-by: "platform-controller"
+  aphex/tenant: "archon"
+  aphex/repo: "your-github-org/archon-agent"
+  aphex/managed-by: "platform-controller"
 ```
 
 ### Resource Quota Spec

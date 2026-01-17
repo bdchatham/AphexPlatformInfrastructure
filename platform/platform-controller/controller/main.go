@@ -54,7 +54,7 @@ func main() {
 		Metrics:                server.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "platform-controller.platform.arbiter.io",
+		LeaderElectionID:       "platform-controller.platform.aphex",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

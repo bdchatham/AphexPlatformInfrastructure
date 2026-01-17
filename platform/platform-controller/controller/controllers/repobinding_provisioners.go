@@ -29,9 +29,9 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 		ObjectMeta: metav1.ObjectMeta{
 			Name: rb.Spec.PipelineName,
 			Labels: map[string]string{
-				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
-				"platform.arbiter.io/repo":       repoLabel,
-				"platform.arbiter.io/managed-by": "platform-controller",
+				"platform.aphex/pipeline":   rb.Spec.PipelineName,
+				"platform.aphex/repo":       repoLabel,
+				"platform.aphex/managed-by": "platform-controller",
 			},
 		},
 	}
@@ -78,8 +78,8 @@ func (r *RepoBindingReconciler) provisionPipeline(ctx context.Context, rb *platf
 	if pipeline.Labels == nil {
 		pipeline.Labels = make(map[string]string)
 	}
-	pipeline.Labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
-	pipeline.Labels["platform.arbiter.io/managed-by"] = "platform-controller"
+	pipeline.Labels["platform.aphex/pipeline"] = rb.Spec.PipelineName
+	pipeline.Labels["platform.aphex/managed-by"] = "platform-controller"
 
 	// Check if pipeline already exists
 	existingPipeline := &tektonv1.Pipeline{}
@@ -231,8 +231,8 @@ func (r *RepoBindingReconciler) provisionClusterRole(ctx context.Context, rb *pl
 		ObjectMeta: metav1.ObjectMeta{
 			Name: clusterRoleName,
 			Labels: map[string]string{
-				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by": "platform-controller",
+				"platform.aphex/pipeline":   rb.Spec.PipelineName,
+				"platform.aphex/managed-by": "platform-controller",
 			},
 		},
 		Rules: []rbacv1.PolicyRule{
@@ -276,8 +276,8 @@ func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context,
 		ObjectMeta: metav1.ObjectMeta{
 			Name: clusterRoleBindingName,
 			Labels: map[string]string{
-				"platform.arbiter.io/pipeline":   rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by": "platform-controller",
+				"platform.aphex/pipeline":   rb.Spec.PipelineName,
+				"platform.aphex/managed-by": "platform-controller",
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
@@ -671,7 +671,7 @@ func (r *RepoBindingReconciler) provisionTriggerTemplate(ctx context.Context, rb
 	// Convert to TriggerTemplate and materialize in org namespace
 	triggerTemplate := template.ToTriggerTemplate(orgNamespace, rb.Spec.AphexOrg)
 	triggerTemplate.SetName(fmt.Sprintf("%s-trigger-template", rb.Spec.PipelineName))
-	triggerTemplate.Labels["platform.arbiter.io/pipeline"] = rb.Spec.PipelineName
+	triggerTemplate.Labels["platform.aphex/pipeline"] = rb.Spec.PipelineName
 
 	// Apply the TriggerTemplate
 	if err := r.Client.Patch(ctx, triggerTemplate, client.Apply, client.ForceOwnership, client.FieldOwner("platform-controller")); err != nil {
@@ -704,9 +704,9 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 			Name:      fmt.Sprintf("%s-trigger", rb.Spec.PipelineName),
 			Namespace: orgNamespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/pipeline":     rb.Spec.PipelineName,
-				"platform.arbiter.io/managed-by":   "platform-controller",
-				"platform.arbiter.io/organization": rb.Spec.AphexOrg,
+				"platform.aphex/pipeline":     rb.Spec.PipelineName,
+				"platform.aphex/managed-by":   "platform-controller",
+				"platform.aphex/organization": rb.Spec.AphexOrg,
 			},
 		},
 		Spec: triggersv1beta1.TriggerSpec{
@@ -874,8 +874,8 @@ func (r *RepoBindingReconciler) updateRepoBindingStatusWithWebhookInfo(ctx conte
 					Name:      "github-webhook-secret",
 					Namespace: rb.Spec.PipelineName,
 					Labels: map[string]string{
-						"platform.arbiter.io/managed-by":   "repobinding-controller",
-						"platform.arbiter.io/organization": rb.Spec.RepoOrg,
+						"platform.aphex/managed-by":   "repobinding-controller",
+						"platform.aphex/organization": rb.Spec.RepoOrg,
 					},
 				},
 				Type: orgSecret.Type,

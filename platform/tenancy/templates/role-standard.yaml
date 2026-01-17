@@ -4,9 +4,9 @@ metadata:
   name: pipeline-runner-standard
   namespace: {{TENANT_NAME}}
   labels:
-    arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "platform-controller"
-    arbiter.io/permission-profile: "standard"
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+    aphex/permission-profile: "standard"
 rules:
   # Allow pipeline execution
   - apiGroups: ["tekton.dev"]

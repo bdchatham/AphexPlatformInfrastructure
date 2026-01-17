@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: {{TENANT_NAME}}
   labels:
-    arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "platform-controller"
-    arbiter.io/repo-org: "{{REPO_ORG}}"
-    arbiter.io/repo-name: "{{REPO_NAME}}"
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+    aphex/repo-org: "{{REPO_ORG}}"
+    aphex/repo-name: "{{REPO_NAME}}"

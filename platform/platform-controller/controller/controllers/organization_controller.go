@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	organizationFinalizer    = "platform.arbiter.io/organization-finalizer"
+	organizationFinalizer    = "platform.aphex/organization-finalizer"
 	cloudflareAPITokenSecret = "cloudflare-api-token"
 	platformSystemNamespace  = "platform-system"
 )
@@ -36,9 +36,9 @@ type OrganizationReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=arbiter.io,resources=organizations,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=arbiter.io,resources=organizations/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=arbiter.io,resources=organizations/finalizers,verbs=update
+// +kubebuilder:rbac:groups=aphex,resources=organizations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=aphex,resources=organizations/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=aphex,resources=organizations/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
@@ -165,8 +165,8 @@ func (r *OrganizationReconciler) provisionNamespace(ctx context.Context, org *pl
 		ObjectMeta: metav1.ObjectMeta{
 			Name: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 	}
@@ -193,8 +193,8 @@ func (r *OrganizationReconciler) provisionWebhookSecret(ctx context.Context, org
 			Name:      "github-webhook-secret",
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Data: map[string][]byte{
@@ -224,8 +224,8 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 			Name:      "organization-admin",
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Rules: []rbacv1.PolicyRule{
@@ -240,7 +240,7 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 				Verbs:     []string{"*"},
 			},
 			{
-				APIGroups: []string{"arbiter.io"},
+				APIGroups: []string{"aphex"},
 				Resources: []string{"repobindings"},
 				Verbs:     []string{"get", "list", "watch", "create", "update", "patch"},
 			},
@@ -272,8 +272,8 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 				Name:      fmt.Sprintf("organization-admin-%s", adminUser),
 				Namespace: org.Status.Namespace,
 				Labels: map[string]string{
-					"platform.arbiter.io/organization": org.Name,
-					"platform.arbiter.io/managed-by":   "organization-controller",
+					"platform.aphex/organization": org.Name,
+					"platform.aphex/managed-by":   "organization-controller",
 				},
 			},
 			Subjects: []rbacv1.Subject{
@@ -311,8 +311,8 @@ func (r *OrganizationReconciler) provisionEventListenerServiceAccount(ctx contex
 			Name:      "eventlistener",
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 	}
@@ -333,8 +333,8 @@ func (r *OrganizationReconciler) provisionEventListenerServiceAccount(ctx contex
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fmt.Sprintf("eventlistener-%s", org.Name),
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Subjects: []rbacv1.Subject{
@@ -465,8 +465,8 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 			Name:      fmt.Sprintf("cloudflared-credentials-%s", org.Name),
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Data: map[string][]byte{
@@ -498,8 +498,8 @@ func (r *OrganizationReconciler) provisionCloudflaredTunnel(ctx context.Context,
 			Name:      "cloudflared-config",
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Data: map[string]string{
@@ -537,8 +537,8 @@ ingress:
 			Name:      fmt.Sprintf("cloudflared-%s", org.Name),
 			Namespace: org.Status.Namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 				"app":                              "cloudflared",
 			},
 		},
@@ -627,8 +627,8 @@ ingress:
 			Name:      "github-listener",
 			Namespace: orgNamespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Spec: triggersv1beta1.EventListenerSpec{
@@ -642,7 +642,7 @@ ingress:
 					TriggerSelector: triggersv1beta1.EventListenerTriggerSelector{
 						LabelSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{
-								"platform.arbiter.io/organization": org.Name,
+								"platform.aphex/organization": org.Name,
 							},
 						},
 					},
@@ -677,8 +677,8 @@ ingress:
 			Name:      "github-push-binding",
 			Namespace: orgNamespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/organization": org.Name,
-				"platform.arbiter.io/managed-by":   "organization-controller",
+				"platform.aphex/organization": org.Name,
+				"platform.aphex/managed-by":   "organization-controller",
 			},
 		},
 		Spec: triggersv1beta1.TriggerBindingSpec{

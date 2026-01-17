@@ -14,7 +14,7 @@ metadata:
 spec:
   description: >-
     This Task uploads pipeline artifacts (logs, outputs, terraform plans) to external storage.
-    It is designed for use in the Arbiter Pipeline Infrastructure to preserve
+    It is designed for use in the Aphex Pipeline Infrastructure to preserve
     deployment artifacts for inspection and auditing.
 
   params:

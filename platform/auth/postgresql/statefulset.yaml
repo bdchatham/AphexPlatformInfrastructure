@@ -5,8 +5,8 @@ metadata:
   namespace: auth-system
   labels:
     app: postgresql
-    platform.arbiter.io/component: "authentication"
-    platform.arbiter.io/managed-by: "argocd"
+    platform.aphex/component: "authentication"
+    platform.aphex/managed-by: "argocd"
 spec:
   serviceName: postgresql
   replicas: 1

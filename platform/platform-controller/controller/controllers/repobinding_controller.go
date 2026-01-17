@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	repoBindingFinalizer = "platform.arbiter.io/finalizer"
+	repoBindingFinalizer = "platform.aphex/finalizer"
 )
 
 // RepoBindingReconciler reconciles a RepoBinding object
@@ -29,9 +29,9 @@ type RepoBindingReconciler struct {
 	TemplateCatalog *TemplateCatalog
 }
 
-// +kubebuilder:rbac:groups=platform.arbiter.io,resources=repobindings,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=platform.arbiter.io,resources=repobindings/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=platform.arbiter.io,resources=repobindings/finalizers,verbs=update
+// +kubebuilder:rbac:groups=platform.aphex,resources=repobindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=platform.aphex,resources=repobindings/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=platform.aphex,resources=repobindings/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch

@@ -10,12 +10,12 @@ metadata:
     component: onboarding
 rules:
   # Allow creating and managing RepoBinding resources
-  - apiGroups: ["platform.arbiter.io"]
+  - apiGroups: ["platform.aphex"]
     resources: ["repobindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch"]
   
   # Allow reading RepoBinding status
-  - apiGroups: ["platform.arbiter.io"]
+  - apiGroups: ["platform.aphex"]
     resources: ["repobindings/status"]
     verbs: ["get", "list", "watch"]
   

@@ -53,9 +53,9 @@ func (t *DispatcherTemplate) ToTriggerTemplate(namespace string, orgName string)
 			Name:      t.Name,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"platform.arbiter.io/template-version": t.Version,
-				"platform.arbiter.io/managed-by":       "platform",
-				"platform.arbiter.io/organization":     orgName,
+				"platform.aphex/template-version": t.Version,
+				"platform.aphex/managed-by":       "platform",
+				"platform.aphex/organization":     orgName,
 			},
 		},
 		Spec: t.Spec,
@@ -71,9 +71,9 @@ func buildPipelineRunTemplate() []byte {
 				"generateName": "$(tt.params.pipeline-name)-",
 				"namespace": "$(tt.params.pipeline-namespace)",
 				"labels": {
-					"platform.arbiter.io/triggered": "true",
-					"platform.arbiter.io/event-type": "$(tt.params.event-type)",
-					"platform.arbiter.io/event-id": "$(tt.params.event-id)"
+					"platform.aphex/triggered": "true",
+					"platform.aphex/event-type": "$(tt.params.event-type)",
+					"platform.aphex/event-id": "$(tt.params.event-id)"
 				}
 			},
 			"spec": {

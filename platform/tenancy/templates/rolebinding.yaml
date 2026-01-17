@@ -4,9 +4,9 @@ metadata:
   name: pipeline-runner-binding
   namespace: {{TENANT_NAME}}
   labels:
-    arbiter.io/tenant: "{{TENANT_NAME}}"
-    arbiter.io/managed-by: "platform-controller"
-    arbiter.io/permission-profile: "{{PERMISSION_PROFILE}}"
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+    aphex/permission-profile: "{{PERMISSION_PROFILE}}"
 subjects:
   - kind: ServiceAccount
     name: pipeline-runner

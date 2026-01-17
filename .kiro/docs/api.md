@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Arbiter Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure with complete isolation and security boundaries.
+The Aphex Pipeline Infrastructure provides a Kubernetes-native API for repository onboarding through Custom Resource Definitions (CRDs). Users interact with the platform by creating RepoBinding resources, which trigger automated provisioning of tenant infrastructure with complete isolation and security boundaries.
 
 ## Kubernetes API OIDC Authentication
 
@@ -56,7 +56,7 @@ kubectl get pods --user=oidc
 
 The primary API for creating multi-tenant organizations with isolated namespaces, public webhook endpoints, and Cloudflare tunnel integration.
 
-**API Group**: `arbiter.io`  
+**API Group**: `aphex`  
 **API Version**: `v1alpha1`  
 **Kind**: `Organization`  
 **Scope**: Namespaced (must be created in `platform-system`)
@@ -64,7 +64,7 @@ The primary API for creating multi-tenant organizations with isolated namespaces
 ### Create Organization
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp
@@ -113,7 +113,7 @@ kubectl delete organization acme-corp -n platform-system
 
 The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `arbiter.io`  
+**API Group**: `aphex`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
 **Scope**: Namespaced (must be created in `platform-system` namespace)
@@ -121,7 +121,7 @@ The primary API for onboarding repositories to the platform with automated tenan
 ### RepoBinding Spec
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: <binding-name>
@@ -202,7 +202,7 @@ status:
 **Example 1: Standard Repository Onboarding**
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: platform.aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-app-binding
@@ -217,7 +217,7 @@ spec:
 **Example 2: Infrastructure Repository with Elevated Permissions**
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: platform.aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
@@ -275,7 +275,7 @@ kubectl logs -n <tenant-name> -l app.kubernetes.io/component=eventlistener
 
 The API for managing Archon knowledge bases that track documentation across multiple repositories.
 
-**API Group**: `arbiter.io`  
+**API Group**: `aphex`  
 **API Version**: `v1alpha1`  
 **Kind**: `KnowledgeBase`  
 **Scope**: Namespaced (typically created in `platform-system` namespace)
@@ -283,7 +283,7 @@ The API for managing Archon knowledge bases that track documentation across mult
 ### KnowledgeBase Spec
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: <knowledge-base-name>
@@ -318,7 +318,7 @@ spec:
 
 For data model details, see [data-models.md](data-models.md#knowledgebase-data-model).
 
-**Source**: `platform/crds/arbiter.io_knowledgebases.yaml`, `platform/platform-controller/controller/controllers/knowledgebase_controller.go`
+**Source**: `platform/crds/aphex_knowledgebases.yaml`, `platform/platform-controller/controller/controllers/knowledgebase_controller.go`
 
 ### KnowledgeBase Status
 
@@ -348,7 +348,7 @@ Pending → Ready
 **Example 1: Platform Documentation Knowledge Base**
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: platform-docs
@@ -374,7 +374,7 @@ spec:
 **Example 2: Application Documentation Knowledge Base**
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: app-docs
@@ -415,7 +415,7 @@ The KnowledgeBase controller validates specifications and maintains tracking sta
 - Transient errors trigger exponential backoff retry
 
 **Source**
-- `platform/crds/arbiter.io_knowledgebases.yaml` - KnowledgeBase CRD definition
+- `platform/crds/aphex_knowledgebases.yaml` - KnowledgeBase CRD definition
 - `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - KnowledgeBase Go types
 - `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller reconciliation logic
 
@@ -616,9 +616,9 @@ kind: Namespace
 metadata:
   name: ${TENANT_NAME}
   labels:
-    platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/repo: "${REPO_ORG}/${REPO_NAME}"
-    platform.arbiter.io/managed-by: "platform-controller"
+    platform.aphex/tenant: "${TENANT_NAME}"
+    platform.aphex/repo: "${REPO_ORG}/${REPO_NAME}"
+    platform.aphex/managed-by: "platform-controller"
 ```
 
 ### Service Account
@@ -694,8 +694,8 @@ kind: ClusterRole
 metadata:
   name: pipeline-runner-${TENANT_NAME}
   labels:
-    platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/managed-by: "platform-controller"
+    platform.aphex/tenant: "${TENANT_NAME}"
+    platform.aphex/managed-by: "platform-controller"
 rules:
   - apiGroups: ["triggers.tekton.dev"]
     resources: ["clusterinterceptors", "clustertriggerbindings"]
@@ -712,8 +712,8 @@ kind: ClusterRoleBinding
 metadata:
   name: pipeline-runner-${TENANT_NAME}
   labels:
-    platform.arbiter.io/tenant: "${TENANT_NAME}"
-    platform.arbiter.io/managed-by: "platform-controller"
+    platform.aphex/tenant: "${TENANT_NAME}"
+    platform.aphex/managed-by: "platform-controller"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

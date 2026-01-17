@@ -15,7 +15,7 @@ metadata:
 spec:
   description: >-
     This Task runs cdktf deploy to apply Terraform configuration with remote state.
-    It is designed for use in the Arbiter Pipeline Infrastructure to deploy
+    It is designed for use in the Aphex Pipeline Infrastructure to deploy
     infrastructure-as-code with proper state management and tenant isolation.
 
   params:

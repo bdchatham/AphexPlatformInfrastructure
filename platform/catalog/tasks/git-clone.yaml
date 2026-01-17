@@ -15,7 +15,7 @@ metadata:
 spec:
   description: >-
     This Task clones a git repository at a specific commit SHA.
-    It is designed for use in the Arbiter Pipeline Infrastructure to ensure
+    It is designed for use in the Aphex Pipeline Infrastructure to ensure
     reproducible builds by checking out the exact commit that triggered the pipeline.
 
   params:

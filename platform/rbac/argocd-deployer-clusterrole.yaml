@@ -6,8 +6,8 @@ kind: ClusterRole
 metadata:
   name: argocd-application-deployer
   labels:
-    platform.arbiter.io/shared-role: "true"
-    platform.arbiter.io/component: "argocd"
+    platform.aphex/shared-role: "true"
+    platform.aphex/component: "argocd"
   annotations:
     argocd.argoproj.io/sync-wave: "5"
 rules:

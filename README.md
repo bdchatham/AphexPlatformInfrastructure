@@ -1,4 +1,4 @@
-# Arbiter Pipeline Infrastructure
+# Aphex Platform Infrastructure
 
 ArgoCD + Tekton GitOps platform for homelab deployment providing shared pipeline infrastructure with tenant isolation.
 
@@ -67,8 +67,8 @@ The bootstrap script provides **zero-touch convergence**: run once and walk away
 
 1. **Clone this repository:**
    ```bash
-   git clone https://github.com/your-org/arbiter-pipeline-infrastructure.git
-   cd arbiter-pipeline-infrastructure
+   git clone https://github.com/your-org/aphex-pipeline-infrastructure.git
+   cd aphex-pipeline-infrastructure
    ```
 
 2. **Deploy Ingress controller (if not already present):**
@@ -180,7 +180,7 @@ The bootstrap script provides **zero-touch convergence**: run once and walk away
 
 1. **Create a RepoBinding:**
    ```yaml
-   apiVersion: platform.arbiter.io/v1alpha1
+   apiVersion: platform.aphex/v1alpha1
    kind: RepoBinding
    metadata:
      name: my-repo-binding

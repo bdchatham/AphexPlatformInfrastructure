@@ -4,7 +4,7 @@
 
 ### What is this repository for?
 
-The Arbiter Pipeline Infrastructure provides a production-ready GitOps platform using ArgoCD and Tekton with revolutionary layered cert-manager architecture. It enables zero-touch deployment, centralized authentication, self-service repository onboarding, and bulletproof certificate management.
+The Aphex Pipeline Infrastructure provides a production-ready GitOps platform using ArgoCD and Tekton with revolutionary layered cert-manager architecture. It enables zero-touch deployment, centralized authentication, self-service repository onboarding, and bulletproof certificate management.
 
 ### How does this fit into the larger system?
 
@@ -114,7 +114,7 @@ The platform uses real hostnames for OIDC authentication:
 Create a RepoBinding resource:
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding

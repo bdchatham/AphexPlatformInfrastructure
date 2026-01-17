@@ -1,6 +1,6 @@
 # Authentication System
 
-This directory contains the authentication and authorization infrastructure for the Arbiter Pipeline Infrastructure platform. The system provides centralized identity management through Authentik with Dex as an OIDC connector layer, enabling secure, role-based access to platform services including ArgoCD and Tekton Dashboard.
+This directory contains the authentication and authorization infrastructure for the Aphex Platform Infrastructure platform. The system provides centralized identity management through Authentik with Dex as an OIDC connector layer, enabling secure, role-based access to platform services including ArgoCD and Tekton Dashboard.
 
 ## Architecture Overview
 

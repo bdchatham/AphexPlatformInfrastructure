@@ -1,6 +1,6 @@
 # Platform Controller
 
-The platform controller is a Kubernetes operator that automates tenant provisioning for the Arbiter Pipeline Infrastructure platform. It watches for `RepoBinding` and `Organization` custom resources and provisions all necessary tenant infrastructure.
+The platform controller is a Kubernetes operator that automates tenant provisioning for the Aphex Platform Infrastructure. It watches for `RepoBinding` and `Organization` custom resources and provisions all necessary tenant infrastructure.
 
 ## Features
 
@@ -45,7 +45,7 @@ make deploy
 Create a `RepoBinding` resource to onboard a repository:
 
 ```yaml
-apiVersion: platform.arbiter.io/v1alpha1
+apiVersion: platform.aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding
@@ -183,4 +183,4 @@ Common validation errors:
 
 ## License
 
-Copyright 2024 Arbiter Platform Team
+Copyright 2025 Aphex Platform Team

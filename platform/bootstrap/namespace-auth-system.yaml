@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: auth-system
   labels:
-    platform.arbiter.io/component: "authentication"
-    platform.arbiter.io/managed-by: "bootstrap"
+    platform.aphex/component: "authentication"
+    platform.aphex/managed-by: "bootstrap"
     app.kubernetes.io/name: "auth-system"
     app.kubernetes.io/part-of: "argocd-tekton-platform"

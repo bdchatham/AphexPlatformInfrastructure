@@ -283,7 +283,7 @@ aphex organization bootstrap --admin-email admin@acme-corp.com acme-corp
 **Manual YAML Application**:
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp
@@ -372,7 +372,7 @@ After organization bootstrap, repositories can be onboarded to create webhook in
 ```bash
 # Create RepoBinding
 kubectl apply -f - <<EOF
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
@@ -1275,7 +1275,7 @@ kubectl get applications -n argocd -o yaml > applications-backup.yaml
 ```bash
 # Run bootstrap on new cluster
 cd platform/bootstrap
-./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
+./bootstrap.sh --cluster-name aphex-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
 ```
 
 **Step 2: Wait for ArgoCD to Sync**
@@ -1298,7 +1298,7 @@ kubectl apply -f repobindings-backup.yaml
 
 # Verify onboarding
 kubectl get repobindings -n platform-system
-kubectl get namespaces -l arbiter.io/managed-by=platform-controller
+kubectl get namespaces -l aphex/managed-by=platform-controller
 ```
 
 **Step 4: Verify Platform**
@@ -1310,7 +1310,7 @@ kubectl get pods -n tekton-pipelines
 kubectl get pods -n platform-system
 
 # Check organization namespaces
-kubectl get namespaces -l arbiter.io/managed-by=platform-controller
+kubectl get namespaces -l aphex/managed-by=platform-controller
 
 # Check ArgoCD sync status
 kubectl get application -n argocd
@@ -1579,7 +1579,7 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 2. **Run Bootstrap**:
    ```bash
    cd platform/bootstrap
-   ./bootstrap.sh --cluster-name arbiter-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
+   ./bootstrap.sh --cluster-name aphex-platform --repo-url https://github.com/bdchatham/AphexPlatformInfrastructure
    ```
 
 3. **Verify Bootstrap**:
@@ -1619,7 +1619,7 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 1. **Create RepoBinding**:
    ```bash
    kubectl apply -f - <<EOF
-   apiVersion: arbiter.io/v1alpha1
+   apiVersion: aphex/v1alpha1
    kind: RepoBinding
    metadata:
      name: my-repo-binding

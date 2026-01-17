@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: organizations.arbiter.io
+  name: organizations.aphex
 spec:
-  group: arbiter.io
+  group: aphex
   names:
     kind: Organization
     listKind: OrganizationList

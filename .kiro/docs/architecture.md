@@ -2,7 +2,7 @@
 
 ## System Design
 
-The Arbiter Pipeline Infrastructure is a production-ready GitOps platform built on ArgoCD and Tekton with a revolutionary layered cert-manager architecture. The system provides bulletproof certificate management, centralized authentication, self-service repository onboarding, and complete platform automation.
+The Aphex Pipeline Infrastructure is a production-ready GitOps platform built on ArgoCD and Tekton with a revolutionary layered cert-manager architecture. The system provides bulletproof certificate management, centralized authentication, self-service repository onboarding, and complete platform automation.
 
 The platform follows a **"Bootstrap Once, GitOps Forever"** pattern with **zero-touch convergence**: a one-time bootstrap script achieves complete platform deployment automatically, then ArgoCD manages all components declaratively with self-healing capabilities.
 
@@ -608,7 +608,7 @@ For authentication API details, see [api.md](api.md#authentication-api).
 ./bootstrap.sh [OPTIONS]
 
 Options:
-  --cluster-name NAME    Name of the cluster (default: arbiter-platform)
+  --cluster-name NAME    Name of the cluster (default: aphex-platform)
   --repo-url URL         Platform repository URL (default: current repo)
 ```
 
@@ -902,7 +902,7 @@ GitHub → {org}.arbiter-dev.com → Cloudflare DNS → Cloudflare Edge (SSL) �
 **Source**
 - `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller implementation
 - `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - CRD definition
-- `platform/crds/arbiter.io_knowledgebases.yaml` - CRD manifest
+- `platform/crds/aphex_knowledgebases.yaml` - CRD manifest
 - `platform/platform-controller/controller/` (Go source code)
 - `platform/platform-controller/controller-deployment.yaml`
 - `platform/platform-controller/controller-rbac.yaml`
@@ -1031,9 +1031,9 @@ spec:
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: repobindings.arbiter.io
+  name: repobindings.aphex
 spec:
-  group: arbiter.io
+  group: aphex
   names:
     kind: RepoBinding
     plural: repobindings

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The **Arbiter Pipeline Infrastructure** provides a production-ready GitOps platform using ArgoCD and Tekton for Kubernetes clusters. The system enables self-service repository onboarding with automated tenant provisioning, centralized authentication, and bulletproof certificate management through a layered cert-manager architecture.
+The **Aphex Pipeline Infrastructure** provides a production-ready GitOps platform using ArgoCD and Tekton for Kubernetes clusters. The system enables self-service repository onboarding with automated tenant provisioning, centralized authentication, and bulletproof certificate management through a layered cert-manager architecture.
 
 This repository contains:
 
@@ -141,7 +141,7 @@ After bootstrap completes:
 ### Onboard an Organization
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp

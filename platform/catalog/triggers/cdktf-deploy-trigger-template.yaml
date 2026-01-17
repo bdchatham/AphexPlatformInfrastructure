@@ -56,15 +56,15 @@ spec:
           app.kubernetes.io/name: cdktf-deploy-pipeline
           app.kubernetes.io/version: "0.1"
           tekton.dev/pipeline: cdktf-deploy-pipeline
-          arbiter.io/tenant: $(tt.params.tenant-name)
-          arbiter.io/repo-owner: $(tt.params.repo-owner)
-          arbiter.io/repo-name: $(tt.params.repo-name)
-          arbiter.io/commit-sha: $(tt.params.commit-sha)
+          aphex/tenant: $(tt.params.tenant-name)
+          aphex/repo-owner: $(tt.params.repo-owner)
+          aphex/repo-name: $(tt.params.repo-name)
+          aphex/commit-sha: $(tt.params.commit-sha)
         annotations:
-          arbiter.io/commit-message: $(tt.params.commit-message)
-          arbiter.io/commit-author: $(tt.params.commit-author)
-          arbiter.io/commit-timestamp: $(tt.params.commit-timestamp)
-          arbiter.io/triggered-by: github-webhook
+          aphex/commit-message: $(tt.params.commit-message)
+          aphex/commit-author: $(tt.params.commit-author)
+          aphex/commit-timestamp: $(tt.params.commit-timestamp)
+          aphex/triggered-by: github-webhook
       spec:
         pipelineRef:
           name: cdktf-deploy-pipeline

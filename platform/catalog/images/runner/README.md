@@ -163,6 +163,6 @@ If tools don't work in the container:
 
 ## Source
 
-This image is part of the Arbiter Pipeline Infrastructure platform.
+This image is part of the Aphex Platform Infrastructure platform.
 
 **Requirements**: 13.4

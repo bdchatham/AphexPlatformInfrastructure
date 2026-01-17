@@ -137,7 +137,7 @@ The platform is organized into four layers:
 ./bootstrap.sh [OPTIONS]
 
 Options:
-  --cluster-name NAME    Name of the cluster (default: arbiter-platform)
+  --cluster-name NAME    Name of the cluster (default: aphex-platform)
   --cluster-type TYPE    Type of cluster: kind, k3s, existing (default: kind)
   --repo-url URL         Platform repository URL (default: current repo)
   --cleanup-jenkinsx     Force cleanup of JenkinsX components (default: auto-detect)
@@ -540,7 +540,7 @@ sequenceDiagram
 ### RepoBinding Custom Resource
 
 ```yaml
-apiVersion: arbiter.io/v1alpha1
+apiVersion: aphex/v1alpha1
 kind: RepoBinding
 metadata:
   name: example-repo-binding

@@ -3,7 +3,7 @@ kind: Namespace
 metadata:
   name: pipeline-catalog
   labels:
-    platform.arbiter.io/component: "catalog"
-    platform.arbiter.io/managed-by: "bootstrap"
+    platform.aphex/component: "catalog"
+    platform.aphex/managed-by: "bootstrap"
     app.kubernetes.io/name: "pipeline-catalog"
     app.kubernetes.io/part-of: "argocd-tekton-platform"

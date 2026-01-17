@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design implements a centralized authentication and authorization system for the Arbiter Pipeline Infrastructure platform using Authentik as the primary Identity Provider (IdP) with Dex as an OIDC connector layer. The system integrates with ArgoCD and Tekton Dashboard to provide secure, role-based access to platform services. The implementation follows the existing GitOps patterns where bootstrap scripts handle initial deployment and ArgoCD manages ongoing configuration.
+This design implements a centralized authentication and authorization system for the Aphex Platform Infrastructure platform using Authentik as the primary Identity Provider (IdP) with Dex as an OIDC connector layer. The system integrates with ArgoCD and Tekton Dashboard to provide secure, role-based access to platform services. The implementation follows the existing GitOps patterns where bootstrap scripts handle initial deployment and ArgoCD manages ongoing configuration.
 
 The authentication system provides:
 - Self-hosted identity management with web UI through Authentik
