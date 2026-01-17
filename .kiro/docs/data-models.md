@@ -218,6 +218,95 @@ Pending → Provisioning → Ready
 For operational procedures on creating and managing repo bindings, see [operations.md](operations.md#create-repobinding).
 For API details on RepoBinding resources, see [api.md](api.md#repobinding-api).
 
+## KnowledgeBase Data Model
+
+### KnowledgeBase Spec
+
+```typescript
+interface KnowledgeBaseSpec {
+  displayName: string;          // Human-readable knowledge base name
+  description?: string;         // Optional context about this knowledge base
+  repositories: Repository[];   // List of repositories to track (minimum 1)
+}
+
+interface Repository {
+  url: string;                  // GitHub repository URL (https://github.com/org/repo)
+  branch?: string;              // Git branch to track (default: "main")
+  paths?: string[];             // Documentation paths to track (default: [".kiro/docs"])
+}
+```
+
+**Validation Rules**:
+- `displayName`: Required, non-empty string
+- `description`: Optional, provides context about the knowledge base
+- `repositories`: Required array with at least one repository
+- `repositories[].url`: Required, must start with `https://github.com/`
+- `repositories[].branch`: Optional, must be valid Git branch name if provided
+- `repositories[].paths`: Optional, each path must start with `.kiro/docs`
+
+**Example**:
+```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: KnowledgeBase
+metadata:
+  name: platform-docs
+  namespace: platform-system
+spec:
+  displayName: "Platform Documentation"
+  description: "Archon knowledge base for platform infrastructure and tooling"
+  repositories:
+    - url: "https://github.com/bdchatham/ArbiterPipelineInfrastructure"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+    - url: "https://github.com/bdchatham/AphexCLI"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+    - url: "https://github.com/bdchatham/ArchonAgent"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+```
+
+### KnowledgeBase Status
+
+```typescript
+interface KnowledgeBaseStatus {
+  phase: "Pending" | "Ready" | "Failed";
+  message: string;              // Human-readable status information
+  lastReconcileTime: string;    // ISO 8601 timestamp of last reconciliation
+}
+```
+
+**Phase Transitions**:
+```
+Pending → Ready
+    ↓
+  Failed
+```
+
+**Phase Descriptions**:
+- `Pending`: Initial state, validation in progress
+- `Ready`: Specification validated, tracking repositories
+- `Failed`: Validation failed, user must fix specification
+
+**Example**:
+```yaml
+status:
+  phase: "Ready"
+  message: "Tracking 3 repositories"
+  lastReconcileTime: "2026-01-16T23:15:00Z"
+```
+
+For operational procedures on creating and managing knowledge bases, see [operations.md](operations.md#knowledge-base-management).
+For API details on KnowledgeBase resources, see [api.md](api.md#knowledgebase-api).
+
+**Source**
+- `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - Go type definition
+- `platform/crds/arbiter.io_knowledgebases.yaml` - CRD definition
+- `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller implementation
+
 ## ArgoCD Application Data Model
 
 ### Application Spec with Sync Waves

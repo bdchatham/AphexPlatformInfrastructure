@@ -269,6 +269,156 @@ kubectl logs -n <tenant-name> -l app.kubernetes.io/component=eventlistener
 # Test webhook delivery in GitHub repository settings
 ```
 
+## KnowledgeBase API
+
+### KnowledgeBase Custom Resource
+
+The API for managing Archon knowledge bases that track documentation across multiple repositories.
+
+**API Group**: `arbiter.io`  
+**API Version**: `v1alpha1`  
+**Kind**: `KnowledgeBase`  
+**Scope**: Namespaced (typically created in `platform-system` namespace)
+
+### KnowledgeBase Spec
+
+```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: KnowledgeBase
+metadata:
+  name: <knowledge-base-name>
+  namespace: platform-system
+spec:
+  displayName: <string>          # Required: Human-readable knowledge base name
+  description: <string>          # Optional: Context about this knowledge base
+  repositories:                  # Required: List of repositories to track (minimum 1)
+    - url: <string>              # Required: GitHub repository URL (https://github.com/org/repo)
+      branch: <string>           # Optional: Git branch to track (default: "main")
+      paths:                     # Optional: Documentation paths (default: [".kiro/docs"])
+        - <string>
+```
+
+**Field Descriptions**:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `displayName` | string | Yes | Human-readable knowledge base name |
+| `description` | string | No | Optional context about this knowledge base |
+| `repositories` | array | Yes | List of repositories to track (minimum 1 repository) |
+| `repositories[].url` | string | Yes | GitHub repository URL (must start with `https://github.com/`) |
+| `repositories[].branch` | string | No | Git branch to track (default: `main`) |
+| `repositories[].paths` | array | No | Documentation paths to track (default: `[".kiro/docs"]`) |
+
+**Validation Rules**:
+- `displayName` is required and must be non-empty
+- `repositories` array must contain at least one repository
+- `repositories[].url` must start with `https://github.com/`
+- `repositories[].branch` must be a valid Git branch name if provided
+- `repositories[].paths` must start with `.kiro/docs` if provided
+
+For data model details, see [data-models.md](data-models.md#knowledgebase-data-model).
+
+**Source**: `platform/crds/arbiter.io_knowledgebases.yaml`, `platform/platform-controller/controller/controllers/knowledgebase_controller.go`
+
+### KnowledgeBase Status
+
+The controller updates the status to reflect validation and tracking state.
+
+```yaml
+status:
+  phase: <string>                    # "Pending" | "Ready" | "Failed"
+  message: <string>                  # Human-readable status information
+  lastReconcileTime: <timestamp>     # ISO 8601 timestamp of last reconciliation
+```
+
+**Phase Values**:
+- `Pending`: KnowledgeBase created, validation in progress
+- `Ready`: Specification validated, tracking repositories
+- `Failed`: Validation failed (check message for details)
+
+**Phase Transitions**:
+```
+Pending → Ready
+    ↓
+  Failed
+```
+
+### Usage Examples
+
+**Example 1: Platform Documentation Knowledge Base**
+
+```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: KnowledgeBase
+metadata:
+  name: platform-docs
+  namespace: platform-system
+spec:
+  displayName: "Platform Documentation"
+  description: "Archon knowledge base for platform infrastructure and tooling"
+  repositories:
+    - url: "https://github.com/bdchatham/ArbiterPipelineInfrastructure"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+    - url: "https://github.com/bdchatham/AphexCLI"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+    - url: "https://github.com/bdchatham/ArchonAgent"
+      branch: "main"
+      paths:
+        - ".kiro/docs"
+```
+
+**Example 2: Application Documentation Knowledge Base**
+
+```yaml
+apiVersion: arbiter.io/v1alpha1
+kind: KnowledgeBase
+metadata:
+  name: app-docs
+  namespace: platform-system
+spec:
+  displayName: "Application Documentation"
+  description: "Documentation for production applications"
+  repositories:
+    - url: "https://github.com/acme-corp/frontend-app"
+      branch: "main"
+    - url: "https://github.com/acme-corp/backend-api"
+      branch: "main"
+    - url: "https://github.com/acme-corp/data-pipeline"
+      branch: "develop"
+      paths:
+        - ".kiro/docs"
+        - ".kiro/docs/runbooks"
+```
+
+### Controller Behavior
+
+The KnowledgeBase controller validates specifications and maintains tracking state.
+
+**Reconciliation Process**:
+1. **Validation**: Validates KnowledgeBase spec (repository URLs, branch names, paths)
+2. **Status Update**: Updates phase to `Ready` if validation passes, `Failed` if validation fails
+3. **Periodic Reconciliation**: Requeues every 5 minutes to maintain tracking state
+
+**Validation Checks**:
+- Repository URLs must start with `https://github.com/`
+- Branch names must be valid Git branch names (if provided)
+- Paths must start with `.kiro/docs` (if provided)
+- Repositories array must contain at least one repository
+
+**Error Handling**:
+- Validation errors result in `Failed` phase with descriptive error messages
+- Invalid specifications do not trigger requeue (user must fix the spec)
+- Transient errors trigger exponential backoff retry
+
+**Source**
+- `platform/crds/arbiter.io_knowledgebases.yaml` - KnowledgeBase CRD definition
+- `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - KnowledgeBase Go types
+- `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller reconciliation logic
+
 ## Onboarding Controller API
 
 ### Controller Behavior

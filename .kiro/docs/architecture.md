@@ -863,7 +863,46 @@ GitHub → {org}.arbiter-dev.com → Cloudflare DNS → Cloudflare Edge (SSL) �
 - No router port forwarding required
 - Independent scaling per organization
 
+#### KnowledgeBase Controller
+
+**Resources**:
+- KnowledgeBase CRD and Controller
+- Documentation repository tracking for Archon RAG system
+- Validation of repository URLs and documentation paths
+
+**Controller Logic**:
+1. Watch KnowledgeBase resources across all namespaces
+2. Validate spec on creation or update:
+   - Repository URLs must start with `https://github.com/`
+   - Branch names must contain only valid Git characters
+   - Documentation paths must start with `.kiro/docs`
+3. Set status phase to Pending on first reconciliation
+4. Update status phase to Ready when validation succeeds
+5. Update status phase to Failed with descriptive error message when validation fails
+6. Update lastReconcileTime on each reconciliation
+7. Requeue every 5 minutes for periodic validation
+
+**Status Phases**:
+- **Pending**: Initial state, validation not yet complete
+- **Ready**: Validation successful, repositories are valid
+- **Failed**: Validation failed, see status message for details
+
+**Validation Rules**:
+- At least one repository must be specified
+- Repository URLs must be GitHub HTTPS URLs
+- Branch names must be valid Git branch names
+- Documentation paths must be within `.kiro/docs` directory
+
+**Integration with Archon**:
+- Archon agent monitors KnowledgeBase resources
+- Documentation changes in tracked repositories trigger re-ingestion
+- Vector store is updated with latest documentation content
+- RAG queries use ingested documentation for context
+
 **Source**
+- `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller implementation
+- `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - CRD definition
+- `platform/crds/arbiter.io_knowledgebases.yaml` - CRD manifest
 - `platform/platform-controller/controller/` (Go source code)
 - `platform/platform-controller/controller-deployment.yaml`
 - `platform/platform-controller/controller-rbac.yaml`
