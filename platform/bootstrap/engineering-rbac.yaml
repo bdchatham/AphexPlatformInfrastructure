@@ -10,12 +10,12 @@ metadata:
     component: onboarding
 rules:
   # Allow creating and managing RepoBinding resources
-  - apiGroups: ["platform.aphex"]
+  - apiGroups: ["aphex.io"]
     resources: ["repobindings"]
     verbs: ["create", "get", "list", "watch", "update", "patch"]
   
   # Allow reading RepoBinding status
-  - apiGroups: ["platform.aphex"]
+  - apiGroups: ["aphex.io"]
     resources: ["repobindings/status"]
     verbs: ["get", "list", "watch"]
   

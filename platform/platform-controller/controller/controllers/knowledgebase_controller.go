@@ -22,9 +22,9 @@ type KnowledgeBaseReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=aphex,resources=knowledgebases,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=aphex,resources=knowledgebases/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=aphex,resources=knowledgebases/finalizers,verbs=update
+// +kubebuilder:rbac:groups=aphex.io,resources=knowledgebases,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=aphex.io,resources=knowledgebases/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=aphex.io,resources=knowledgebases/finalizers,verbs=update
 
 // Reconcile manages KnowledgeBase resources
 func (r *KnowledgeBaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

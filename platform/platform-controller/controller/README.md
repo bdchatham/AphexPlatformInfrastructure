@@ -45,7 +45,7 @@ make deploy
 Create a `RepoBinding` resource to onboard a repository:
 
 ```yaml
-apiVersion: platform.aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding

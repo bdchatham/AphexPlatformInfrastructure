@@ -150,7 +150,7 @@ The onboarding controller selects the appropriate Role template based on the `pe
 ## Example RepoBinding
 
 ```yaml
-apiVersion: platform.aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding

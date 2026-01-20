@@ -180,7 +180,7 @@ The bootstrap script provides **zero-touch convergence**: run once and walk away
 
 1. **Create a RepoBinding:**
    ```yaml
-   apiVersion: platform.aphex/v1alpha1
+   apiVersion: aphex.io/v1alpha1
    kind: RepoBinding
    metadata:
      name: my-repo-binding

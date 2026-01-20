@@ -4,19 +4,22 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.14.0
-  name: knowledgebases.aphex
+  name: organizations.aphex.io
 spec:
-  group: aphex
+  group: aphex.io
   names:
-    kind: KnowledgeBase
-    listKind: KnowledgeBaseList
-    plural: knowledgebases
-    singular: knowledgebase
+    kind: Organization
+    listKind: OrganizationList
+    plural: organizations
+    singular: organization
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.displayName
       name: Display Name
+      type: string
+    - jsonPath: .status.namespace
+      name: Namespace
       type: string
     - jsonPath: .status.phase
       name: Phase
@@ -27,7 +30,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: KnowledgeBase is the Schema for the knowledgebases API
+        description: Organization is the Schema for the organizations API
         properties:
           apiVersion:
             description: |-
@@ -47,52 +50,38 @@ spec:
           metadata:
             type: object
           spec:
-            description: KnowledgeBaseSpec defines the desired state of KnowledgeBase
+            description: OrganizationSpec defines the desired state of Organization
             properties:
-              description:
-                description: Description provides context about this knowledge base
-                type: string
-              displayName:
-                description: DisplayName is the human-readable knowledge base name
-                type: string
-              repositories:
-                description: Repositories is the list of repositories to track
+              adminUsers:
+                description: AdminUsers is a list of admin email addresses
                 items:
-                  description: Repository defines a single repository to track
-                  properties:
-                    branch:
-                      description: 'Branch is the Git branch to track (default: main)'
-                      type: string
-                    paths:
-                      description: 'Paths are the documentation paths to track (default:
-                        [".kiro/docs"])'
-                      items:
-                        type: string
-                      type: array
-                    url:
-                      description: URL is the GitHub repository URL (https://github.com/org/repo)
-                      type: string
-                  required:
-                  - url
-                  type: object
-                minItems: 1
+                  type: string
                 type: array
+              displayName:
+                description: DisplayName is the human-readable organization name
+                type: string
+              webhookSecret:
+                description: WebhookSecret is the GitHub webhook secret (auto-generated
+                  if not provided)
+                type: string
             required:
+            - adminUsers
             - displayName
-            - repositories
             type: object
           status:
-            description: KnowledgeBaseStatus defines the observed state of KnowledgeBase
+            description: OrganizationStatus defines the observed state of Organization
             properties:
-              lastReconcileTime:
-                description: LastReconcileTime is the timestamp of the last reconciliation
-                format: date-time
-                type: string
               message:
                 description: Message provides human-readable status information
                 type: string
+              namespace:
+                description: Namespace is the organization namespace name
+                type: string
               phase:
-                description: Phase represents the current state (Pending, Ready, Failed)
+                description: Phase represents the organization provisioning status
+                type: string
+              webhookURL:
+                description: WebhookURL is the external webhook URL for GitHub integration
                 type: string
             type: object
         type: object

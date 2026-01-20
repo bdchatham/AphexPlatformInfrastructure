@@ -36,9 +36,9 @@ type OrganizationReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=aphex,resources=organizations,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=aphex,resources=organizations/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=aphex,resources=organizations/finalizers,verbs=update
+// +kubebuilder:rbac:groups=aphex.io,resources=organizations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=aphex.io,resources=organizations/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=aphex.io,resources=organizations/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
@@ -240,7 +240,7 @@ func (r *OrganizationReconciler) provisionRBAC(ctx context.Context, org *platfor
 				Verbs:     []string{"*"},
 			},
 			{
-				APIGroups: []string{"aphex"},
+				APIGroups: []string{"aphex.io"},
 				Resources: []string{"repobindings"},
 				Verbs:     []string{"get", "list", "watch", "create", "update", "patch"},
 			},

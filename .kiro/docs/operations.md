@@ -283,7 +283,7 @@ aphex organization bootstrap --admin-email admin@acme-corp.com acme-corp
 **Manual YAML Application**:
 ```bash
 kubectl apply -f - <<EOF
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp
@@ -372,7 +372,7 @@ After organization bootstrap, repositories can be onboarded to create webhook in
 ```bash
 # Create RepoBinding
 kubectl apply -f - <<EOF
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding
@@ -1619,7 +1619,7 @@ kubectl run -it --rm debug --image=busybox --restart=Never -n <pipeline-namespac
 1. **Create RepoBinding**:
    ```bash
    kubectl apply -f - <<EOF
-   apiVersion: aphex/v1alpha1
+   apiVersion: aphex.io/v1alpha1
    kind: RepoBinding
    metadata:
      name: my-repo-binding

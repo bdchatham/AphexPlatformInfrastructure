@@ -52,7 +52,7 @@ See `example-repobinding.yaml` for complete examples.
 Basic example:
 
 ```yaml
-apiVersion: platform.aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: archon-binding
@@ -83,13 +83,13 @@ kubectl apply -f repobinding.yaml
 Verify the CRD is registered:
 
 ```bash
-kubectl get crd repobindings.platform.aphex
+kubectl get crd repobindings.aphex.io
 ```
 
 Wait for the CRD to be established:
 
 ```bash
-kubectl wait --for condition=established --timeout=60s crd/repobindings.platform.aphex
+kubectl wait --for condition=established --timeout=60s crd/repobindings.aphex.io
 ```
 
 #### Automated Installation and Verification

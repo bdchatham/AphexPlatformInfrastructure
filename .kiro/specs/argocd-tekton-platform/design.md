@@ -540,7 +540,7 @@ sequenceDiagram
 ### RepoBinding Custom Resource
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: example-repo-binding

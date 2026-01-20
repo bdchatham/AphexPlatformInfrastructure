@@ -56,7 +56,7 @@ kubectl get pods --user=oidc
 
 The primary API for creating multi-tenant organizations with isolated namespaces, public webhook endpoints, and Cloudflare tunnel integration.
 
-**API Group**: `aphex`  
+**API Group**: `aphex.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `Organization`  
 **Scope**: Namespaced (must be created in `platform-system`)
@@ -64,7 +64,7 @@ The primary API for creating multi-tenant organizations with isolated namespaces
 ### Create Organization
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp
@@ -113,7 +113,7 @@ kubectl delete organization acme-corp -n platform-system
 
 The primary API for onboarding repositories to the platform with automated tenant provisioning.
 
-**API Group**: `aphex`  
+**API Group**: `aphex.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `RepoBinding`  
 **Scope**: Namespaced (must be created in `platform-system` namespace)
@@ -121,7 +121,7 @@ The primary API for onboarding repositories to the platform with automated tenan
 ### RepoBinding Spec
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: <binding-name>
@@ -202,7 +202,7 @@ status:
 **Example 1: Standard Repository Onboarding**
 
 ```yaml
-apiVersion: platform.aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-app-binding
@@ -217,7 +217,7 @@ spec:
 **Example 2: Infrastructure Repository with Elevated Permissions**
 
 ```yaml
-apiVersion: platform.aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: infrastructure-binding
@@ -275,7 +275,7 @@ kubectl logs -n <tenant-name> -l app.kubernetes.io/component=eventlistener
 
 The API for managing Archon knowledge bases that track documentation across multiple repositories.
 
-**API Group**: `aphex`  
+**API Group**: `aphex.io`  
 **API Version**: `v1alpha1`  
 **Kind**: `KnowledgeBase`  
 **Scope**: Namespaced (typically created in `platform-system` namespace)
@@ -283,7 +283,7 @@ The API for managing Archon knowledge bases that track documentation across mult
 ### KnowledgeBase Spec
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: <knowledge-base-name>
@@ -348,7 +348,7 @@ Pending → Ready
 **Example 1: Platform Documentation Knowledge Base**
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: platform-docs
@@ -374,7 +374,7 @@ spec:
 **Example 2: Application Documentation Knowledge Base**
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: KnowledgeBase
 metadata:
   name: app-docs

@@ -141,7 +141,7 @@ After bootstrap completes:
 ### Onboard an Organization
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: Organization
 metadata:
   name: acme-corp

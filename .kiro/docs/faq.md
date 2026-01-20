@@ -114,7 +114,7 @@ The platform uses real hostnames for OIDC authentication:
 Create a RepoBinding resource:
 
 ```yaml
-apiVersion: aphex/v1alpha1
+apiVersion: aphex.io/v1alpha1
 kind: RepoBinding
 metadata:
   name: my-repo-binding

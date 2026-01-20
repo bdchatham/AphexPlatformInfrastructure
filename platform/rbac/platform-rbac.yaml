@@ -5,7 +5,7 @@ metadata:
   name: platform-admin
 rules:
   # Full access to platform CRDs
-  - apiGroups: ["aphex"]
+  - apiGroups: ["aphex.io"]
     resources: ["*"]
     verbs: ["*"]
   
@@ -36,7 +36,7 @@ metadata:
   name: platform-operator
 rules:
   # Manage platform CRDs (full access)
-  - apiGroups: ["aphex"]
+  - apiGroups: ["aphex.io"]
     resources: ["*"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   
