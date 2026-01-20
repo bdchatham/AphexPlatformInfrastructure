@@ -7,7 +7,7 @@ metadata:
 rules:
 # RepoBinding CRD permissions
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - repobindings
   verbs:
@@ -16,8 +16,9 @@ rules:
   - watch
   - update
   - patch
+  - create
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - repobindings/status
   verbs:
@@ -27,7 +28,7 @@ rules:
 
 # Organization CRD permissions
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - organizations
   verbs:
@@ -39,7 +40,7 @@ rules:
   - patch
   - delete
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - organizations/status
   verbs:
@@ -49,7 +50,7 @@ rules:
 
 # KnowledgeBase CRD permissions
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - knowledgebases
   verbs:
@@ -59,7 +60,7 @@ rules:
   - update
   - patch
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - knowledgebases/status
   verbs:
@@ -168,7 +169,7 @@ rules:
 
 # RepoBinding create permissions for organizations
 - apiGroups:
-  - aphex
+  - aphex.io
   resources:
   - repobindings
   verbs:
