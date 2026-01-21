@@ -80,6 +80,7 @@ func buildPipelineRunTemplate() []byte {
 				"pipelineRef": {
 					"resolver": "cluster",
 					"params": [
+						{"name": "kind", "value": "pipeline"},
 						{"name": "name", "value": "$(tt.params.pipeline-name)"},
 						{"name": "namespace", "value": "$(tt.params.pipeline-namespace)"}
 					]
