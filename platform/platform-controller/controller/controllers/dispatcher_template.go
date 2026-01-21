@@ -94,6 +94,21 @@ func buildPipelineRunTemplate() []byte {
 					{"name": "triggered-at", "value": "$(tt.params.triggered-at)"},
 					{"name": "org-name", "value": "$(tt.params.org-name)"}
 				],
+				"workspaces": [
+					{
+						"name": "source",
+						"volumeClaimTemplate": {
+							"spec": {
+								"accessModes": ["ReadWriteOnce"],
+								"resources": {
+									"requests": {
+										"storage": "1Gi"
+									}
+								}
+							}
+						}
+					}
+				],
 				"taskRunTemplate": {
 					"serviceAccountName": "pipeline-runner"
 				},
