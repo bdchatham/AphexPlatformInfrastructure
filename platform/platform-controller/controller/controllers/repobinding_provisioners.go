@@ -11,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -159,6 +161,11 @@ func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv
 	// Create ArgoCD RoleBinding in argocd namespace
 	if err := r.provisionArgoCDRoleBinding(ctx, rb); err != nil {
 		return fmt.Errorf("failed to provision argocd rolebinding: %w", err)
+	}
+
+	// Create ArgoCD AppProject for pipeline isolation
+	if err := r.provisionArgoCDAppProject(ctx, rb); err != nil {
+		return fmt.Errorf("failed to provision argocd appproject: %w", err)
 	}
 
 	return nil
@@ -369,6 +376,75 @@ func (r *RepoBindingReconciler) provisionArgoCDRoleBinding(ctx context.Context, 
 	existingRB.Labels = roleBinding.Labels
 	if err := r.Update(ctx, existingRB); err != nil {
 		return fmt.Errorf("failed to update ArgoCD RoleBinding: %w", err)
+	}
+
+	return nil
+}
+
+// provisionArgoCDAppProject creates an AppProject scoped to the pipeline's allowed destinations.
+//
+// NOTE: We use unstructured here instead of importing github.com/argoproj/argo-cd/v2/pkg/apis/application/v1alpha1
+// because ArgoCD's API types have deep transitive dependencies on k8s.io/kubernetes which causes
+// version conflicts with our k8s.io/api version. The unstructured approach avoids this dependency
+// hell while still providing type-safe interaction with the ArgoCD CRD.
+func (r *RepoBindingReconciler) provisionArgoCDAppProject(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	projectName := rb.Spec.PipelineName
+
+	appProject := &unstructured.Unstructured{}
+	appProject.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "argoproj.io",
+		Version: "v1alpha1",
+		Kind:    "AppProject",
+	})
+	appProject.SetName(projectName)
+	appProject.SetNamespace("argocd")
+	appProject.SetLabels(map[string]string{
+		"platform.aphex/pipeline":   rb.Spec.PipelineName,
+		"platform.aphex/managed-by": "platform-controller",
+	})
+
+	spec := map[string]interface{}{
+		"description": fmt.Sprintf("Project for %s pipeline", rb.Spec.PipelineName),
+		"destinations": []interface{}{
+			map[string]interface{}{
+				"server":    "https://kubernetes.default.svc",
+				"namespace": rb.Spec.PipelineName,
+			},
+			map[string]interface{}{
+				"server":    "https://kubernetes.default.svc",
+				"namespace": fmt.Sprintf("%s-*", rb.Spec.PipelineName),
+			},
+		},
+		"sourceRepos": []interface{}{
+			fmt.Sprintf("https://github.com/%s/%s", rb.Spec.RepoOrg, rb.Spec.RepoName),
+			fmt.Sprintf("https://github.com/%s/%s.git", rb.Spec.RepoOrg, rb.Spec.RepoName),
+		},
+		"clusterResourceWhitelist": []interface{}{},
+		"namespaceResourceWhitelist": []interface{}{
+			map[string]interface{}{"group": "*", "kind": "*"},
+		},
+	}
+	appProject.Object["spec"] = spec
+
+	existingProject := &unstructured.Unstructured{}
+	existingProject.SetGroupVersionKind(appProject.GroupVersionKind())
+	err := r.Get(ctx, client.ObjectKey{Name: projectName, Namespace: "argocd"}, existingProject)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating ArgoCD AppProject", "name", projectName, "pipeline", rb.Spec.PipelineName)
+			if err := r.Create(ctx, appProject); err != nil {
+				return fmt.Errorf("failed to create ArgoCD AppProject: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ArgoCD AppProject: %w", err)
+	}
+
+	r.Log.Info("Updating ArgoCD AppProject", "name", projectName, "pipeline", rb.Spec.PipelineName)
+	existingProject.Object["spec"] = spec
+	existingProject.SetLabels(appProject.GetLabels())
+	if err := r.Update(ctx, existingProject); err != nil {
+		return fmt.Errorf("failed to update ArgoCD AppProject: %w", err)
 	}
 
 	return nil

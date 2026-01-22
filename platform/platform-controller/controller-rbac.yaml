@@ -131,6 +131,19 @@ rules:
   - update
   - patch
 
+# ArgoCD AppProject permissions
+- apiGroups:
+  - argoproj.io
+  resources:
+  - appprojects
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+
 # All core API permissions for organization admin roles
 - apiGroups:
   - ""
