@@ -226,7 +226,7 @@ metadata:
   name: platform-root
   namespace: argocd
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - argoproj.io/finalizer
 spec:
   project: default
   source:
