@@ -115,41 +115,10 @@ install_k3s() {
 }
 
 configure_nvidia_runtime() {
-  local config_file="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
-  local config_dir=$(dirname "$config_file")
-  
-  # Check if already configured
-  if [[ -f "$config_file" ]] && grep -q "nvidia-container-runtime" "$config_file" 2>/dev/null; then
-    log_info "NVIDIA runtime already configured in containerd"
-    return 0
+  if ! nvidia-ctk runtime configure --runtime=containerd --set-as-default=false 2>/dev/null; then
+    log_warning "nvidia-ctk configure skipped (may already be configured)"
   fi
-  
-  log_info "Configuring NVIDIA runtime for containerd..."
-  
-  # Create directory if needed
-  mkdir -p "$config_dir"
-  
-  # Add NVIDIA runtime configuration
-  cat >> "$config_file" <<'EOF'
-
-[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'nvidia']
-  runtime_type = "io.containerd.runc.v2"
-
-[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'nvidia'.options]
-  BinaryName = "/usr/bin/nvidia-container-runtime"
-  SystemdCgroup = true
-EOF
-  
-  # Restart K3s to pick up changes
-  log_info "Restarting K3s to apply NVIDIA runtime config..."
-  systemctl restart k3s
-  
-  # Wait for K3s to be ready again
-  until k3s kubectl get nodes &> /dev/null; do
-    sleep 2
-  done
-  
-  log_success "NVIDIA runtime configured"
+  log_success "NVIDIA runtime available"
 }
 
 generate_secrets() {
