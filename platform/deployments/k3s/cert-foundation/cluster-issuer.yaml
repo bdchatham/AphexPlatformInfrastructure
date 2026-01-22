@@ -1,0 +1,73 @@
+# Let's Encrypt ClusterIssuer for production TLS
+# Uses HTTP-01 challenge for individual certs
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@arbiter-dev.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - name: platform-gateway
+                namespace: kube-system
+                kind: Gateway
+---
+# Individual certificates (HTTP-01 challenge)
+# For wildcard, you'd need DNS-01 with Cloudflare/Route53
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-tls
+  namespace: argocd
+spec:
+  secretName: argocd-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - argocd.arbiter-dev.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: auth-tls
+  namespace: auth-system
+spec:
+  secretName: auth-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - auth.arbiter-dev.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dex-tls
+  namespace: auth-system
+spec:
+  secretName: dex-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - dex.arbiter-dev.com
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: tekton-tls
+  namespace: tekton-pipelines
+spec:
+  secretName: tekton-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - tekton.arbiter-dev.com

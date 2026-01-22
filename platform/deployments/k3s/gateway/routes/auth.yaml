@@ -1,0 +1,15 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: authentik
+  namespace: auth-system
+spec:
+  parentRefs:
+    - name: platform-gateway
+      namespace: kube-system
+  hostnames:
+    - auth.arbiter-dev.com
+  rules:
+    - backendRefs:
+        - name: authentik
+          port: 9000

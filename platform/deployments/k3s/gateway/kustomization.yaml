@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - gateway-api-crds.yaml
+  - traefik-config.yaml
+  - gateway.yaml
+  - routes/argocd.yaml
+  - routes/auth.yaml
+  - routes/dex.yaml
+  - routes/tekton.yaml

@@ -1,0 +1,20 @@
+# Enable Traefik Gateway API provider in K3s
+# K3s uses HelmChartConfig to customize bundled Traefik
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+    gateway:
+      listeners:
+        web:
+          port: 8000
+          protocol: HTTP
+        websecure:
+          port: 8443
+          protocol: HTTPS
