@@ -144,6 +144,28 @@ rules:
   - update
   - patch
 
+# ArgoCD Application permissions (needed to grant via RoleBinding)
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications/status
+  verbs:
+  - get
+  - list
+  - watch
+
 # All core API permissions for organization admin roles
 - apiGroups:
   - ""
