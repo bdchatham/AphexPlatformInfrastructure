@@ -1,0 +1,292 @@
+#!/bin/sh
+set -e
+
+echo "========================================="
+echo "Authentik-Dex Configuration Sync Job"
+echo "========================================="
+echo ""
+
+# Configuration
+AUTHENTIK_URL="http://authentik.auth-system.svc.cluster.local:9000"
+DEX_NAMESPACE="auth-system"
+DEX_DEPLOYMENT="dex"
+EXPECTED_REDIRECT_URI="https://dex.home.local/callback"
+EXPECTED_ISSUER_AUTHENTIK="https://auth.home.local/application/o/platform-services/"
+EXPECTED_ISSUER_DEX="https://dex.home.local"
+
+# Read secrets from mounted volumes
+echo "[1/9] Reading secrets from mounted volumes..."
+if [ ! -f /secrets/dex-client-secret ]; then
+  echo "ERROR: Dex client secret not found at /secrets/dex-client-secret"
+  exit 1
+fi
+if [ ! -f /secrets/authentik-token ]; then
+  echo "ERROR: Authentik API token not found at /secrets/authentik-token"
+  exit 1
+fi
+
+# Read and strip any newlines/carriage returns to avoid "invalid header field value" errors
+DEX_CLIENT_SECRET=$(cat /secrets/dex-client-secret | tr -d '\n\r')
+AUTHENTIK_TOKEN=$(cat /secrets/authentik-token | tr -d '\n\r')
+
+if [ -z "$DEX_CLIENT_SECRET" ]; then
+  echo "ERROR: Dex client secret is empty"
+  exit 1
+fi
+if [ -z "$AUTHENTIK_TOKEN" ]; then
+  echo "ERROR: Authentik API token is empty"
+  exit 1
+fi
+
+echo "✓ Secrets loaded successfully"
+echo ""
+
+# Wait for Authentik to be ready
+echo "[2/9] Waiting for Authentik to be ready..."
+MAX_ATTEMPTS=60
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+  if curl -f -s "${AUTHENTIK_URL}/api/v3/root/config/" > /dev/null 2>&1; then
+    echo "✓ Authentik is ready"
+    break
+  fi
+  ATTEMPT=$((ATTEMPT + 1))
+  if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+    echo "ERROR: Authentik did not become ready after ${MAX_ATTEMPTS} attempts"
+    exit 1
+  fi
+  echo "  Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: Authentik not ready, waiting 5 seconds..."
+  sleep 5
+done
+echo ""
+
+# Lookup OIDC provider by name, client_id, and redirect_uris
+echo "[3/9] Looking up OIDC provider in Authentik..."
+PROVIDERS_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer ${AUTHENTIK_TOKEN}" \
+  "${AUTHENTIK_URL}/api/v3/providers/oauth2/")
+
+HTTP_CODE=$(echo "$PROVIDERS_RESPONSE" | tail -n1)
+PROVIDERS_JSON=$(echo "$PROVIDERS_RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+  echo "ERROR: Failed to fetch OIDC providers from Authentik API (HTTP ${HTTP_CODE})"
+  echo "Response: ${PROVIDERS_JSON}"
+  exit 1
+fi
+
+# Use jq for robust JSON parsing
+# Find providers matching all criteria:
+# - name = "Dex OIDC Provider"
+# - client_id = "dex-client"
+# - redirect_uris contains "https://dex.home.local/callback"
+MATCHING_PROVIDERS=$(echo "$PROVIDERS_JSON" | jq -r --arg redirect_uri "$EXPECTED_REDIRECT_URI" '
+  .results[] | 
+  select(
+    .name == "Dex OIDC Provider" and 
+    .client_id == "dex-client" and 
+    (.redirect_uris | contains($redirect_uri))
+  ) | 
+  .pk
+')
+
+# Count matches
+MATCH_COUNT=$(echo "$MATCHING_PROVIDERS" | grep -c . || true)
+
+if [ "$MATCH_COUNT" -eq 0 ]; then
+  PROVIDER_COUNT=$(echo "$PROVIDERS_JSON" | jq -r '.results | length')
+  echo "ERROR: No OIDC provider found matching criteria"
+  echo "  Found ${PROVIDER_COUNT} total OAuth2 providers in Authentik"
+  echo "  Expected to find provider matching:"
+  echo "  - name = 'Dex OIDC Provider'"
+  echo "  - client_id = 'dex-client'"
+  echo "  - redirect_uris contains '${EXPECTED_REDIRECT_URI}'"
+  echo ""
+  echo "  This likely means:"
+  echo "  1. Authentik Blueprint did not create the provider, or"
+  echo "  2. The redirect URI in the Blueprint does not match '${EXPECTED_REDIRECT_URI}'"
+  echo ""
+  echo "  Please verify the Authentik Blueprint configuration."
+  exit 1
+fi
+
+if [ "$MATCH_COUNT" -gt 1 ]; then
+  echo "ERROR: Multiple OIDC providers found matching criteria"
+  echo "  Found ${MATCH_COUNT} providers with IDs: $(echo "$MATCHING_PROVIDERS" | tr '\n' ',' | sed 's/,$//')"
+  echo "  Expected exactly one provider matching:"
+  echo "  - name = 'Dex OIDC Provider'"
+  echo "  - client_id = 'dex-client'"
+  echo "  - redirect_uris contains '${EXPECTED_REDIRECT_URI}'"
+  echo ""
+  echo "  Please remove duplicate providers in Authentik UI."
+  exit 1
+fi
+
+PROVIDER_ID="$MATCHING_PROVIDERS"
+echo "✓ Found matching OIDC provider (ID: ${PROVIDER_ID})"
+echo ""
+
+# Check if client secret is already set (idempotency)
+echo "[4/9] Checking if OIDC provider already has client secret..."
+PROVIDER_DETAIL=$(curl -s -w "\n%{http_code}" -H "Authorization: Bearer ${AUTHENTIK_TOKEN}" \
+  "${AUTHENTIK_URL}/api/v3/providers/oauth2/${PROVIDER_ID}/")
+
+HTTP_CODE=$(echo "$PROVIDER_DETAIL" | tail -n1)
+PROVIDER_JSON=$(echo "$PROVIDER_DETAIL" | sed '$d')
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+  echo "ERROR: Failed to fetch OIDC provider details (HTTP ${HTTP_CODE})"
+  echo "Response: ${PROVIDER_JSON}"
+  exit 1
+fi
+
+# Check if client_secret is already set
+CURRENT_SECRET=$(echo "$PROVIDER_JSON" | jq -r '.client_secret // empty')
+
+if [ -n "$CURRENT_SECRET" ] && [ "$CURRENT_SECRET" = "$DEX_CLIENT_SECRET" ]; then
+  echo "✓ OIDC provider already has correct client secret (idempotent - no update needed)"
+else
+  # Update OIDC provider with client secret
+  echo "  Updating OIDC provider with Dex client secret..."
+  UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+    -H "Authorization: Bearer ${AUTHENTIK_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"client_secret\": \"${DEX_CLIENT_SECRET}\"}" \
+    "${AUTHENTIK_URL}/api/v3/providers/oauth2/${PROVIDER_ID}/")
+
+  HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+  RESPONSE_BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
+
+  if [ "$HTTP_CODE" -ne 200 ]; then
+    echo "ERROR: Failed to update OIDC provider (HTTP ${HTTP_CODE})"
+    echo "Response: ${RESPONSE_BODY}"
+    exit 1
+  fi
+
+  echo "✓ OIDC provider updated with client secret"
+fi
+echo ""
+
+# Verify Authentik OIDC discovery endpoint
+echo "[5/9] Verifying Authentik OIDC discovery endpoint..."
+DISCOVERY_URL="${AUTHENTIK_URL}/application/o/platform-services/.well-known/openid-configuration"
+DISCOVERY_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Accept: application/json" "$DISCOVERY_URL")
+
+HTTP_CODE=$(echo "$DISCOVERY_RESPONSE" | tail -n1)
+DISCOVERY_JSON=$(echo "$DISCOVERY_RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+  echo "ERROR: Authentik OIDC discovery endpoint returned HTTP ${HTTP_CODE}"
+  echo "  URL: ${DISCOVERY_URL}"
+  echo "Response: ${DISCOVERY_JSON}"
+  exit 1
+fi
+
+# Verify issuer in discovery JSON using jq
+DISCOVERED_ISSUER=$(echo "$DISCOVERY_JSON" | jq -r '.issuer // empty')
+
+if [ -z "$DISCOVERED_ISSUER" ]; then
+  echo "ERROR: Authentik OIDC discovery response missing 'issuer' field"
+  echo "Response: ${DISCOVERY_JSON}"
+  exit 1
+fi
+
+if [ "$DISCOVERED_ISSUER" != "$EXPECTED_ISSUER_AUTHENTIK" ]; then
+  echo "WARNING: Authentik OIDC discovery issuer mismatch"
+  echo "  Expected: ${EXPECTED_ISSUER_AUTHENTIK}"
+  echo "  Got:      ${DISCOVERED_ISSUER}"
+  echo "  Continuing anyway (issuer depends on Authentik external URL config)"
+else
+  echo "✓ Authentik OIDC discovery endpoint is valid"
+  echo "  Issuer: ${DISCOVERED_ISSUER}"
+fi
+echo ""
+
+# Scale Dex deployment from 0 to 1 replica
+echo "[6/9] Scaling Dex deployment to 1 replica..."
+CURRENT_REPLICAS=$(kubectl get deployment "${DEX_DEPLOYMENT}" -n "${DEX_NAMESPACE}" -o jsonpath='{.spec.replicas}')
+echo "  Current replicas: ${CURRENT_REPLICAS}"
+
+if [ "$CURRENT_REPLICAS" -eq 1 ]; then
+  echo "  Dex is already scaled to 1 replica (idempotent operation)"
+else
+  kubectl scale deployment/"${DEX_DEPLOYMENT}" --replicas=1 -n "${DEX_NAMESPACE}"
+  if [ $? -ne 0 ]; then
+    echo "ERROR: Failed to scale Dex deployment"
+    exit 1
+  fi
+  echo "✓ Dex deployment scaled to 1 replica"
+fi
+echo ""
+
+# Wait for Dex to be ready
+echo "[7/9] Waiting for Dex to be ready..."
+DEX_URL="http://dex.auth-system.svc.cluster.local:5556"
+MAX_ATTEMPTS=60
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+  if curl -f -s "${DEX_URL}/healthz" > /dev/null 2>&1; then
+    echo "✓ Dex is ready"
+    break
+  fi
+  ATTEMPT=$((ATTEMPT + 1))
+  if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+    echo "ERROR: Dex did not become ready after ${MAX_ATTEMPTS} attempts"
+    echo "  Check Dex pod logs for errors:"
+    echo "  kubectl logs -n ${DEX_NAMESPACE} deployment/${DEX_DEPLOYMENT}"
+    exit 1
+  fi
+  echo "  Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: Dex not ready, waiting 5 seconds..."
+  sleep 5
+done
+echo ""
+
+# Verify Dex OIDC discovery endpoint
+echo "[8/9] Verifying Dex OIDC discovery endpoint..."
+DEX_DISCOVERY_URL="${DEX_URL}/.well-known/openid-configuration"
+DEX_DISCOVERY_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Accept: application/json" "$DEX_DISCOVERY_URL")
+
+HTTP_CODE=$(echo "$DEX_DISCOVERY_RESPONSE" | tail -n1)
+DEX_DISCOVERY_JSON=$(echo "$DEX_DISCOVERY_RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+  echo "ERROR: Dex OIDC discovery endpoint returned HTTP ${HTTP_CODE}"
+  echo "  URL: ${DEX_DISCOVERY_URL}"
+  echo "  Check Dex configuration and logs"
+  echo "Response: ${DEX_DISCOVERY_JSON}"
+  exit 1
+fi
+
+# Verify issuer in Dex discovery JSON using jq
+DEX_DISCOVERED_ISSUER=$(echo "$DEX_DISCOVERY_JSON" | jq -r '.issuer // empty')
+
+if [ -z "$DEX_DISCOVERED_ISSUER" ]; then
+  echo "ERROR: Dex OIDC discovery response missing 'issuer' field"
+  echo "Response: ${DEX_DISCOVERY_JSON}"
+  exit 1
+fi
+
+if [ "$DEX_DISCOVERED_ISSUER" != "$EXPECTED_ISSUER_DEX" ]; then
+  echo "WARNING: Dex OIDC discovery issuer mismatch"
+  echo "  Expected: ${EXPECTED_ISSUER_DEX}"
+  echo "  Got:      ${DEX_DISCOVERED_ISSUER}"
+  echo "  Continuing anyway (issuer depends on Dex external URL config)"
+else
+  echo "✓ Dex OIDC discovery endpoint is valid"
+  echo "  Issuer: ${DEX_DISCOVERED_ISSUER}"
+fi
+echo ""
+
+# Final success message
+echo "[9/9] Configuration sync complete!"
+echo ""
+echo "========================================="
+echo "Summary:"
+echo "  ✓ Authentik is ready and configured"
+echo "  ✓ OIDC provider updated with Dex client secret"
+echo "  ✓ Authentik OIDC discovery endpoint verified"
+echo "  ✓ Dex scaled to 1 replica"
+echo "  ✓ Dex is ready and healthy"
+echo "  ✓ Dex OIDC discovery endpoint verified"
+echo ""
+echo "The authentication system is now fully operational."
+echo "========================================="

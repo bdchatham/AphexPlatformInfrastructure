@@ -1,0 +1,100 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: cdktf-deploy-trigger-template
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    tekton.dev/categories: Infrastructure
+    tekton.dev/tags: cdktf, terraform, infrastructure-as-code, deployment
+    tekton.dev/displayName: "CDKTF Deploy Trigger Template"
+spec:
+  params:
+    - name: repo-url
+      description: Git repository URL to clone
+    - name: commit-sha
+      description: Git commit SHA to checkout and deploy
+    - name: branch
+      description: Git branch name (for reference only)
+      default: "main"
+    - name: tenant-name
+      description: Tenant namespace name for RBAC and state isolation
+    - name: repo-name
+      description: Repository name
+      default: "unknown"
+    - name: repo-owner
+      description: Repository owner
+      default: "unknown"
+    - name: commit-message
+      description: Commit message
+      default: ""
+    - name: commit-author
+      description: Commit author
+      default: ""
+    - name: commit-timestamp
+      description: Commit timestamp
+      default: ""
+    - name: runner-image
+      description: Container image with node, cdktf, terraform, and kubectl
+      default: "ghcr.io/bdchatham/pipeline-runner:latest"
+    - name: auto-approve
+      description: Automatically approve terraform apply
+      default: "true"
+    - name: verbose
+      description: Enable verbose output for all tasks
+      default: "false"
+
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: cdktf-deploy-
+        namespace: $(tt.params.tenant-name)
+        labels:
+          app.kubernetes.io/name: cdktf-deploy-pipeline
+          app.kubernetes.io/version: "0.1"
+          tekton.dev/pipeline: cdktf-deploy-pipeline
+          aphex/tenant: $(tt.params.tenant-name)
+          aphex/repo-owner: $(tt.params.repo-owner)
+          aphex/repo-name: $(tt.params.repo-name)
+          aphex/commit-sha: $(tt.params.commit-sha)
+        annotations:
+          aphex/commit-message: $(tt.params.commit-message)
+          aphex/commit-author: $(tt.params.commit-author)
+          aphex/commit-timestamp: $(tt.params.commit-timestamp)
+          aphex/triggered-by: github-webhook
+      spec:
+        pipelineRef:
+          name: cdktf-deploy-pipeline
+        params:
+          - name: repo-url
+            value: $(tt.params.repo-url)
+          - name: commit-sha
+            value: $(tt.params.commit-sha)
+          - name: tenant-name
+            value: $(tt.params.tenant-name)
+          - name: branch
+            value: $(tt.params.branch)
+          - name: runner-image
+            value: $(tt.params.runner-image)
+          - name: auto-approve
+            value: $(tt.params.auto-approve)
+          - name: upload-artifacts
+            value: "false"
+          - name: verbose
+            value: $(tt.params.verbose)
+        workspaces:
+          - name: source
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: terraform-backend
+            secret:
+              secretName: terraform-backend-$(tt.params.tenant-name)
+        timeout: 1h0m0s

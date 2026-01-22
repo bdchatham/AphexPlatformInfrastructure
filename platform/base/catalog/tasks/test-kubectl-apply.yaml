@@ -1,0 +1,16 @@
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: test-kubectl-apply
+  namespace: pipeline-catalog
+spec:
+  taskRef:
+    name: kubectl-apply
+  params:
+    - name: manifest-dir
+      value: "test-manifests"
+    - name: recursive
+      value: "true"
+  workspaces:
+    - name: source
+      emptyDir: {}

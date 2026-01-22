@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: pipeline-system
-  labels:
-    platform.aphex/component: "platform"
-    platform.aphex/managed-by: "bootstrap"
-    app.kubernetes.io/name: "pipeline-system"
-    app.kubernetes.io/part-of: "argocd-tekton-platform"

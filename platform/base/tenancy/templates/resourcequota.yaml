@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: {{TENANT_NAME}}
+  labels:
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "4"
+    requests.memory: "8Gi"
+    limits.cpu: "8"
+    limits.memory: "16Gi"
+    
+    # Storage resources
+    requests.storage: "50Gi"
+    persistentvolumeclaims: "10"
+    
+    # Object counts
+    pods: "20"
+    services: "10"
+    configmaps: "50"
+    secrets: "50"
+    
+    # Tekton resources
+    count/pipelineruns.tekton.dev: "100"
+    count/taskruns.tekton.dev: "200"

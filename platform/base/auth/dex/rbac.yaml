@@ -1,0 +1,105 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dex
+  namespace: auth-system
+  labels:
+    app: dex
+rules:
+  # Dex uses Kubernetes storage backend to persist OIDC state (auth codes, refresh tokens, sessions)
+  # This requires write access (create/update/delete) to manage Secrets dynamically
+  # 
+  # Why write access is required:
+  # - Dex creates Secrets to store authorization codes during OAuth flow
+  # - Dex updates Secrets to store refresh tokens for long-lived sessions
+  # - Dex deletes Secrets when tokens expire or are revoked
+  # 
+  # Security considerations:
+  # - Permissions are namespace-scoped (auth-system only, not cluster-wide)
+  # - Dex only manages its own storage Secrets (prefixed with dex-)
+  # - This is the standard pattern for Dex with Kubernetes storage backend
+  # - Alternative: Use external storage (etcd, PostgreSQL) but adds complexity
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  
+  # Dex CRD access for Kubernetes storage backend
+  - apiGroups:
+      - dex.coreos.com
+    resources:
+      - authcodes
+      - authrequests
+      - connectors
+      - oauth2clients
+      - offlinesessionses
+      - passwords
+      - refreshtokens
+      - signingkeies
+      - devicerequests
+      - devicetokens
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dex-crd-manager
+  labels:
+    app: dex
+rules:
+  # Dex needs to create its own CRDs on first startup
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
+      - list
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dex-crd-manager
+  labels:
+    app: dex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dex-crd-manager
+subjects:
+  - kind: ServiceAccount
+    name: dex
+    namespace: auth-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dex
+  namespace: auth-system
+  labels:
+    app: dex
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dex
+subjects:
+  - kind: ServiceAccount
+    name: dex
+    namespace: auth-system

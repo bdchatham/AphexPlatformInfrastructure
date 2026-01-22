@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.default: role:readonly
+  policy.csv: |
+    # Admin group has full access
+    g, platform-admins, role:admin
+    
+    # Engineering group has read-only access
+    g, platform-engineering, role:readonly
+    
+    # Readonly role can view applications
+    p, role:readonly, applications, get, */*, allow
+    p, role:readonly, applications, list, */*, allow
+    p, role:readonly, repositories, get, *, allow
+    p, role:readonly, repositories, list, *, allow
+    p, role:readonly, clusters, get, *, allow
+    p, role:readonly, clusters, list, *, allow

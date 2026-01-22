@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-gpu
+  namespace: argocd
+  annotations:
+    # Sync before workloads that need GPU access (lower wave = earlier sync)
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure.git
+    targetRevision: HEAD
+    path: platform/deployments/kind/gpu
+  destination:
+    server: https://kubernetes.default.svc
+    # RuntimeClass is cluster-scoped, namespace is ignored but required
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

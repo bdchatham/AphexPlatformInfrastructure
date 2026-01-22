@@ -1,0 +1,116 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-manager-readiness
+  namespace: cert-manager
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-readiness
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["discovery.k8s.io"]
+  resources: ["endpointslices"]
+  verbs: ["get","list","watch"]
+- apiGroups: ["admissionregistration.k8s.io"]
+  resources: ["validatingwebhookconfigurations","mutatingwebhookconfigurations"]
+  verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-readiness
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-readiness
+subjects:
+- kind: ServiceAccount
+  name: cert-manager-readiness
+  namespace: cert-manager
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cert-manager-webhook-readiness
+  namespace: cert-manager
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  template:
+    spec:
+      serviceAccountName: cert-manager-readiness
+      restartPolicy: Never
+      containers:
+      - name: check
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh","-c"]
+        args:
+        - |
+          set -euo pipefail
+          deadline=$((SECONDS+120))
+
+          echo "Waiting for cert-manager-webhook endpoints + caBundle..."
+          while [ $SECONDS -lt $deadline ]; do
+            
+            # Check for ready addresses (prefer EndpointSlice, fallback to Endpoints)
+            ready_addrs=""
+            if kubectl get endpointslices -n cert-manager -l kubernetes.io/service-name=cert-manager-webhook >/dev/null 2>&1; then
+              ready_addrs=$(kubectl get endpointslices -n cert-manager -l kubernetes.io/service-name=cert-manager-webhook -o jsonpath='{range .items[*]}{range .endpoints[*]}{.addresses[*]}{"\n"}{end}{end}' | grep -v '^$' | head -1)
+            else
+              ready_addrs=$(kubectl -n cert-manager get endpoints cert-manager-webhook -o jsonpath='{.subsets[*].addresses[*]}' | grep -v '^$' | head -1)
+            fi
+            
+            # Validate ALL webhook caBundles are non-empty
+            vwb_count=0
+            mwb_count=0
+            vwb_empty=0
+            mwb_empty=0
+            
+            # Check ValidatingWebhookConfiguration
+            while IFS= read -r bundle; do
+              vwb_count=$((vwb_count + 1))
+              if [ -z "$bundle" ]; then
+                vwb_empty=$((vwb_empty + 1))
+              fi
+            done < <(kubectl get validatingwebhookconfiguration cert-manager-webhook -o jsonpath='{range .webhooks[*]}{.clientConfig.caBundle}{"\n"}{end}')
+            
+            # Check MutatingWebhookConfiguration  
+            while IFS= read -r bundle; do
+              mwb_count=$((mwb_count + 1))
+              if [ -z "$bundle" ]; then
+                mwb_empty=$((mwb_empty + 1))
+              fi
+            done < <(kubectl get mutatingwebhookconfiguration cert-manager-webhook -o jsonpath='{range .webhooks[*]}{.clientConfig.caBundle}{"\n"}{end}')
+            
+            if [ -n "$ready_addrs" ] && [ "$vwb_empty" -eq 0 ] && [ "$mwb_empty" -eq 0 ] && [ "$vwb_count" -gt 0 ] && [ "$mwb_count" -gt 0 ]; then
+              echo "cert-manager webhook is ready with valid endpoints and caBundles."
+              exit 0
+            fi
+            
+            echo "Still waiting... ready_addrs='$ready_addrs' vwb_empty=$vwb_empty mwb_empty=$mwb_empty vwb_count=$vwb_count mwb_count=$mwb_count"
+            sleep 3
+          done
+
+          echo "Timed out waiting for webhook readiness."
+          echo "=== Endpoints ==="
+          kubectl -n cert-manager get endpoints cert-manager-webhook -o yaml || true
+          echo "=== EndpointSlices ==="
+          kubectl get endpointslices -n cert-manager -l kubernetes.io/service-name=cert-manager-webhook -o yaml || true
+          echo "=== ValidatingWebhookConfiguration ==="
+          kubectl get validatingwebhookconfiguration cert-manager-webhook -o yaml || true
+          echo "=== MutatingWebhookConfiguration ==="
+          kubectl get mutatingwebhookconfiguration cert-manager-webhook -o yaml || true
+          exit 1

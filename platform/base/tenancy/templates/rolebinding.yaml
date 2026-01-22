@@ -1,0 +1,17 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pipeline-runner-binding
+  namespace: {{TENANT_NAME}}
+  labels:
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+    aphex/permission-profile: "{{PERMISSION_PROFILE}}"
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runner
+    namespace: {{TENANT_NAME}}
+roleRef:
+  kind: Role
+  name: pipeline-runner-{{PERMISSION_PROFILE}}
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,31 @@
+---
+# Role with no permissions - Config Sync Job only needs to call Authentik API
+# Secrets are mounted via projected volumes, so no RBAC permissions needed
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: auth-config-sync
+  namespace: auth-system
+  labels:
+    app: auth-config-sync
+    component: configuration
+rules: []
+
+---
+# RoleBinding to bind the Role to the ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: auth-config-sync
+  namespace: auth-system
+  labels:
+    app: auth-config-sync
+    component: configuration
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: auth-config-sync
+subjects:
+  - kind: ServiceAccount
+    name: auth-config-sync
+    namespace: auth-system

@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pipeline-catalog
+  labels:
+    platform.aphex/component: "catalog"
+    platform.aphex/managed-by: "bootstrap"
+    app.kubernetes.io/name: "pipeline-catalog"
+    app.kubernetes.io/part-of: "argocd-tekton-platform"

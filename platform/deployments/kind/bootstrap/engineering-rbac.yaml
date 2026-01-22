@@ -1,0 +1,133 @@
+---
+# ClusterRole for repository onboarding
+# This role allows users to create and manage RepoBinding resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: repo-onboarder
+  labels:
+    app: argocd-tekton-platform
+    component: onboarding
+rules:
+  # Allow creating and managing RepoBinding resources
+  - apiGroups: ["aphex.io"]
+    resources: ["repobindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch"]
+  
+  # Allow reading RepoBinding status
+  - apiGroups: ["aphex.io"]
+    resources: ["repobindings/status"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading namespaces to verify tenant namespaces exist
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading pods and logs in tenant namespaces for debugging
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading PipelineRuns and TaskRuns in tenant namespaces
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns", "taskruns"]
+    verbs: ["get", "list", "watch"]
+  
+  # Allow reading PipelineRun and TaskRun logs
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelineruns/log", "taskruns/log"]
+    verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding for engineering group
+# Binds the repo-onboarder role to users in the engineering OIDC group
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: engineering-onboarders
+  labels:
+    app: argocd-tekton-platform
+    component: onboarding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: repo-onboarder
+subjects:
+  # Bind to the engineering group from OIDC
+  - kind: Group
+    name: "engineering"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# Additional ClusterRole for viewing pipeline catalog
+# This allows engineering users to view shared Tasks and Pipelines
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pipeline-catalog-viewer
+  labels:
+    app: argocd-tekton-platform
+    component: catalog
+rules:
+  # Allow reading Tasks and Pipelines in pipeline-catalog namespace
+  - apiGroups: ["tekton.dev"]
+    resources: ["tasks", "pipelines", "clustertasks"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ClusterRoleBinding for pipeline catalog viewing
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: engineering-catalog-viewers
+  labels:
+    app: argocd-tekton-platform
+    component: catalog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pipeline-catalog-viewer
+subjects:
+  - kind: Group
+    name: "engineering"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for viewing resources in pipeline-system namespace
+# This allows engineering users to view platform components for debugging
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: engineering-platform-viewers
+  namespace: pipeline-system
+  labels:
+    app: argocd-tekton-platform
+    component: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view  # Use built-in view role
+subjects:
+  - kind: Group
+    name: "engineering"
+    apiGroup: rbac.authorization.k8s.io
+
+---
+# RoleBinding for viewing resources in pipeline-catalog namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: engineering-catalog-viewers
+  namespace: pipeline-catalog
+  labels:
+    app: argocd-tekton-platform
+    component: catalog
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view  # Use built-in view role
+subjects:
+  - kind: Group
+    name: "engineering"
+    apiGroup: rbac.authorization.k8s.io

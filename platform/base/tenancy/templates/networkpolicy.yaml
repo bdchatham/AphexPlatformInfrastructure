@@ -1,0 +1,77 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tenant-isolation
+  namespace: {{TENANT_NAME}}
+  labels:
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  
+  ingress:
+    # Allow ingress from ingress controller namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+    
+    # Allow ingress from same namespace
+    - from:
+        - podSelector: {}
+  
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+    
+    # Allow egress to same namespace
+    - to:
+        - podSelector: {}
+    
+    # Allow egress to specific required services only
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: pipeline-catalog
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    
+    # Allow egress to auth-system for authentication
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: auth-system
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 5556
+    
+    # Allow egress to external git repositories and registries
+    - to: []
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 22
+    
+    # Allow egress to Kubernetes API server
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: default
+      ports:
+        - protocol: TCP
+          port: 443

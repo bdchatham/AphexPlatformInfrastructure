@@ -1,0 +1,67 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: upgrade-tekton
+  namespace: pipeline-catalog
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Deployment
+    tekton.dev/tags: tekton
+    tekton.dev/displayName: "upgrade tekton"
+    tekton.dev/platforms: "linux/amd64,linux/arm64"
+spec:
+  description: >-
+    This Task upgrades Tekton Pipelines by downloading the release YAML
+    and applying it to the cluster. It patches images from gcr.io to ghcr.io
+    to avoid rate limiting issues with Google Container Registry.
+
+  params:
+    - name: version
+      description: Tekton Pipelines version to install (e.g., v0.56.0)
+      type: string
+      default: "v0.56.0"
+    - name: kubectl-image
+      description: The image providing kubectl binary
+      type: string
+      default: "bitnami/kubectl:1.28"
+
+  steps:
+    - name: download-and-patch
+      image: "$(params.kubectl-image)"
+      script: |
+        #!/bin/bash
+        set -e
+
+        VERSION="$(params.version)"
+        RELEASE_URL="https://github.com/tektoncd/pipeline/releases/download/${VERSION}/release.yaml"
+        
+        echo "Downloading Tekton Pipelines ${VERSION} from ${RELEASE_URL}"
+        
+        # Download the release YAML
+        curl -sL "${RELEASE_URL}" -o /tmp/tekton-release.yaml
+        
+        if [ ! -s /tmp/tekton-release.yaml ]; then
+          echo "Error: Failed to download Tekton release YAML"
+          exit 1
+        fi
+        
+        echo "Patching images from gcr.io to ghcr.io"
+        
+        # Patch images to use ghcr.io instead of gcr.io
+        # This avoids rate limiting issues with Google Container Registry
+        sed -i 's|gcr.io/tekton-releases/|ghcr.io/tektoncd/pipeline/|g' /tmp/tekton-release.yaml
+        
+        echo "Applying Tekton Pipelines manifests"
+        
+        kubectl apply -f /tmp/tekton-release.yaml
+        
+        echo "Waiting for Tekton Pipelines to be ready"
+        
+        kubectl wait --for=condition=ready pod \
+          -l app.kubernetes.io/part-of=tekton-pipelines \
+          -n tekton-pipelines \
+          --timeout=300s
+        
+        echo "Successfully upgraded Tekton Pipelines to ${VERSION}"

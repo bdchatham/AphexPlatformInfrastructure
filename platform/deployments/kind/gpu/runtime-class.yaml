@@ -1,0 +1,15 @@
+# NVIDIA RuntimeClass for GPU workloads
+# This RuntimeClass enables pods to access NVIDIA GPUs via the nvidia container runtime
+# Prerequisites:
+#   - NVIDIA drivers installed on host nodes
+#   - NVIDIA Container Toolkit installed
+#   - NVIDIA Device Plugin deployed to cluster
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+  labels:
+    app.kubernetes.io/name: nvidia-runtime
+    app.kubernetes.io/component: gpu
+    app.kubernetes.io/part-of: aphex-platform
+handler: nvidia

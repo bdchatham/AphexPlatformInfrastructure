@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: auth-system
-  labels:
-    platform.aphex/component: "authentication"
-    platform.aphex/managed-by: "bootstrap"
-    app.kubernetes.io/name: "auth-system"
-    app.kubernetes.io/part-of: "argocd-tekton-platform"

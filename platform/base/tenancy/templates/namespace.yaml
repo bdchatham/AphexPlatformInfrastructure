@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{TENANT_NAME}}
+  labels:
+    aphex/tenant: "{{TENANT_NAME}}"
+    aphex/managed-by: "platform-controller"
+    aphex/repo-org: "{{REPO_ORG}}"
+    aphex/repo-name: "{{REPO_NAME}}"

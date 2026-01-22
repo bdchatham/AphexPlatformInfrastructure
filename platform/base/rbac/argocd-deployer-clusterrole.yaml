@@ -1,0 +1,22 @@
+---
+# Shared ClusterRole for pipelines that need to deploy via ArgoCD
+# Pipelines can bind to this role using a RoleBinding in the argocd namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-application-deployer
+  labels:
+    platform.aphex/shared-role: "true"
+    platform.aphex/component: "argocd"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+rules:
+  # Allow full lifecycle management of ArgoCD Application resources
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # Allow reading ArgoCD Application status for verification
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications/status"]
+    verbs: ["get", "list", "watch"]

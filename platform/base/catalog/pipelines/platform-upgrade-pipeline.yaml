@@ -1,0 +1,193 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: platform-upgrade-pipeline
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/categories: Platform
+    tekton.dev/tags: platform, upgrade, gitops
+    tekton.dev/displayName: "Platform Upgrade Pipeline"
+spec:
+  description: >-
+    This Pipeline orchestrates platform component upgrades when changes are
+    committed to the platform repository. It applies manifests and upgrades
+    components in the correct order to ensure a smooth platform upgrade.
+    
+    Pipeline steps:
+    1. Clone platform repository at commit SHA
+    2. Apply CRD manifests (RepoBinding)
+    3. Apply namespace manifests
+    4. Upgrade Tekton Pipelines
+    5. Upgrade Lighthouse via Helm
+    6. Apply onboarding controller manifests
+    7. Apply pipeline catalog Tasks and Pipelines
+    
+    This pipeline enables the platform to manage its own upgrades through GitOps.
+
+  params:
+    - name: repo-url
+      description: Platform repository URL to clone
+      type: string
+    - name: revision
+      description: Git commit SHA to checkout and deploy
+      type: string
+    - name: tekton-version
+      description: Tekton Pipelines version to upgrade to
+      type: string
+      default: "v0.56.0"
+    - name: lighthouse-chart-version
+      description: Lighthouse Helm chart version
+      type: string
+      default: ""
+    - name: verbose
+      description: Enable verbose output for all tasks
+      type: string
+      default: "false"
+
+  workspaces:
+    - name: source
+      description: Workspace for cloning repository and accessing manifests
+
+  results:
+    - name: commit
+      description: The precise commit SHA that was deployed
+      value: $(tasks.git-clone.results.commit)
+
+  tasks:
+    - name: git-clone
+      taskRef:
+        name: git-clone
+        kind: Task
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.revision)
+        - name: deleteExisting
+          value: "true"
+        - name: verbose
+          value: $(params.verbose)
+      workspaces:
+        - name: output
+          workspace: source
+
+    - name: apply-crds
+      taskRef:
+        name: kubectl-apply
+        kind: Task
+      runAfter:
+        - git-clone
+      params:
+        - name: manifest-dir
+          value: "platform/infrastructure/crds"
+        - name: recursive
+          value: "false"
+      workspaces:
+        - name: source
+          workspace: source
+
+    - name: apply-namespaces
+      taskRef:
+        name: kubectl-apply
+        kind: Task
+      runAfter:
+        - apply-crds
+      params:
+        - name: manifest-dir
+          value: "platform/infrastructure/namespaces"
+        - name: recursive
+          value: "false"
+      workspaces:
+        - name: source
+          workspace: source
+
+    - name: upgrade-tekton
+      taskRef:
+        name: upgrade-tekton
+        kind: Task
+      runAfter:
+        - apply-namespaces
+      params:
+        - name: version
+          value: $(params.tekton-version)
+
+    - name: upgrade-lighthouse
+      taskRef:
+        name: helm-upgrade
+        kind: Task
+      runAfter:
+        - upgrade-tekton
+      params:
+        - name: chart
+          value: "jx3/lighthouse"
+        - name: release-name
+          value: "lighthouse"
+        - name: namespace
+          value: "pipeline-system"
+        - name: version
+          value: $(params.lighthouse-chart-version)
+        - name: create-namespace
+          value: "false"
+      workspaces:
+        - name: source
+          workspace: source
+
+    - name: apply-platform-controller
+      taskRef:
+        name: kubectl-apply
+        kind: Task
+      runAfter:
+        - upgrade-lighthouse
+      params:
+        - name: manifest-dir
+          value: "platform/platform-controller"
+        - name: recursive
+          value: "false"
+        - name: namespace
+          value: "pipeline-system"
+      workspaces:
+        - name: source
+          workspace: source
+
+    - name: apply-catalog
+      taskRef:
+        name: kubectl-apply
+        kind: Task
+      runAfter:
+        - apply-platform-controller
+      params:
+        - name: manifest-dir
+          value: "platform/catalog"
+        - name: recursive
+          value: "true"
+      workspaces:
+        - name: source
+          workspace: source
+
+  finally:
+    - name: upgrade-summary
+      params:
+        - name: commit-sha
+          value: $(params.revision)
+        - name: tekton-version
+          value: $(params.tekton-version)
+      taskSpec:
+        params:
+          - name: commit-sha
+          - name: tekton-version
+        steps:
+          - name: log-summary
+            image: alpine:3.18
+            script: |
+              #!/bin/sh
+              echo "========================================="
+              echo "Platform Upgrade Summary"
+              echo "========================================="
+              echo "Commit: $(params.commit-sha)"
+              echo "Tekton Version: $(params.tekton-version)"
+              echo "Pipeline Run: $(context.pipelineRun.name)"
+              echo "Namespace: $(context.pipelineRun.namespace)"
+              echo "========================================="
+              echo "✓ Platform upgrade completed successfully"
