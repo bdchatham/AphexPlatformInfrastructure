@@ -11,12 +11,12 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "5"
 rules:
-  # Allow creating and managing ArgoCD Application resources
+  # Allow full lifecycle management of ArgoCD Application resources
   - apiGroups: ["argoproj.io"]
     resources: ["applications"]
-    verbs: ["get", "list", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   
   # Allow reading ArgoCD Application status for verification
   - apiGroups: ["argoproj.io"]
     resources: ["applications/status"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"]

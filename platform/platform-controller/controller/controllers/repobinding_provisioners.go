@@ -156,6 +156,11 @@ func (r *RepoBindingReconciler) provisionRBAC(ctx context.Context, rb *platformv
 		return fmt.Errorf("failed to provision cluster rolebinding: %w", err)
 	}
 
+	// Create ArgoCD RoleBinding in argocd namespace
+	if err := r.provisionArgoCDRoleBinding(ctx, rb); err != nil {
+		return fmt.Errorf("failed to provision argocd rolebinding: %w", err)
+	}
+
 	return nil
 }
 
@@ -313,6 +318,57 @@ func (r *RepoBindingReconciler) provisionClusterRoleBinding(ctx context.Context,
 	existingCRB.Labels = clusterRoleBinding.Labels
 	if err := r.Update(ctx, existingCRB); err != nil {
 		return fmt.Errorf("failed to update ClusterRoleBinding: %w", err)
+	}
+
+	return nil
+}
+
+// provisionArgoCDRoleBinding creates a RoleBinding in the argocd namespace
+// granting the pipeline's service account permission to manage ArgoCD Applications
+func (r *RepoBindingReconciler) provisionArgoCDRoleBinding(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
+	roleBindingName := fmt.Sprintf("%s-argocd-access", rb.Spec.PipelineName)
+
+	roleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      roleBindingName,
+			Namespace: "argocd",
+			Labels: map[string]string{
+				"platform.aphex/pipeline":   rb.Spec.PipelineName,
+				"platform.aphex/managed-by": "platform-controller",
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "argocd-application-deployer",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      "pipeline-runner",
+				Namespace: rb.Spec.PipelineName,
+			},
+		},
+	}
+
+	existingRB := &rbacv1.RoleBinding{}
+	err := r.Get(ctx, client.ObjectKey{Name: roleBindingName, Namespace: "argocd"}, existingRB)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			r.Log.Info("Creating ArgoCD RoleBinding", "name", roleBindingName, "pipeline", rb.Spec.PipelineName)
+			if err := r.Create(ctx, roleBinding); err != nil {
+				return fmt.Errorf("failed to create ArgoCD RoleBinding: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("failed to get ArgoCD RoleBinding: %w", err)
+	}
+
+	r.Log.Info("Updating ArgoCD RoleBinding", "name", roleBindingName, "pipeline", rb.Spec.PipelineName)
+	existingRB.Subjects = roleBinding.Subjects
+	existingRB.Labels = roleBinding.Labels
+	if err := r.Update(ctx, existingRB); err != nil {
+		return fmt.Errorf("failed to update ArgoCD RoleBinding: %w", err)
 	}
 
 	return nil
