@@ -40,3 +40,4 @@ secrets/
 *.key
 *.pem
 platform/platform-controller/controller/bin/
+platform/base/platform-controller/controller/bin/
