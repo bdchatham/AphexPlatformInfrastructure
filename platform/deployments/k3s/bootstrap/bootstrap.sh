@@ -50,6 +50,12 @@ log_error() { echo -e "${RED}✗${NC} $1"; }
 check_prerequisites() {
   log_info "Checking prerequisites..."
   
+  # Fail if K3s already installed
+  if command -v k3s &> /dev/null; then
+    log_error "K3s is already installed. Uninstall first with: /usr/local/bin/k3s-uninstall.sh"
+    exit 1
+  fi
+  
   local missing=()
   
   # Check for root/sudo
@@ -96,11 +102,6 @@ check_prerequisites() {
 }
 
 install_k3s() {
-  if command -v k3s &> /dev/null; then
-    log_info "K3s already installed: $(k3s --version | head -1)"
-    return 0
-  fi
-  
   log_info "Installing K3s..."
   curl -sfL https://get.k3s.io | sh -
   
