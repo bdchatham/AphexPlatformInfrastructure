@@ -1,0 +1,89 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-issuer-setup
+  namespace: cert-manager
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-issuer-setup
+rules:
+  - apiGroups: ["cert-manager.io"]
+    resources: ["clusterissuers"]
+    verbs: ["create", "get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-issuer-setup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-issuer-setup
+subjects:
+  - kind: ServiceAccount
+    name: cert-issuer-setup
+    namespace: cert-manager
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cert-issuer-setup
+  namespace: cert-manager
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: cert-issuer-setup
+      restartPolicy: OnFailure
+      containers:
+        - name: setup
+          image: bitnami/kubectl:latest
+          env:
+            - name: CF_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflare-api-token
+                  key: api-token
+            - name: DOMAIN
+              value: arbiter-dev.com
+            - name: ACME_EMAIL
+              value: admin@arbiter-dev.com
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Looking up Cloudflare zone ID for $DOMAIN..."
+              ZONE_ID=$(curl -sf "https://api.cloudflare.com/client/v4/zones?name=$DOMAIN" \
+                -H "Authorization: Bearer $CF_API_TOKEN" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+              
+              if [ -z "$ZONE_ID" ]; then
+                echo "ERROR: Could not find zone ID for $DOMAIN"
+                exit 1
+              fi
+              echo "Found zone ID: $ZONE_ID"
+              
+              echo "Creating ClusterIssuer with zone ID..."
+              cat <<EOF | kubectl apply -f -
+              apiVersion: cert-manager.io/v1
+              kind: ClusterIssuer
+              metadata:
+                name: letsencrypt-prod
+              spec:
+                acme:
+                  server: https://acme-v02.api.letsencrypt.org/directory
+                  email: $ACME_EMAIL
+                  privateKeySecretRef:
+                    name: letsencrypt-prod-account-key
+                  solvers:
+                    - dns01:
+                        cloudflare:
+                          apiTokenSecretRef:
+                            name: cloudflare-api-token
+                            key: api-token
+                          zoneID: $ZONE_ID
+              EOF
+              
+              echo "Done!"
