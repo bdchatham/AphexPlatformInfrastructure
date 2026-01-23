@@ -165,7 +165,7 @@ create_namespaces() {
 create_secrets() {
   log_info "Creating secrets..."
   
-  # Cloudflare API token (cert-manager for DNS-01, kube-system for external-dns)
+  # Cloudflare API token (cert-manager for DNS-01, kube-system for external-dns, platform-system for org controller)
   if ! k3s kubectl get secret cloudflare-api-token -n cert-manager &> /dev/null; then
     k3s kubectl create secret generic cloudflare-api-token -n cert-manager \
       --from-literal=api-token="$CLOUDFLARE_API_TOKEN"
@@ -176,6 +176,12 @@ create_secrets() {
     k3s kubectl create secret generic cloudflare-api-token -n kube-system \
       --from-literal=api-token="$CLOUDFLARE_API_TOKEN"
     log_success "Created secret: cloudflare-api-token (kube-system)"
+  fi
+  
+  if ! k3s kubectl get secret cloudflare-api-token -n platform-system &> /dev/null; then
+    k3s kubectl create secret generic cloudflare-api-token -n platform-system \
+      --from-literal=token="$CLOUDFLARE_API_TOKEN"
+    log_success "Created secret: cloudflare-api-token (platform-system)"
   fi
   
   # PostgreSQL secret
