@@ -8,7 +8,7 @@ spec:
   listeners:
     - name: https
       protocol: HTTPS
-      port: 443
+      port: 8443
       hostname: "*.arbiter-dev.com"
       tls:
         mode: Terminate
@@ -20,7 +20,7 @@ spec:
           from: All
     - name: http
       protocol: HTTP
-      port: 80
+      port: 8000
       hostname: "*.arbiter-dev.com"
       allowedRoutes:
         namespaces:
