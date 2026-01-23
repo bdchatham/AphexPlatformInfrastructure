@@ -55,7 +55,6 @@ spec:
             - --source=gateway-httproute
             - --source=gateway-grpcroute
             - --provider=cloudflare
-            - --cloudflare-proxied=false
             - --domain-filter=arbiter-dev.com
             - --policy=sync
             - --registry=txt
