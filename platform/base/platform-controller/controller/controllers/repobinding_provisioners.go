@@ -654,47 +654,9 @@ func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *
 				},
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
-				// Allow to same namespace
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							PodSelector: &metav1.LabelSelector{},
-						},
-					},
-				},
-				// Allow DNS queries to kube-system
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "kube-system",
-								},
-							},
-						},
-					},
-					Ports: []networkingv1.NetworkPolicyPort{
-						{
-							Protocol: &[]corev1.Protocol{corev1.ProtocolUDP}[0],
-							Port:     &intstr.IntOrString{Type: intstr.Int, IntVal: 53},
-						},
-					},
-				},
-				// Allow internet egress (excluding private IP ranges)
-				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							IPBlock: &networkingv1.IPBlock{
-								CIDR: "0.0.0.0/0",
-								Except: []string{
-									"10.0.0.0/8",
-									"172.16.0.0/12",
-									"192.168.0.0/16",
-								},
-							},
-						},
-					},
-				},
+				// Allow all egress - pipelines need access to K8s API, ArgoCD, registries
+				// TODO: Implement allowlist-based egress policy
+				{},
 			},
 		},
 	}
