@@ -53,7 +53,6 @@ spec:
           image: registry.k8s.io/external-dns/external-dns:v0.14.0
           args:
             - --source=gateway-httproute
-            - --source=gateway-grpcroute
             - --provider=cloudflare
             - --domain-filter=arbiter-dev.com
             - --policy=sync
