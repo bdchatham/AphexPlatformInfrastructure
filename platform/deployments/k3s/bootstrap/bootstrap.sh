@@ -56,6 +56,12 @@ check_prerequisites() {
     exit 1
   fi
   
+  # Check for Cloudflare API token
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+    log_error "CLOUDFLARE_API_TOKEN environment variable not set"
+    exit 1
+  fi
+  
   local missing=()
   
   # Check for root/sudo
@@ -145,7 +151,7 @@ generate_secrets() {
 create_namespaces() {
   log_info "Creating namespaces..."
   
-  for ns in auth-system tekton-pipelines platform-system argocd; do
+  for ns in auth-system tekton-pipelines platform-system argocd cert-manager; do
     if k3s kubectl get namespace "$ns" &> /dev/null; then
       log_info "Namespace $ns already exists"
     else
@@ -157,6 +163,13 @@ create_namespaces() {
 
 create_secrets() {
   log_info "Creating secrets..."
+  
+  # Cloudflare API token for DNS-01 cert challenges
+  if ! k3s kubectl get secret cloudflare-api-token -n cert-manager &> /dev/null; then
+    k3s kubectl create secret generic cloudflare-api-token -n cert-manager \
+      --from-literal=api-token="$CLOUDFLARE_API_TOKEN"
+    log_success "Created secret: cloudflare-api-token"
+  fi
   
   # PostgreSQL secret
   if ! k3s kubectl get secret authentik-postgresql -n auth-system &> /dev/null; then

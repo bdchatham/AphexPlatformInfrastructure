@@ -1,4 +1,3 @@
-# Platform Gateway - handles all *.arbiter-dev.com traffic
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -7,51 +6,15 @@ metadata:
 spec:
   gatewayClassName: traefik
   listeners:
-    - name: argocd-https
+    - name: https
       protocol: HTTPS
       port: 443
-      hostname: argocd.arbiter-dev.com
+      hostname: "*.arbiter-dev.com"
       tls:
         mode: Terminate
         certificateRefs:
-          - name: argocd-tls
-            namespace: argocd
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: auth-https
-      protocol: HTTPS
-      port: 443
-      hostname: auth.arbiter-dev.com
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: auth-tls
-            namespace: auth-system
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: dex-https
-      protocol: HTTPS
-      port: 443
-      hostname: dex.arbiter-dev.com
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: dex-tls
-            namespace: auth-system
-      allowedRoutes:
-        namespaces:
-          from: All
-    - name: tekton-https
-      protocol: HTTPS
-      port: 443
-      hostname: tekton.arbiter-dev.com
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: tekton-tls
-            namespace: tekton-pipelines
+          - name: wildcard-arbiter-dev-tls
+            kind: Secret
       allowedRoutes:
         namespaces:
           from: All
