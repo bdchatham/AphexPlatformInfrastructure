@@ -65,7 +65,7 @@ spec:
               fi
               echo "Found zone ID: $ZONE_ID"
               
-              echo "Creating ClusterIssuer with zone ID..."
+              echo "Creating ClusterIssuer..."
               cat <<EOF | kubectl apply -f -
               apiVersion: cert-manager.io/v1
               kind: ClusterIssuer
@@ -78,12 +78,14 @@ spec:
                   privateKeySecretRef:
                     name: letsencrypt-prod-account-key
                   solvers:
-                    - dns01:
+                    - selector:
+                        dnsZones:
+                          - $DOMAIN
+                      dns01:
                         cloudflare:
                           apiTokenSecretRef:
                             name: cloudflare-api-token
                             key: api-token
-                          zoneID: $ZONE_ID
               EOF
               
               echo "Done!"
