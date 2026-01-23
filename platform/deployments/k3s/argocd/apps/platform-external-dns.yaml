@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-external-dns
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - argoproj.io/finalizer
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure.git
+    targetRevision: HEAD
+    path: platform/deployments/k3s/external-dns
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
