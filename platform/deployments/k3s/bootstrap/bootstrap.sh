@@ -137,6 +137,7 @@ generate_secrets() {
   DEX_CLIENT_SECRET=$(openssl rand -base64 32)
   ARGOCD_CLIENT_SECRET=$(openssl rand -base64 32)
   TEKTON_CLIENT_SECRET=$(openssl rand -base64 32)
+  KUBERNETES_CLIENT_SECRET=$(openssl rand -base64 32)
   
   log_success "Generated all secrets"
   
@@ -197,7 +198,11 @@ create_secrets() {
   # Dex secrets
   if ! k3s kubectl get secret dex-secrets -n auth-system &> /dev/null; then
     k3s kubectl create secret generic dex-secrets -n auth-system \
-      --from-literal=client-secret="$DEX_CLIENT_SECRET"
+      --from-literal=client-secret="$DEX_CLIENT_SECRET" \
+      --from-literal=authentik-client-secret="$DEX_CLIENT_SECRET" \
+      --from-literal=argocd-client-secret="$ARGOCD_CLIENT_SECRET" \
+      --from-literal=tekton-client-secret="$TEKTON_CLIENT_SECRET" \
+      --from-literal=kubernetes-client-secret="$KUBERNETES_CLIENT_SECRET"
     log_success "Created secret: dex-secrets"
   fi
   
