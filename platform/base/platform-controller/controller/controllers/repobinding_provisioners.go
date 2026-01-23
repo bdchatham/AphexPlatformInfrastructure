@@ -8,6 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -788,6 +789,10 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 		return fmt.Errorf("failed to find pipeline %q: %w", rb.Spec.PipelineName, err)
 	}
 
+	// TODO: Remove bdchatham hardcode and use RepoOrg from spec
+	// repoFullName := fmt.Sprintf("%s/%s", rb.Spec.RepoOrg, rb.Spec.RepoName)
+	repoFullName := fmt.Sprintf("bdchatham/%s", rb.Spec.RepoName)
+
 	trigger := &triggersv1beta1.Trigger{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "triggers.tekton.dev/v1beta1",
@@ -803,12 +808,26 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 			},
 		},
 		Spec: triggersv1beta1.TriggerSpec{
+			Interceptors: []*triggersv1beta1.TriggerInterceptor{
+				{
+					Ref: triggersv1beta1.InterceptorRef{
+						Name: "cel",
+						Kind: triggersv1beta1.ClusterInterceptorKind,
+					},
+					Params: []triggersv1beta1.InterceptorParams{
+						{
+							Name:  "filter",
+							Value: apiextensionsv1.JSON{Raw: []byte(fmt.Sprintf(`"%s"`, fmt.Sprintf("body.repository.full_name == '%s'", repoFullName)))},
+						},
+					},
+				},
+			},
 			Bindings: []*triggersv1beta1.TriggerSpecBinding{
 				{Ref: "github-push-binding"},
 				{Name: "pipeline-name", Value: stringPtr(rb.Spec.PipelineName)},
 				{Name: "pipeline-namespace", Value: stringPtr(pipelineNamespace)},
 				{Name: "org-name", Value: stringPtr(rb.Spec.AphexOrg)},
-				{Name: "repo-full-name", Value: stringPtr(fmt.Sprintf("%s/%s", rb.Spec.RepoOrg, rb.Spec.RepoName))},
+				{Name: "repo-full-name", Value: stringPtr(repoFullName)},
 				{Name: "event-type", Value: stringPtr("$(header.X-Github-Event)")},
 				{Name: "event-id", Value: stringPtr("$(header.X-Github-Delivery)")},
 				{Name: "triggered-at", Value: stringPtr("$(body.repository.pushed_at)")},
@@ -823,11 +842,11 @@ func (r *RepoBindingReconciler) provisionTrigger(ctx context.Context, rb *platfo
 		return fmt.Errorf("failed to apply Trigger: %w", err)
 	}
 
-	r.Log.Info("Provisioned trigger with template parameters",
+	r.Log.Info("Provisioned trigger with CEL filter",
 		"trigger", trigger.Name,
 		"template", *trigger.Spec.Template.Ref,
 		"pipeline", rb.Spec.PipelineName,
-		"namespace", pipelineNamespace)
+		"repoFilter", repoFullName)
 
 	return nil
 }
