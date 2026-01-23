@@ -21,7 +21,7 @@ spec:
       serviceAccountName: platform-controller
       containers:
       - name: manager
-        image: ghcr.io/bdchatham/platform-controller:latest
+        image: ghcr.io/bdchatham/aphex-platform-controller:latest
         imagePullPolicy: Always
         command:
         - /manager
