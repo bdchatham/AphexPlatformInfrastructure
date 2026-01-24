@@ -62,6 +62,12 @@ check_prerequisites() {
     exit 1
   fi
   
+  # Check for GitHub token
+  if [[ -z "${GITHUB_TOKEN:-}" ]]; then
+    log_error "GITHUB_TOKEN environment variable not set"
+    exit 1
+  fi
+  
   local missing=()
   
   # Check for root/sudo

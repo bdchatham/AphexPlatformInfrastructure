@@ -9,6 +9,8 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cloudflare-go"
+	esv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
+	esmeta "github.com/external-secrets/external-secrets/apis/meta/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -142,6 +144,11 @@ func (r *OrganizationReconciler) provisionOrganization(ctx context.Context, org 
 		return fmt.Errorf("failed to provision webhook secret: %w", err)
 	}
 
+	// Create SecretStore for ESO
+	if err := r.provisionSecretStore(ctx, org); err != nil {
+		return fmt.Errorf("failed to provision SecretStore: %w", err)
+	}
+
 	// Create Cloudflared tunnel infrastructure
 	if err := r.provisionCloudflaredTunnel(ctx, org); err != nil {
 		return fmt.Errorf("failed to provision Cloudflared tunnel: %w", err)
@@ -214,6 +221,120 @@ func (r *OrganizationReconciler) provisionWebhookSecret(ctx context.Context, org
 	existingSecret.Data = secret.Data
 	existingSecret.Labels = secret.Labels
 	return r.Update(ctx, existingSecret)
+}
+
+const esoServiceAccountName = "eso-secrets-reader"
+
+func (r *OrganizationReconciler) provisionSecretStore(ctx context.Context, org *platformv1alpha1.Organization) error {
+	if err := r.provisionESOServiceAccount(ctx, org); err != nil {
+		return err
+	}
+	if err := r.provisionESORole(ctx, org); err != nil {
+		return err
+	}
+	if err := r.provisionESORoleBinding(ctx, org); err != nil {
+		return err
+	}
+	return r.provisionESOSecretStore(ctx, org)
+}
+
+func (r *OrganizationReconciler) provisionESOServiceAccount(ctx context.Context, org *platformv1alpha1.Organization) error {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      esoServiceAccountName,
+			Namespace: org.Status.Namespace,
+			Labels:    r.orgLabels(org),
+		},
+	}
+	return r.createOrUpdateObject(ctx, sa)
+}
+
+func (r *OrganizationReconciler) provisionESORole(ctx context.Context, org *platformv1alpha1.Organization) error {
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      esoServiceAccountName,
+			Namespace: org.Status.Namespace,
+			Labels:    r.orgLabels(org),
+		},
+		Rules: []rbacv1.PolicyRule{{
+			APIGroups:     []string{""},
+			Resources:     []string{"secrets"},
+			ResourceNames: []string{"org-secrets"},
+			Verbs:         []string{"get"},
+		}},
+	}
+	return r.createOrUpdateObject(ctx, role)
+}
+
+func (r *OrganizationReconciler) provisionESORoleBinding(ctx context.Context, org *platformv1alpha1.Organization) error {
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      esoServiceAccountName,
+			Namespace: org.Status.Namespace,
+			Labels:    r.orgLabels(org),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     esoServiceAccountName,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      esoServiceAccountName,
+			Namespace: org.Status.Namespace,
+		}},
+	}
+	return r.createOrUpdateObject(ctx, rb)
+}
+
+func (r *OrganizationReconciler) provisionESOSecretStore(ctx context.Context, org *platformv1alpha1.Organization) error {
+	store := &esv1beta1.SecretStore{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "org-store",
+			Namespace: org.Status.Namespace,
+			Labels:    r.orgLabels(org),
+		},
+		Spec: esv1beta1.SecretStoreSpec{
+			Provider: &esv1beta1.SecretStoreProvider{
+				Kubernetes: &esv1beta1.KubernetesProvider{
+					RemoteNamespace: org.Status.Namespace,
+					Server: esv1beta1.KubernetesServer{
+						CAProvider: &esv1beta1.CAProvider{
+							Type: esv1beta1.CAProviderTypeConfigMap,
+							Name: "kube-root-ca.crt",
+							Key:  "ca.crt",
+						},
+					},
+					Auth: esv1beta1.KubernetesAuth{
+						ServiceAccount: &esmeta.ServiceAccountSelector{
+							Name: esoServiceAccountName,
+						},
+					},
+				},
+			},
+		},
+	}
+	return r.createOrUpdateObject(ctx, store)
+}
+
+func (r *OrganizationReconciler) orgLabels(org *platformv1alpha1.Organization) map[string]string {
+	return map[string]string{
+		"platform.aphex/organization": org.Name,
+		"platform.aphex/managed-by":   "organization-controller",
+	}
+}
+
+func (r *OrganizationReconciler) createOrUpdateObject(ctx context.Context, obj client.Object) error {
+	existing := obj.DeepCopyObject().(client.Object)
+	err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, obj)
+	}
+	if err != nil {
+		return err
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	return r.Update(ctx, obj)
 }
 
 // provisionRBAC creates RBAC for organization admins
