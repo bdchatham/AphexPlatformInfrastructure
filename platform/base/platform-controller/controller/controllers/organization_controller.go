@@ -174,6 +174,7 @@ func (r *OrganizationReconciler) provisionNamespace(ctx context.Context, org *pl
 			Labels: map[string]string{
 				"platform.aphex/organization": org.Name,
 				"platform.aphex/managed-by":   "organization-controller",
+				"aphex.dev/org":               org.Name,
 			},
 		},
 	}
@@ -187,7 +188,6 @@ func (r *OrganizationReconciler) provisionNamespace(ctx context.Context, org *pl
 		return err
 	}
 
-	// Update labels if namespace exists
 	existingNs.Labels = namespace.Labels
 	return r.Update(ctx, existingNs)
 }
@@ -288,16 +288,23 @@ func (r *OrganizationReconciler) provisionESORoleBinding(ctx context.Context, or
 }
 
 func (r *OrganizationReconciler) provisionESOSecretStore(ctx context.Context, org *platformv1alpha1.Organization) error {
-	store := &esv1.SecretStore{
+	ns := org.Status.Namespace
+	store := &esv1.ClusterSecretStore{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "org-store",
-			Namespace: org.Status.Namespace,
-			Labels:    r.orgLabels(org),
+			Name:   fmt.Sprintf("org-%s-store", org.Name),
+			Labels: r.orgLabels(org),
 		},
 		Spec: esv1.SecretStoreSpec{
+			Conditions: []esv1.ClusterSecretStoreCondition{{
+				NamespaceSelector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"aphex.dev/org": org.Name,
+					},
+				},
+			}},
 			Provider: &esv1.SecretStoreProvider{
 				Kubernetes: &esv1.KubernetesProvider{
-					RemoteNamespace: org.Status.Namespace,
+					RemoteNamespace: ns,
 					Server: esv1.KubernetesServer{
 						CAProvider: &esv1.CAProvider{
 							Type: esv1.CAProviderTypeConfigMap,
@@ -307,14 +314,25 @@ func (r *OrganizationReconciler) provisionESOSecretStore(ctx context.Context, or
 					},
 					Auth: &esv1.KubernetesAuth{
 						ServiceAccount: &esmeta.ServiceAccountSelector{
-							Name: esoServiceAccountName,
+							Name:      esoServiceAccountName,
+							Namespace: &ns,
 						},
 					},
 				},
 			},
 		},
 	}
-	return r.createOrUpdateObject(ctx, store)
+
+	existing := &esv1.ClusterSecretStore{}
+	err := r.Get(ctx, client.ObjectKey{Name: store.Name}, existing)
+	if errors.IsNotFound(err) {
+		return r.Create(ctx, store)
+	}
+	if err != nil {
+		return err
+	}
+	store.SetResourceVersion(existing.GetResourceVersion())
+	return r.Update(ctx, store)
 }
 
 func (r *OrganizationReconciler) orgLabels(org *platformv1alpha1.Organization) map[string]string {

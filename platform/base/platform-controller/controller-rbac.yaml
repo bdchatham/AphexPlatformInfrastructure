@@ -320,6 +320,7 @@ rules:
   - external-secrets.io
   resources:
   - secretstores
+  - clustersecretstores
   verbs:
   - create
   - get

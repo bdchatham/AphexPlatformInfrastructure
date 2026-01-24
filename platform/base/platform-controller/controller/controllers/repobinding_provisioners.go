@@ -34,6 +34,7 @@ func (r *RepoBindingReconciler) provisionNamespace(ctx context.Context, rb *plat
 				"platform.aphex/pipeline":   rb.Spec.PipelineName,
 				"platform.aphex/repo":       repoLabel,
 				"platform.aphex/managed-by": "platform-controller",
+				"aphex.dev/org":             rb.Spec.AphexOrg,
 			},
 		},
 	}
