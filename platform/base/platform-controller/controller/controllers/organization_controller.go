@@ -307,9 +307,10 @@ func (r *OrganizationReconciler) provisionESOSecretStore(ctx context.Context, or
 					RemoteNamespace: ns,
 					Server: esv1.KubernetesServer{
 						CAProvider: &esv1.CAProvider{
-							Type: esv1.CAProviderTypeConfigMap,
-							Name: "kube-root-ca.crt",
-							Key:  "ca.crt",
+							Type:      esv1.CAProviderTypeConfigMap,
+							Name:      "kube-root-ca.crt",
+							Key:       "ca.crt",
+							Namespace: &ns,
 						},
 					},
 					Auth: &esv1.KubernetesAuth{
