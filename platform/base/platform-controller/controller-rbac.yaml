@@ -315,6 +315,19 @@ rules:
   - watch
   - update
   - patch
+# External Secrets Operator permissions
+- apiGroups:
+  - external-secrets.io
+  resources:
+  - secretstores
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+  - update
+  - patch
+  - delete
 # Service permissions (for EventListener services)
 - apiGroups:
   - ""
