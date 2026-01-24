@@ -9,7 +9,7 @@ import (
 	"fmt"
 
 	"github.com/cloudflare/cloudflare-go"
-	esv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
+	esv1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1"
 	esmeta "github.com/external-secrets/external-secrets/apis/meta/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -288,24 +288,24 @@ func (r *OrganizationReconciler) provisionESORoleBinding(ctx context.Context, or
 }
 
 func (r *OrganizationReconciler) provisionESOSecretStore(ctx context.Context, org *platformv1alpha1.Organization) error {
-	store := &esv1beta1.SecretStore{
+	store := &esv1.SecretStore{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "org-store",
 			Namespace: org.Status.Namespace,
 			Labels:    r.orgLabels(org),
 		},
-		Spec: esv1beta1.SecretStoreSpec{
-			Provider: &esv1beta1.SecretStoreProvider{
-				Kubernetes: &esv1beta1.KubernetesProvider{
+		Spec: esv1.SecretStoreSpec{
+			Provider: &esv1.SecretStoreProvider{
+				Kubernetes: &esv1.KubernetesProvider{
 					RemoteNamespace: org.Status.Namespace,
-					Server: esv1beta1.KubernetesServer{
-						CAProvider: &esv1beta1.CAProvider{
-							Type: esv1beta1.CAProviderTypeConfigMap,
+					Server: esv1.KubernetesServer{
+						CAProvider: &esv1.CAProvider{
+							Type: esv1.CAProviderTypeConfigMap,
 							Name: "kube-root-ca.crt",
 							Key:  "ca.crt",
 						},
 					},
-					Auth: esv1beta1.KubernetesAuth{
+					Auth: &esv1.KubernetesAuth{
 						ServiceAccount: &esmeta.ServiceAccountSelector{
 							Name: esoServiceAccountName,
 						},
