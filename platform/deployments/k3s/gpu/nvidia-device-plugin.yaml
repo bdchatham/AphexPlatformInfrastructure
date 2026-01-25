@@ -1,5 +1,5 @@
 # NVIDIA Device Plugin DaemonSet
-# Exposes GPUs to Kubernetes scheduler
+# Based on official Helm chart defaults
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -19,18 +19,25 @@ spec:
       labels:
         name: nvidia-device-plugin-ds
     spec:
+      priorityClassName: system-node-critical
       tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
         - key: nvidia.com/gpu
           operator: Exists
           effect: NoSchedule
-      priorityClassName: system-node-critical
       containers:
         - name: nvidia-device-plugin-ctr
           image: nvcr.io/nvidia/k8s-device-plugin:v0.17.0
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
+          command: ["nvidia-device-plugin"]
           env:
-            - name: FAIL_ON_INIT_ERROR
-              value: "false"
+            - name: MPS_ROOT
+              value: /run/nvidia/mps
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -38,7 +45,24 @@ spec:
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
+            - name: mps-shm
+              mountPath: /dev/shm
+            - name: mps-root
+              mountPath: /mps
+            - name: cdi-root
+              mountPath: /var/run/cdi
       volumes:
         - name: device-plugin
           hostPath:
             path: /var/lib/kubelet/device-plugins
+        - name: mps-root
+          hostPath:
+            path: /run/nvidia/mps
+            type: DirectoryOrCreate
+        - name: mps-shm
+          hostPath:
+            path: /run/nvidia/mps/shm
+        - name: cdi-root
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
