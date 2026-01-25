@@ -1,0 +1,47 @@
+# GPU Operator - manages NVIDIA device plugin, runtime config, and CDI
+# Uses pre-installed driver (driver.enabled=false)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-gpu-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: platform
+  source:
+    repoURL: https://helm.ngc.nvidia.com/nvidia
+    chart: gpu-operator
+    targetRevision: v24.9.0
+    helm:
+      values: |
+        operator:
+          defaultRuntime: containerd
+        driver:
+          enabled: false
+        toolkit:
+          enabled: true
+        devicePlugin:
+          enabled: true
+        dcgm:
+          enabled: false
+        dcgmExporter:
+          enabled: false
+        migManager:
+          enabled: false
+        nodeStatusExporter:
+          enabled: false
+        gfd:
+          enabled: false
+        validator:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gpu-operator
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
