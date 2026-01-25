@@ -37,7 +37,13 @@ spec:
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
+            - name: nvidia-driver
+              mountPath: /usr/lib/x86_64-linux-gnu
+              readOnly: true
       volumes:
         - name: device-plugin
           hostPath:
             path: /var/lib/kubelet/device-plugins
+        - name: nvidia-driver
+          hostPath:
+            path: /usr/lib/x86_64-linux-gnu
