@@ -38,6 +38,10 @@ spec:
               value: all
             - name: NVIDIA_DRIVER_CAPABILITIES
               value: compute,utility
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-annotations
+            - name: CDI_ANNOTATION_PREFIX
+              value: cdi.k8s.io/
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
