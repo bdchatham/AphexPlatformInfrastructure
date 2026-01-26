@@ -734,11 +734,14 @@ spec:
 # Tekton Pipelines v0.65.0
 # https://github.com/tektoncd/pipeline/releases/download/v0.65.0/release.yaml
 
-# Tekton Triggers v0.29.0
-# https://github.com/tektoncd/triggers/releases/download/v0.29.0/release.yaml
+# Tekton Triggers v0.34.0
+# https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/release.yaml
 
-# Tekton Triggers Core Interceptors v0.29.0
-# https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+# Tekton Triggers Core Interceptors v0.34.0
+# https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/interceptors.yaml
+
+# Tekton Dashboard v0.64.0
+# https://github.com/tektoncd/dashboard/releases/download/v0.64.0/release.yaml
 ```
 
 **Components**:
@@ -747,6 +750,7 @@ spec:
 - tekton-triggers-controller: Manages EventListeners and Triggers
 - tekton-triggers-webhook: Validates Trigger resources
 - tekton-triggers-core-interceptors: Provides ClusterInterceptors (github, gitlab, cel, bitbucket, slack)
+- tekton-dashboard: Web UI for viewing and managing pipelines
 
 **ClusterInterceptors**:
 - github: Validates GitHub webhook signatures and filters events

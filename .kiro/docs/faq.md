@@ -564,7 +564,7 @@ kubectl rollout restart deployment platform-controller -n platform-system
    kubectl get clusterinterceptors
    
    # If missing, install Core Interceptors
-   kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+   kubectl apply -f https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/interceptors.yaml
    ```
 
 2. **Missing Cluster-scoped RBAC**: EventListener needs read permissions for ClusterInterceptor and ClusterTriggerBinding
@@ -975,7 +975,7 @@ All authentication system components are managed by ArgoCD via GitOps. To make c
    
    # Commit changes
    git add .
-   git commit -m "Update Authentik to v2024.1.0"
+   git commit -m "Update Authentik to v2024.2.2"
    git push
    ```
 

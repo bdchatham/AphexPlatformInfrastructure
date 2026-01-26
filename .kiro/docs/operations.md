@@ -568,7 +568,7 @@ All services use HTTPS with TLS certificates. Choose between self-signed (simple
 
 1. **Install cert-manager**:
    ```bash
-   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.4/cert-manager.yaml
    
    kubectl wait --for=condition=ready pod \
      -l app.kubernetes.io/instance=cert-manager \
@@ -767,7 +767,7 @@ vi platform/auth/authentik/server-deployment.yaml
 
 # Commit changes
 git add .
-git commit -m "Update Authentik to v2024.1.0"
+git commit -m "Update Authentik to v2024.2.2"
 git push
 ```
 
@@ -1100,7 +1100,7 @@ This error occurs when Tekton Triggers Core Interceptors are not installed. The 
 
 ```bash
 # Install Core Interceptors
-kubectl apply -f https://github.com/tektoncd/triggers/releases/download/v0.29.0/interceptors.yaml
+kubectl apply -f https://infra.tekton.dev/tekton-releases/triggers/previous/v0.34.0/interceptors.yaml
 
 # Verify ClusterInterceptors are created
 kubectl get clusterinterceptors
@@ -1438,16 +1438,16 @@ kubectl get pods -n tekton-pipelines
 vi platform/bootstrap/bootstrap.sh
 
 # Update version URL
-# ArgoCD: https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.0/manifests/install.yaml
+# ArgoCD: https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.3/manifests/install.yaml
 
 # Commit changes
 git add platform/bootstrap/bootstrap.sh
-git commit -m "Update ArgoCD to v2.9.0"
+git commit -m "Update ArgoCD to v2.9.3"
 git push
 
 # ArgoCD will NOT automatically update itself (installed by bootstrap)
 # To update ArgoCD, manually apply new manifests:
-kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.0/manifests/install.yaml
+kubectl apply -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.9.3/manifests/install.yaml
 ```
 
 ### Update Onboarding Controller
