@@ -6,9 +6,40 @@
 
 The Aphex Pipeline Infrastructure provides a production-ready GitOps platform using ArgoCD and Tekton with revolutionary layered cert-manager architecture. It enables zero-touch deployment, centralized authentication, self-service repository onboarding, and bulletproof certificate management.
 
+### Which deployment type should I use?
+
+**Kind (Development)**:
+- Use for local development and testing
+- Requires Docker and Kind CLI
+- Simulated GPU support (RuntimeClass only)
+- Fast iteration and experimentation
+- Bootstrap: `./bootstrap.sh --deployment kind`
+
+**K3s (Production)**:
+- Use for production deployments with GPU workloads
+- Requires Ubuntu 22.04+, NVIDIA drivers, nvidia-container-toolkit
+- Real GPU support via NVIDIA GPU Operator
+- Gateway API with external DNS
+- Bootstrap: `./bootstrap.sh --deployment k3s`
+
+### How do deployment types differ?
+
+**Infrastructure**:
+- Kind: nginx-ingress-controller, simulated GPU
+- K3s: Gateway API, NVIDIA GPU Operator, External DNS
+
+**ArgoCD Applications**:
+- Kind: Uses `platform/base/argocd/apps` → references `platform/deployments/kind/*`
+- K3s: Uses `platform/deployments/k3s/argocd/apps` → references `platform/deployments/k3s/*`
+
+**Additional Apps (K3s only)**:
+- `platform-gpu-operator`: Real NVIDIA GPU support
+- `platform-gateway`: Gateway API for advanced routing
+- `platform-external-dns`: Automatic DNS record management
+
 ### How does this fit into the larger system?
 
-This platform provides shared CI/CD infrastructure with complete tenant isolation. Teams can onboard repositories through RepoBinding CRDs, which automatically provisions isolated namespaces with RBAC, network policies, and pipeline resources. The platform serves as the foundation for automated deployments and infrastructure management.
+This platform provides shared CI/CD infrastructure with complete tenant isolation. Teams can onboard repositories through RepoBinding CRDs, which automatically provisions isolated namespaces with RBAC, network policies, AppProject boundaries, and pipeline resources. The platform serves as the foundation for automated deployments and infrastructure management.
 
 ### What makes the cert-manager architecture special?
 
@@ -18,7 +49,7 @@ For detailed architecture, see [architecture.md](architecture.md).
 
 ### What is zero-touch bootstrap?
 
-The bootstrap script achieves complete platform convergence automatically by generating all secrets, creating the cluster, and waiting for full platform functionality without manual steps.
+The bootstrap script achieves complete platform convergence automatically by generating all secrets, creating the cluster, and waiting for full platform functionality without manual steps. The dispatcher routes to deployment-specific bootstrap scripts based on the `--deployment` flag.
 
 For deployment procedures, see [operations.md](operations.md).
 
@@ -29,6 +60,7 @@ A tenant is a product team with complete isolation and dedicated resources:
 - **Service Account**: Least-privilege access with role-based permissions
 - **Resource Quotas**: CPU, memory, and storage limits
 - **Network Policies**: Traffic isolation with ingress exceptions
+- **AppProject**: ArgoCD project isolation with scoped destinations
 - **EventListener**: Tekton webhook handler for GitHub integration
 - **Pipeline Resources**: Access to shared catalog and custom pipelines
 
@@ -81,9 +113,78 @@ Organization deletion follows this sequence:
 2. Cleanup active tunnel connections via Cloudflare API
 3. Delete tunnel from Cloudflare
 4. Delete ClusterRoleBinding for EventListener
-5. Delete organization namespace (cascades all resources)
+5. Delete ClusterSecretStore (cluster-scoped)
+6. Delete organization namespace (cascades all resources including ESO RBAC)
 
 This ensures complete cleanup with no orphaned resources in Cloudflare or Kubernetes.
+
+### How do I use External Secrets with my organization?
+
+Each organization automatically receives a ClusterSecretStore that enables centralized secret management:
+
+1. **Create secrets in your organization namespace**:
+   ```bash
+   kubectl create secret generic org-secrets \
+     -n org-my-org \
+     --from-literal=github-token=ghp_xxx \
+     --from-literal=database-password=mypass
+   ```
+
+2. **Label your application namespace**:
+   ```bash
+   kubectl label namespace my-app aphex.dev/org=my-org
+   ```
+
+3. **Create ExternalSecret in your application namespace**:
+   ```yaml
+   apiVersion: external-secrets.io/v1
+   kind: ExternalSecret
+   metadata:
+     name: my-app-secrets
+     namespace: my-app
+   spec:
+     refreshInterval: 1h
+     secretStoreRef:
+       name: org-my-org-store
+       kind: ClusterSecretStore
+     target:
+       name: my-app-secrets
+     data:
+       - secretKey: github_token
+         remoteRef:
+           key: org-secrets
+           property: github-token
+   ```
+
+The External Secrets Operator automatically syncs secrets from `org-secrets` to your application namespace.
+
+**Benefits**:
+- Centralized secret management per organization
+- No need to duplicate secrets across namespaces
+- Automatic synchronization and rotation support
+- Namespace isolation via label selectors
+
+For detailed API documentation, see [api.md](api.md#external-secrets-api).
+
+### What is AppProject isolation?
+
+Each pipeline automatically receives an ArgoCD AppProject that enforces security boundaries:
+
+**Scoping Rules**:
+- **Destinations**: Only `{pipelineName}` and `{pipelineName}-*` namespaces
+- **Source Repositories**: Only the specific GitHub repository
+- **Cluster Resources**: None (empty whitelist)
+- **Namespace Resources**: All resources within scoped namespaces
+
+**Benefits**:
+- Prevents cross-pipeline Application deployments
+- Enforces namespace boundaries
+- Restricts source repositories
+- Prevents cluster-scoped resource creation
+
+**Lifecycle**: Created during RepoBinding provisioning, deleted when RepoBinding is deleted.
+
+For detailed AppProject API, see [api.md](api.md#argocd-appproject-api).
 
 ### How do I troubleshoot webhook delivery issues?
 
