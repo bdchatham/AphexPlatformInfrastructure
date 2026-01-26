@@ -632,7 +632,6 @@ func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *pla
 	return nil
 }
 
-// provisionNetworkPolicy creates or updates the pipeline NetworkPolicy
 func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *platformv1alpha1.RepoBinding) error {
 	networkPolicy := &networkingv1.NetworkPolicy{
 		ObjectMeta: metav1.ObjectMeta{
@@ -651,11 +650,17 @@ func (r *RepoBindingReconciler) provisionNetworkPolicy(ctx context.Context, rb *
 						{
 							PodSelector: &metav1.LabelSelector{},
 						},
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"aphex.dev/org": rb.Spec.AphexOrg,
+								},
+							},
+						},
 					},
 				},
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
-				// Allow all egress - pipelines need access to K8s API, ArgoCD, registries
 				// TODO: Implement allowlist-based egress policy
 				{},
 			},
