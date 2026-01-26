@@ -590,38 +590,72 @@ For authentication API details, see [api.md](api.md#authentication-api).
 
 ### 1. Bootstrap Script
 
-**Purpose**: One-time initialization of cluster and platform components
+**Purpose**: One-time initialization of cluster and platform components with deployment type support
 
-**Location**: `platform/bootstrap/bootstrap.sh`
+**Location**: `bootstrap.sh` (dispatcher), `platform/deployments/{kind|k3s}/bootstrap/bootstrap.sh` (deployment-specific)
+
+**Architecture**: The bootstrap system uses a dispatcher pattern to route to deployment-specific scripts:
+
+```bash
+bootstrap.sh (root dispatcher)
+├── --deployment kind → platform/deployments/kind/bootstrap/bootstrap.sh
+└── --deployment k3s → platform/deployments/k3s/bootstrap/bootstrap.sh
+```
 
 **Responsibilities**:
-- Detect and clean up existing JenkinsX installations
-- Create Kubernetes cluster (Kind for local, configurable for others)
-- Install Tekton Pipelines and Tekton Triggers
+- Route to deployment-specific bootstrap script
+- Create or use existing Kubernetes cluster
+- Generate ALL secrets automatically (PostgreSQL, Authentik, Dex, API tokens)
 - Install ArgoCD
-- Create platform namespaces (argocd, tekton-pipelines, pipeline-system)
-- Create platform root ArgoCD Application
-- Display ArgoCD credentials and access instructions
+- Create platform namespaces (argocd, auth-system, tekton-pipelines, platform-system, external-secrets)
+- Create deployment-specific platform-root ArgoCD Application
+- Wait for Authentik deployment and create API token
+- Achieve complete platform convergence automatically
 
 **Interface**:
 ```bash
-./bootstrap.sh [OPTIONS]
+./bootstrap.sh --deployment <kind|k3s> [OPTIONS]
 
-Options:
-  --cluster-name NAME    Name of the cluster (default: aphex-platform)
-  --repo-url URL         Platform repository URL (default: current repo)
+Required:
+  --deployment TYPE      Deployment type: kind (development) or k3s (production)
+
+Kind Options:
+  --cluster-name NAME    Name for Kind cluster (default: platform-cluster)
+  --use-existing         Use existing kubecontext instead of creating cluster
+  --show-secrets         Display generated secrets (WARNING: not for production)
+
+K3s Options:
+  --show-secrets         Display generated secrets (WARNING: not for production)
 ```
+
+**Deployment Types**:
+
+**Kind (Development)**:
+- Creates local Kind cluster with Docker
+- Simulated GPU support via RuntimeClass
+- nginx-ingress-controller
+- Uses `platform/base/argocd/apps` for Applications
+- Apps reference `platform/deployments/kind/*` for resources
+
+**K3s (Production)**:
+- Installs K3s with NVIDIA container runtime
+- Real GPU support via NVIDIA GPU Operator
+- Gateway API with external DNS
+- Uses `platform/deployments/k3s/argocd/apps` for Applications
+- Apps reference `platform/deployments/k3s/*` for resources
 
 **Output**:
 - Kubernetes cluster running
-- Tekton Pipelines and Triggers installed
+- All secrets generated and stored in cluster
 - ArgoCD installed and accessible
 - Platform root Application created and syncing
-- ArgoCD admin password displayed
-- Next steps instructions displayed
+- Complete platform convergence achieved
+- Access instructions displayed
 
 **Source**
-- `platform/bootstrap/bootstrap.sh`
+- `bootstrap.sh` (dispatcher)
+- `platform/deployments/kind/bootstrap/bootstrap.sh` (Kind deployment)
+- `platform/deployments/k3s/bootstrap/bootstrap.sh` (K3s deployment)
 
 ### 2. ArgoCD
 
@@ -767,9 +801,96 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 - `platform/tekton/kustomization.yaml` (ArgoCD management)
 - `platform/argocd/apps/platform-tekton.yaml` (ArgoCD Application)
 
-### 5. Organization and Onboarding System
+### 5. External Secrets Operator
 
-**Purpose**: Multi-tenant organization management with automated webhook infrastructure
+**Purpose**: Enable customers to create secrets in their organization namespace and reference them across their systems
+
+**Namespace**: `external-secrets`
+
+**Version**: v1.3.1
+
+**Installation**: Managed by ArgoCD from `platform/base/external-secrets/`
+
+**Sync Wave**: 15 (after cert-manager at wave 10, before auth at wave 20)
+
+**Architecture**: Each organization receives a ClusterSecretStore that enables secret synchronization across namespaces.
+
+**Per-Organization Resources** (created by Organization controller):
+1. **ServiceAccount**: `eso-secrets-reader` in organization namespace
+2. **Role**: Read access to `org-secrets` Secret
+3. **RoleBinding**: Binds ServiceAccount to Role
+4. **ClusterSecretStore**: `org-{name}-store` with Kubernetes provider
+
+**ClusterSecretStore Configuration**:
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: org-{name}-store
+spec:
+  conditions:
+    - namespaceSelector:
+        matchLabels:
+          aphex.dev/org: {name}
+  provider:
+    kubernetes:
+      remoteNamespace: org-{name}
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+      auth:
+        serviceAccount:
+          name: eso-secrets-reader
+          namespace: org-{name}
+```
+
+**Customer Usage Pattern**:
+1. Create Secret `org-secrets` in organization namespace with all secrets
+2. Create ExternalSecret resources in any namespace labeled with organization
+3. External Secrets Operator syncs secrets from `org-secrets` to target namespaces
+
+**Example** (from ArchonKnowledgeBaseInfrastructure):
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: knowledge-base-secrets
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: org-archon-store
+    kind: ClusterSecretStore
+  target:
+    name: knowledge-base-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: github_token
+      remoteRef:
+        key: org-secrets
+        property: github-token
+```
+
+**Benefits**:
+- Centralized secret management per organization
+- Secrets can be referenced across multiple namespaces
+- No need to duplicate secrets
+- Automatic synchronization and rotation support
+- Namespace isolation via label selectors
+
+**Patches Applied**:
+- cert-controller: Fixed service and secret namespace to `external-secrets`
+- webhook: Fixed DNS name to `external-secrets-webhook.external-secrets.svc`
+
+**Source**
+- `platform/base/external-secrets/kustomization.yaml` (operator installation)
+- `platform/base/argocd/apps/platform-external-secrets.yaml` (ArgoCD Application)
+- `platform/platform-controller/controller/controllers/organization_controller.go` (provisionSecretStore)
+
+### 6. Organization and Onboarding System
+
+**Purpose**: Multi-tenant organization management with automated webhook infrastructure and External Secrets provisioning
 
 **Namespace**: `platform-system` (controllers), `org-{name}` (tenant resources)
 
@@ -783,6 +904,7 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 - Cloudflare tunnel with DNS record management
 - EventListener with dedicated ServiceAccount and ClusterRoleBinding
 - Organization-scoped webhook secrets and RBAC
+- External Secrets ClusterSecretStore for secret management
 
 **Controller Logic**:
 1. Watch Organization resources in platform-system namespace
@@ -793,14 +915,20 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 6. Create Cloudflared tunnel ConfigMap and Deployment
 7. Create EventListener ServiceAccount with ClusterRoleBinding to eventlistener-access ClusterRole
 8. Create organization admin RBAC
-9. Update Organization status with webhook URL: `https://{org}.arbiter-dev.com`
+9. **Provision External Secrets infrastructure**:
+   - Create ServiceAccount `eso-secrets-reader`
+   - Create Role with read access to `org-secrets` Secret
+   - Create RoleBinding
+   - Create ClusterSecretStore `org-{name}-store`
+10. Update Organization status with webhook URL: `https://{org}.arbiter-dev.com`
 
 **Deletion Logic**:
 1. Delete DNS CNAME record from Cloudflare
 2. Cleanup tunnel connections via Cloudflare API
 3. Delete tunnel from Cloudflare
 4. Delete ClusterRoleBinding for EventListener
-5. Delete organization namespace (cascades all resources)
+5. Delete ClusterSecretStore (cluster-scoped)
+6. Delete organization namespace (cascades all resources)
 
 **Source**
 - `platform/platform-controller/controller/controllers/organization_controller.go` - Controller implementation
@@ -818,18 +946,34 @@ After bootstrap, Tekton is managed by the `platform-tekton` ArgoCD Application. 
 1. Watch RepoBinding resources
 2. Validate spec (org, repo, tenant name, pipeline name)
 3. Discover pipeline namespace automatically across cluster
-4. Create namespace-scoped resources in organization namespace:
+4. Create namespace-scoped resources in pipeline namespace:
    - ServiceAccount (`pipeline-runner`)
-   - RBAC (Role, RoleBinding)
+   - RBAC (Role, RoleBinding, ClusterRole, ClusterRoleBinding, ArgoCD RoleBinding)
+   - **ArgoCD AppProject for pipeline isolation**
    - ResourceQuota and LimitRange
    - NetworkPolicy
    - Terraform backend secret
-5. Create Tekton webhook resources:
+5. Create Tekton webhook resources in organization namespace:
    - TriggerBinding (`github-push-binding`)
    - TriggerTemplate (`{tenant}-trigger-template`)
-   - EventListener (`github-listener`)
+   - Trigger (`{pipeline-name}-trigger`)
 6. Reference Organization-managed webhook secret
 7. Update RepoBinding status with webhook configuration
+
+**AppProject Provisioning**:
+- **Name**: `{pipelineName}`
+- **Namespace**: `argocd`
+- **Destinations**: Only `{pipelineName}` and `{pipelineName}-*` namespaces
+- **Source Repositories**: Only the specific GitHub repository
+- **Cluster Resources**: None (empty whitelist)
+- **Namespace Resources**: All resources allowed within scoped namespaces
+
+**Deletion Logic**:
+1. Delete Trigger from organization namespace
+2. Delete TriggerTemplate from organization namespace
+3. **Delete ArgoCD AppProject**
+4. **Delete ArgoCD Applications with label `platform.aphex/pipeline`**
+5. Finalizer cleanup
 
 #### Per-Organization Webhook Infrastructure
 
@@ -912,7 +1056,7 @@ GitHub → {org}.arbiter-dev.com → Cloudflare DNS → Cloudflare Edge (SSL) �
 - `platform/platform-controller/controller-rbac.yaml`
 - `platform/platform-controller/controller-service-account.yaml`
 
-### 6. Tekton EventListener (Per Tenant)
+### 7. Tekton EventListener (Per Tenant)
 
 **Purpose**: Receive GitHub webhooks and create PipelineRuns
 
@@ -993,7 +1137,7 @@ spec:
 - `platform/tenancy/templates/eventlistener-template.yaml`
 - `platform/tenancy/templates/ingress-template.yaml`
 
-### 7. Pipeline Catalog
+### 8. Pipeline Catalog
 
 **Purpose**: Provide shared Tekton Tasks and Pipelines
 
@@ -1022,7 +1166,7 @@ spec:
 - `platform/catalog/triggers/github-push-binding.yaml`
 - `platform/catalog/triggers/cdktf-deploy-trigger-template.yaml`
 
-### 8. RepoBinding Custom Resource Definition
+### 9. RepoBinding Custom Resource Definition
 
 **Purpose**: Define repository onboarding requests
 
