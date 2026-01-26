@@ -274,6 +274,37 @@ func (r *RepoBindingReconciler) handleDeletion(ctx context.Context, logger logr.
 				}
 			}
 
+			appProject := &unstructured.Unstructured{}
+			appProject.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "argoproj.io",
+				Version: "v1alpha1",
+				Kind:    "AppProject",
+			})
+			if err := r.Get(ctx, client.ObjectKey{Name: repoBinding.Spec.PipelineName, Namespace: "argocd"}, appProject); err == nil {
+				logger.Info("Deleting ArgoCD AppProject", "name", repoBinding.Spec.PipelineName)
+				if err := r.Delete(ctx, appProject); err != nil && !errors.IsNotFound(err) {
+					return fmt.Errorf("failed to delete ArgoCD AppProject: %w", err)
+				}
+			}
+
+			appList := &unstructured.UnstructuredList{}
+			appList.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "argoproj.io",
+				Version: "v1alpha1",
+				Kind:    "Application",
+			})
+			if err := r.List(ctx, appList, client.InNamespace("argocd"), client.MatchingLabels{
+				"platform.aphex/pipeline": repoBinding.Spec.PipelineName,
+			}); err == nil {
+				for _, app := range appList.Items {
+					appName := app.GetName()
+					logger.Info("Deleting ArgoCD Application", "name", appName)
+					if err := r.Delete(ctx, &app); err != nil && !errors.IsNotFound(err) {
+						return fmt.Errorf("failed to delete ArgoCD Application %s: %w", appName, err)
+					}
+				}
+			}
+
 			controllerutil.RemoveFinalizer(repoBinding, repoBindingFinalizer)
 			return r.Update(ctx, repoBinding)
 		}

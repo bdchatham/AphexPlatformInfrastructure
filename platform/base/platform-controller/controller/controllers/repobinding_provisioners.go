@@ -546,10 +546,10 @@ func (r *RepoBindingReconciler) provisionResourceQuota(ctx context.Context, rb *
 		},
 		Spec: corev1.ResourceQuotaSpec{
 			Hard: corev1.ResourceList{
-				"requests.cpu":           resource.MustParse("4"),
-				"limits.cpu":             resource.MustParse("8"),
-				"requests.memory":        resource.MustParse("8Gi"),
-				"limits.memory":          resource.MustParse("16Gi"),
+				"requests.cpu":           resource.MustParse("16"),
+				"limits.cpu":             resource.MustParse("32"),
+				"requests.memory":        resource.MustParse("32Gi"),
+				"limits.memory":          resource.MustParse("48Gi"),
 				"persistentvolumeclaims": resource.MustParse("5"),
 				"pods":                   resource.MustParse("20"),
 			},
@@ -598,8 +598,8 @@ func (r *RepoBindingReconciler) provisionLimitRange(ctx context.Context, rb *pla
 						corev1.ResourceMemory: resource.MustParse("128Mi"),
 					},
 					Max: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("2"),
-						corev1.ResourceMemory: resource.MustParse("4Gi"),
+						corev1.ResourceCPU:    resource.MustParse("16"),
+						corev1.ResourceMemory: resource.MustParse("32Gi"),
 					},
 					Min: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("50m"),
