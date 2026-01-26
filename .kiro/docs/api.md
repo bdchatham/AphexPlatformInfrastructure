@@ -419,6 +419,141 @@ The KnowledgeBase controller validates specifications and maintains tracking sta
 - `platform/platform-controller/controller/api/v1alpha1/knowledgebase_types.go` - KnowledgeBase Go types
 - `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller reconciliation logic
 
+## External Secrets API
+
+### ClusterSecretStore API
+
+**Purpose**: Enables customers to create secrets in their organization namespace and reference them across their systems.
+
+**Resource**: `ClusterSecretStore` (cluster-scoped)
+
+**Created By**: Organization controller during organization provisioning
+
+**API Version**: `external-secrets.io/v1`
+
+**Example**:
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: org-acme-corp-store
+  labels:
+    platform.aphex/organization: acme-corp
+    platform.aphex/managed-by: organization-controller
+spec:
+  conditions:
+    - namespaceSelector:
+        matchLabels:
+          aphex.dev/org: acme-corp
+  provider:
+    kubernetes:
+      remoteNamespace: org-acme-corp
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+          namespace: org-acme-corp
+      auth:
+        serviceAccount:
+          name: eso-secrets-reader
+          namespace: org-acme-corp
+```
+
+**Fields**:
+- `metadata.name`: `org-{organizationName}-store`
+- `spec.conditions[].namespaceSelector`: Restricts access to namespaces labeled with organization
+- `spec.provider.kubernetes.remoteNamespace`: Organization namespace where secrets are stored
+- `spec.provider.kubernetes.auth.serviceAccount`: ServiceAccount with read access to `org-secrets`
+
+**Namespace Selector**: Only namespaces with label `aphex.dev/org: {organizationName}` can use this store
+
+**RBAC Resources** (created per organization):
+- **ServiceAccount**: `eso-secrets-reader` in organization namespace
+- **Role**: Read access to Secret `org-secrets`
+- **RoleBinding**: Binds ServiceAccount to Role
+
+### ExternalSecret API
+
+**Purpose**: Synchronize secrets from organization namespace to target namespaces
+
+**Resource**: `ExternalSecret` (namespace-scoped)
+
+**Created By**: Customers in their application namespaces
+
+**API Version**: `external-secrets.io/v1`
+
+**Example** (from ArchonKnowledgeBaseInfrastructure):
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: knowledge-base-secrets
+  namespace: archon-knowledge-base
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: org-archon-store
+    kind: ClusterSecretStore
+  target:
+    name: knowledge-base-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: github_token
+      remoteRef:
+        key: org-secrets
+        property: github-token
+    - secretKey: postgres_user
+      remoteRef:
+        key: org-secrets
+        property: postgres-user
+    - secretKey: postgres_password
+      remoteRef:
+        key: org-secrets
+        property: postgres-password
+```
+
+**Fields**:
+- `spec.refreshInterval`: How often to sync secrets (default: 1h)
+- `spec.secretStoreRef.name`: ClusterSecretStore name (`org-{organizationName}-store`)
+- `spec.target.name`: Name of Kubernetes Secret to create
+- `spec.target.creationPolicy`: `Owner` (ExternalSecret owns the Secret)
+- `spec.data[]`: Array of secret mappings
+  - `secretKey`: Key in target Secret
+  - `remoteRef.key`: Source Secret name (always `org-secrets`)
+  - `remoteRef.property`: Property within source Secret
+
+**Customer Workflow**:
+1. Create Secret `org-secrets` in organization namespace with all secrets:
+   ```bash
+   kubectl create secret generic org-secrets \
+     -n org-acme-corp \
+     --from-literal=github-token=ghp_xxx \
+     --from-literal=postgres-user=myuser \
+     --from-literal=postgres-password=mypass
+   ```
+
+2. Label application namespace with organization:
+   ```bash
+   kubectl label namespace my-app aphex.dev/org=acme-corp
+   ```
+
+3. Create ExternalSecret in application namespace referencing ClusterSecretStore
+
+4. External Secrets Operator syncs secrets automatically
+
+**Benefits**:
+- Centralized secret management per organization
+- Secrets can be referenced across multiple namespaces
+- No need to duplicate secrets
+- Automatic synchronization and rotation support
+- Namespace isolation via label selectors
+
+**Source**
+- `platform/base/external-secrets/kustomization.yaml` - External Secrets Operator installation
+- `platform/platform-controller/controller/controllers/organization_controller.go` - ClusterSecretStore provisioning (provisionSecretStore)
+- External Secrets Operator documentation: https://external-secrets.io/
+
 ## Onboarding Controller API
 
 ### Controller Behavior
@@ -897,6 +1032,74 @@ status:
       status: "False"
       message: ""
 ```
+
+## ArgoCD AppProject API
+
+**Purpose**: Enforce logical security boundaries for customer team resources in ArgoCD.
+
+**Resource**: `AppProject` (namespace-scoped in `argocd` namespace)
+
+**Created By**: RepoBinding controller during pipeline provisioning
+
+**API Version**: `argoproj.io/v1alpha1`
+
+**Example**:
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: my-pipeline
+  namespace: argocd
+  labels:
+    platform.aphex/pipeline: my-pipeline
+    platform.aphex/managed-by: platform-controller
+spec:
+  description: "Project for my-pipeline pipeline"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: my-pipeline
+    - server: https://kubernetes.default.svc
+      namespace: my-pipeline-*
+  sourceRepos:
+    - https://github.com/my-org/my-repo
+    - https://github.com/my-org/my-repo.git
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+```
+
+**Fields**:
+- `metadata.name`: Pipeline name (matches RepoBinding `pipelineName`)
+- `metadata.labels["platform.aphex/pipeline"]`: Pipeline identifier for cleanup
+- `spec.destinations[]`: Allowed deployment targets
+  - Exact namespace: `{pipelineName}`
+  - Wildcard namespaces: `{pipelineName}-*`
+- `spec.sourceRepos[]`: Allowed Git repositories (only the specific repo)
+- `spec.clusterResourceWhitelist`: Empty (no cluster-scoped resources allowed)
+- `spec.namespaceResourceWhitelist`: All resources within scoped namespaces
+
+**Security Benefits**:
+- Prevents cross-pipeline Application deployments
+- Enforces namespace boundaries
+- Restricts source repositories
+- Prevents cluster-scoped resource creation
+- Logical isolation for customer teams
+
+**Lifecycle**:
+- **Created**: During RepoBinding RBAC provisioning step
+- **Updated**: If RepoBinding spec changes (repo URL, pipeline name)
+- **Deleted**: When RepoBinding is deleted (finalizer cleanup)
+
+**Deletion Behavior**:
+When RepoBinding is deleted, the controller:
+1. Deletes the AppProject
+2. Deletes all Applications with label `platform.aphex/pipeline: {pipelineName}`
+3. Removes finalizer from RepoBinding
+
+**Source**
+- `platform/platform-controller/controller/controllers/repobinding_provisioners.go` - provisionArgoCDAppProject function
+- `platform/platform-controller/controller/controllers/repobinding_controller.go` - Deletion logic
 
 ## Error Responses
 
