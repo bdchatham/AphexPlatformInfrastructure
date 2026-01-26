@@ -52,6 +52,7 @@ spec:
 interface OrganizationStatus {
   namespace: string;            // Organization namespace (org-{name})
   webhookURL: string;           // Public webhook URL via Cloudflare tunnel
+  clusterSecretStore: string;   // ClusterSecretStore name (org-{name}-store)
   phase: "Pending" | "Active" | "Failed";
   message?: string;             // Human-readable status message
 }
@@ -62,8 +63,20 @@ interface OrganizationStatus {
 status:
   namespace: "org-acme-corp"
   webhookURL: "https://acme-corp.arbiter-dev.com"
+  clusterSecretStore: "org-acme-corp-store"
   phase: "Active"
 ```
+
+**Resources Created**:
+- Organization namespace: `org-{name}`
+- Cloudflare tunnel and DNS record
+- EventListener ServiceAccount and ClusterRoleBinding
+- Webhook Secret: `github-webhook-secret`
+- **External Secrets infrastructure**:
+  - ServiceAccount: `eso-secrets-reader`
+  - Role: `eso-secrets-reader` (read access to `org-secrets`)
+  - RoleBinding: `eso-secrets-reader`
+  - ClusterSecretStore: `org-{name}-store`
 
 For operational procedures on creating and managing organizations, see [operations.md](operations.md#bootstrap-organization).
 
@@ -183,12 +196,17 @@ interface RepoBindingStatus {
   };
   provisionedResources: {
     namespace: boolean;
+    pipeline: boolean;
     serviceAccount: boolean;
     rbac: boolean;
+    appProject: boolean;
     resourceQuota: boolean;
     networkPolicy: boolean;
-    eventListener: boolean;
-    pipelineResources: boolean;
+    terraformSecret: boolean;
+    triggerBinding: boolean;
+    triggerTemplate: boolean;
+    trigger: boolean;
+    allowlistUpdated: boolean;
   };
 }
 
@@ -208,11 +226,26 @@ Pending → Provisioning → Ready
                     Failed
 ```
 
+**Provisioning Steps** (in order):
+1. Namespace creation
+2. Pipeline creation (from templateRef)
+3. ServiceAccount creation
+4. RBAC provisioning (Role, RoleBinding, ClusterRole, ClusterRoleBinding, ArgoCD RoleBinding)
+5. AppProject provisioning
+6. Resource limits (ResourceQuota, LimitRange)
+7. Network policy
+8. Terraform backend secret
+9. EventListener namespace update
+10. TriggerTemplate creation
+11. Trigger creation
+12. Allowlist update (legacy, skipped if not found)
+
 **Condition Types**:
-- `NamespaceReady`: Tenant namespace created and configured
+- `NamespaceReady`: Pipeline namespace created and configured
 - `RBACReady`: Service account and RBAC policies configured
+- `AppProjectReady`: ArgoCD AppProject created for pipeline isolation
 - `NetworkPolicyReady`: Network isolation policies applied
-- `EventListenerReady`: Tekton webhook handler configured
+- `TriggerReady`: Tekton webhook handler configured
 - `WebhookReady`: GitHub webhook configuration available
 
 For operational procedures on creating and managing repo bindings, see [operations.md](operations.md#create-repobinding).
@@ -307,6 +340,168 @@ For API details on KnowledgeBase resources, see [api.md](api.md#knowledgebase-ap
 - `platform/crds/aphex_knowledgebases.yaml` - CRD definition
 - `platform/platform-controller/controller/controllers/knowledgebase_controller.go` - Controller implementation
 
+## External Secrets Data Models
+
+### ClusterSecretStore Data Model
+
+**Purpose**: Enables customers to create secrets in their organization namespace and reference them across their systems.
+
+**API Version**: `external-secrets.io/v1`
+
+**Kind**: `ClusterSecretStore` (cluster-scoped)
+
+**Schema**:
+```typescript
+interface ClusterSecretStore {
+  apiVersion: "external-secrets.io/v1";
+  kind: "ClusterSecretStore";
+  metadata: {
+    name: string;                    // Format: "org-{organizationName}-store"
+    labels: {
+      "platform.aphex/organization": string;
+      "platform.aphex/managed-by": "organization-controller";
+    };
+  };
+  spec: {
+    conditions: Array<{
+      namespaceSelector: {
+        matchLabels: {
+          "aphex.dev/org": string;   // Organization name
+        };
+      };
+    }>;
+    provider: {
+      kubernetes: {
+        remoteNamespace: string;     // Organization namespace: "org-{name}"
+        server: {
+          caProvider: {
+            type: "ConfigMap";
+            name: "kube-root-ca.crt";
+            key: "ca.crt";
+            namespace: string;       // Organization namespace
+          };
+        };
+        auth: {
+          serviceAccount: {
+            name: "eso-secrets-reader";
+            namespace: string;       // Organization namespace
+          };
+        };
+      };
+    };
+  };
+}
+```
+
+**Example**:
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: org-acme-corp-store
+  labels:
+    platform.aphex/organization: acme-corp
+    platform.aphex/managed-by: organization-controller
+spec:
+  conditions:
+    - namespaceSelector:
+        matchLabels:
+          aphex.dev/org: acme-corp
+  provider:
+    kubernetes:
+      remoteNamespace: org-acme-corp
+      server:
+        caProvider:
+          type: ConfigMap
+          name: kube-root-ca.crt
+          key: ca.crt
+          namespace: org-acme-corp
+      auth:
+        serviceAccount:
+          name: eso-secrets-reader
+          namespace: org-acme-corp
+```
+
+**Created By**: Organization controller during organization provisioning
+
+**Lifecycle**: Created when Organization is created, deleted when Organization is deleted
+
+### ExternalSecret Data Model
+
+**Purpose**: Synchronize secrets from organization namespace to target namespaces
+
+**API Version**: `external-secrets.io/v1`
+
+**Kind**: `ExternalSecret` (namespace-scoped)
+
+**Schema**:
+```typescript
+interface ExternalSecret {
+  apiVersion: "external-secrets.io/v1";
+  kind: "ExternalSecret";
+  metadata: {
+    name: string;
+    namespace: string;               // Must have label "aphex.dev/org: {organizationName}"
+  };
+  spec: {
+    refreshInterval: string;         // e.g., "1h", "5m"
+    secretStoreRef: {
+      name: string;                  // ClusterSecretStore name: "org-{organizationName}-store"
+      kind: "ClusterSecretStore";
+    };
+    target: {
+      name: string;                  // Name of Kubernetes Secret to create
+      creationPolicy: "Owner";       // ExternalSecret owns the Secret
+    };
+    data: Array<{
+      secretKey: string;             // Key in target Secret
+      remoteRef: {
+        key: "org-secrets";          // Source Secret name (always "org-secrets")
+        property: string;            // Property within source Secret
+      };
+    }>;
+  };
+}
+```
+
+**Example**:
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: my-app-secrets
+  namespace: my-app
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: org-acme-corp-store
+    kind: ClusterSecretStore
+  target:
+    name: my-app-secrets
+    creationPolicy: Owner
+  data:
+    - secretKey: github_token
+      remoteRef:
+        key: org-secrets
+        property: github-token
+    - secretKey: database_password
+      remoteRef:
+        key: org-secrets
+        property: database-password
+```
+
+**Created By**: Customers in their application namespaces
+
+**Requirements**:
+- Namespace must have label `aphex.dev/org: {organizationName}`
+- Source Secret `org-secrets` must exist in organization namespace
+- ClusterSecretStore must exist for the organization
+
+**Source**
+- `platform/base/external-secrets/kustomization.yaml` - External Secrets Operator installation
+- `platform/platform-controller/controller/controllers/organization_controller.go` - ClusterSecretStore provisioning
+- External Secrets Operator API: https://external-secrets.io/latest/api/externalsecret/
+
 ## ArgoCD Application Data Model
 
 ### Application Spec with Sync Waves
@@ -352,10 +547,92 @@ interface SyncWaveAnnotations {
 **Platform Sync Waves**:
 - **Wave 0**: `platform-ingress-controller` - Ingress controller deployment
 - **Wave 1**: `platform-tekton` - Tekton Pipelines and Triggers
+- **Wave 3**: `platform-gpu` (k3s only) - GPU Operator
 - **Wave 5**: `platform-crds`, `platform-rbac` - CRDs and RBAC policies
-- **Wave 10**: `platform-cert-manager`, `platform-auth` - cert-manager and authentication
-- **Wave 20**: `platform-cert-foundation`, `platform-controllers`, `platform-catalog` - Certificates and controllers
-- **Wave 30**: `platform-ingress` - Ingress resources with TLS
+- **Wave 10**: `platform-cert-manager` - cert-manager installation
+- **Wave 15**: `platform-external-secrets` - External Secrets Operator
+- **Wave 20**: `platform-cert-foundation`, `platform-auth`, `platform-controllers`, `platform-catalog` - Certificates, auth, and controllers
+- **Wave 30**: `platform-ingress`, `platform-gateway` (k3s only), `platform-external-dns` (k3s only) - Ingress and networking
+
+## ArgoCD AppProject Data Model
+
+**Purpose**: Enforce logical security boundaries for customer team resources in ArgoCD.
+
+**API Version**: `argoproj.io/v1alpha1`
+
+**Kind**: `AppProject` (namespace-scoped in `argocd` namespace)
+
+**Schema**:
+```typescript
+interface AppProject {
+  apiVersion: "argoproj.io/v1alpha1";
+  kind: "AppProject";
+  metadata: {
+    name: string;                    // Pipeline name
+    namespace: "argocd";
+    labels: {
+      "platform.aphex/pipeline": string;
+      "platform.aphex/managed-by": "platform-controller";
+    };
+  };
+  spec: {
+    description: string;             // e.g., "Project for {pipelineName} pipeline"
+    destinations: Array<{
+      server: "https://kubernetes.default.svc";
+      namespace: string;             // "{pipelineName}" or "{pipelineName}-*"
+    }>;
+    sourceRepos: string[];           // Allowed Git repositories
+    clusterResourceWhitelist: [];    // Empty (no cluster resources allowed)
+    namespaceResourceWhitelist: Array<{
+      group: "*";
+      kind: "*";
+    }>;
+  };
+}
+```
+
+**Example**:
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: my-pipeline
+  namespace: argocd
+  labels:
+    platform.aphex/pipeline: my-pipeline
+    platform.aphex/managed-by: platform-controller
+spec:
+  description: "Project for my-pipeline pipeline"
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: my-pipeline
+    - server: https://kubernetes.default.svc
+      namespace: my-pipeline-*
+  sourceRepos:
+    - https://github.com/my-org/my-repo
+    - https://github.com/my-org/my-repo.git
+  clusterResourceWhitelist: []
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+```
+
+**Created By**: RepoBinding controller during RBAC provisioning
+
+**Lifecycle**:
+- Created when RepoBinding is created
+- Updated if RepoBinding spec changes (repo URL, pipeline name)
+- Deleted when RepoBinding is deleted (with finalizer cleanup)
+
+**Security Constraints**:
+- **Destinations**: Only `{pipelineName}` and `{pipelineName}-*` namespaces
+- **Source Repositories**: Only the specific GitHub repository
+- **Cluster Resources**: None (empty whitelist)
+- **Namespace Resources**: All resources within scoped namespaces
+
+**Source**
+- `platform/platform-controller/controller/controllers/repobinding_provisioners.go` - provisionArgoCDAppProject function
+- `platform/platform-controller/controller/controllers/repobinding_controller.go` - Deletion logic
 
 ## Authentication Data Model
 
