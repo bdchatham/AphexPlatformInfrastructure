@@ -6,13 +6,15 @@ The **Aphex Pipeline Infrastructure** provides a production-ready GitOps platfor
 
 This repository contains:
 
-1. **Bootstrap Script**: Zero-touch initialization that creates cluster, installs core components, generates all secrets, and achieves complete platform convergence automatically
-2. **Layered cert-manager Architecture**: Wave-based deployment with webhook validation that eliminates manual intervention and timing issues
-3. **Platform Applications (App of Apps)**: Root ArgoCD Application managing child Applications with proper dependency ordering via sync waves
-4. **Authentication System**: Authentik Identity Provider with Dex OIDC connector providing centralized SSO for all platform services
-5. **Onboarding Controller**: Kubernetes controller enabling self-service repository onboarding via CRDs
-6. **Pipeline Catalog**: Shared, versioned Tekton Tasks and Pipelines for CI/CD workflows
-7. **Multi-Tenant Isolation**: Organization-level and pipeline-level namespaces with RBAC, network policies, and resource quotas
+1. **Deployment Type Support**: Flexible bootstrap system supporting multiple deployment targets (Kind for development, K3s for production with GPU support)
+2. **Bootstrap Script**: Zero-touch initialization that creates cluster, installs core components, generates all secrets, and achieves complete platform convergence automatically
+3. **Layered cert-manager Architecture**: Wave-based deployment with webhook validation that eliminates manual intervention and timing issues
+4. **External Secrets Operator**: Enables customers to create secrets in their organization namespace and reference them across their systems via ExternalSecret resources
+5. **Platform Applications (App of Apps)**: Root ArgoCD Application managing child Applications with proper dependency ordering via sync waves
+6. **Authentication System**: Authentik Identity Provider with Dex OIDC connector providing centralized SSO for all platform services
+7. **Onboarding Controller**: Kubernetes controller enabling self-service repository onboarding via CRDs with AppProject isolation
+8. **Pipeline Catalog**: Shared, versioned Tekton Tasks and Pipelines for CI/CD workflows
+9. **Multi-Tenant Isolation**: Organization-level and pipeline-level namespaces with RBAC, network policies, resource quotas, and ArgoCD AppProject boundaries
 
 ## Archon Integration
 
@@ -24,6 +26,90 @@ Documentation follows the Archon contract defined in `CLAUDE.md` with exactly 6 
 
 ### GitOps Architecture
 ArgoCD manages all platform components declaratively from Git using the app-of-apps pattern. After bootstrap, the platform is entirely self-managing with automatic drift correction and self-healing capabilities.
+
+### Deployment Types
+The platform supports multiple deployment targets with a unified bootstrap interface:
+
+**Kind Deployment (Development)**:
+- Local Kubernetes cluster via Kind
+- Simulated GPU support with RuntimeClass
+- nginx-ingress-controller for ingress
+- Suitable for development and testing
+- Bootstrap: `./bootstrap.sh --deployment kind`
+
+**K3s Deployment (Production)**:
+- Lightweight Kubernetes for production
+- Real NVIDIA GPU support via GPU Operator
+- Gateway API with external DNS
+- Optimized for bare-metal and edge deployments
+- Bootstrap: `./bootstrap.sh --deployment k3s`
+
+**Deployment-Specific Resources**:
+- Each deployment has its own directory: `platform/deployments/{kind|k3s}/`
+- Deployment-specific ArgoCD Applications
+- Deployment-specific bootstrap scripts
+- Deployment-specific infrastructure (GPU, ingress, DNS)
+
+**Source**: `bootstrap.sh`, `platform/deployments/kind/`, `platform/deployments/k3s/`
+
+### External Secrets Management
+Organizations automatically receive a ClusterSecretStore that enables customers to create secrets in their organization namespace and reference them across their systems.
+
+**How it works**:
+1. Organization controller provisions `ClusterSecretStore` named `org-{name}-store`
+2. Customers create a Secret named `org-secrets` in their organization namespace
+3. Customers create `ExternalSecret` resources in any namespace labeled with their organization
+4. External Secrets Operator syncs secrets from `org-secrets` to target namespaces
+
+**Example usage** (from ArchonKnowledgeBaseInfrastructure):
+```yaml
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: knowledge-base-secrets
+spec:
+  secretStoreRef:
+    name: org-archon-store
+    kind: ClusterSecretStore
+  target:
+    name: knowledge-base-secrets
+  data:
+    - secretKey: github_token
+      remoteRef:
+        key: org-secrets
+        property: github-token
+```
+
+**Benefits**:
+- Centralized secret management per organization
+- Secrets can be referenced across multiple namespaces
+- No need to duplicate secrets
+- Automatic synchronization and rotation support
+
+**Source**: `platform/platform-controller/controller/controllers/organization_controller.go` (provisionSecretStore), `platform/base/external-secrets/`
+
+### AppProject Isolation
+Each pipeline automatically receives an ArgoCD AppProject that enforces logical security boundaries for customer team resources.
+
+**Scoping rules**:
+- **Destinations**: Only `{pipelineName}` and `{pipelineName}-*` namespaces
+- **Source repositories**: Only the specific GitHub repository for that pipeline
+- **Cluster resources**: None (empty whitelist)
+- **Namespace resources**: All resources allowed within scoped namespaces
+
+**Benefits**:
+- Prevents cross-pipeline Application deployments
+- Enforces namespace boundaries
+- Restricts source repositories
+- Prevents cluster-scoped resource creation
+- Logical isolation for customer teams
+
+**Lifecycle**:
+- Created during RepoBinding provisioning
+- Updated if spec changes
+- Deleted when RepoBinding is deleted (with finalizer cleanup)
+
+**Source**: `platform/platform-controller/controller/controllers/repobinding_provisioners.go` (provisionArgoCDAppProject)
 
 ### Organizations
 Organizations provide multi-tenant isolation with dedicated namespaces (`org-{name}`), EventListeners, and public webhook endpoints. Each organization gets a unique subdomain under arbiter-dev.com for GitHub webhook delivery through Cloudflare tunnels. Multiple pipelines can belong to a single organization, sharing the webhook infrastructure.
@@ -75,13 +161,15 @@ For operational procedures, see [operations.md](operations.md#organization-and-r
 platform-root (ArgoCD Application)
 ├── Wave 0: platform-ingress-controller
 ├── Wave 1: platform-tekton
+├── Wave 3: platform-gpu (k3s only)
 ├── Wave 5: platform-crds, platform-rbac
-├── Wave 10: platform-cert-manager, platform-auth
-├── Wave 20: platform-cert-foundation, platform-controllers, platform-catalog
-└── Wave 30: platform-ingress, platform-pipeline-resources
+├── Wave 10: platform-cert-manager
+├── Wave 15: platform-external-secrets
+├── Wave 20: platform-cert-foundation, platform-auth, platform-controllers, platform-catalog
+└── Wave 30: platform-ingress, platform-pipeline-resources, platform-gateway (k3s only), platform-external-dns (k3s only)
 ```
 
-**Source**: `platform/argocd/apps/platform-*.yaml`
+**Source**: `platform/base/argocd/apps/platform-*.yaml`, `platform/deployments/k3s/argocd/apps/platform-*.yaml`
 
 ### Authentication Flow
 ```
