@@ -2,16 +2,45 @@
 
 ## Deployment
 
+### Deployment Type Selection
+
+The platform supports two deployment types with different infrastructure requirements:
+
+**Kind (Development)**:
+- Local Kubernetes cluster via Kind
+- Requires: Docker, kubectl, kind CLI
+- Simulated GPU support (RuntimeClass only)
+- nginx-ingress-controller
+- Suitable for development and testing
+- Bootstrap: `./bootstrap.sh --deployment kind`
+
+**K3s (Production)**:
+- Lightweight Kubernetes for production
+- Requires: Ubuntu 22.04+, NVIDIA drivers, nvidia-container-toolkit
+- Real GPU support via NVIDIA GPU Operator
+- Gateway API with external DNS
+- Optimized for bare-metal and edge deployments
+- Bootstrap: `./bootstrap.sh --deployment k3s`
+
 ### Prerequisites
 
-Before deploying the platform, ensure you have:
+**Common Prerequisites** (both deployments):
+1. **kubectl**: Configured with cluster access and admin permissions
+2. **DNS Configuration**: For `*.home.local` (or your chosen domain)
+3. **Network Access**: Ability to reach ingress controller from your devices
+4. **Cloudflare API Token**: For organization webhook tunnels (set as `CLOUDFLARE_API_TOKEN` environment variable)
+5. **Basic tools**: curl, openssl, base64, jq
 
-1. **Kubernetes Cluster**: Version 1.24+ with RBAC enabled
-2. **kubectl**: Configured with cluster access and admin permissions
-3. **Ingress Controller**: Deployed and accessible from your network
-4. **DNS Configuration**: For `*.home.local` (or your chosen domain)
-5. **Network Access**: Ability to reach ingress controller from your devices
-6. **Cloudflare API Token**: For organization webhook tunnels (set as `CLOUDFLARE_API_TOKEN` environment variable)
+**Kind-Specific Prerequisites**:
+1. **Docker**: Docker Desktop or Docker Engine
+2. **Kind CLI**: `brew install kind` or download from releases
+3. **Kubernetes**: Version 1.24+ (created by Kind)
+
+**K3s-Specific Prerequisites**:
+1. **Ubuntu 22.04+**: With root/sudo access
+2. **NVIDIA Drivers**: Installed and working (`nvidia-smi` succeeds)
+3. **NVIDIA Container Toolkit**: `nvidia-container-runtime` installed
+4. **K3s**: Will be installed by bootstrap if not present
 
 ### DNS Setup for Home Network Access
 
@@ -51,20 +80,48 @@ cd AphexPlatformInfrastructure
 # Set Cloudflare API token for organization webhooks
 export CLOUDFLARE_API_TOKEN="your-cloudflare-api-token"
 
-./platform/bootstrap/bootstrap.sh
+# Choose deployment type
+./bootstrap.sh --deployment kind    # For development
+# OR
+./bootstrap.sh --deployment k3s     # For production with GPU support
+```
+
+**Kind Bootstrap Options**:
+```bash
+./bootstrap.sh --deployment kind [OPTIONS]
+
+Options:
+  --cluster-name NAME    Name for Kind cluster (default: platform-cluster)
+  --use-existing         Use existing kubecontext instead of creating cluster
+  --show-secrets         Display generated secrets (WARNING: not for production)
+```
+
+**K3s Bootstrap Options**:
+```bash
+sudo ./bootstrap.sh --deployment k3s [OPTIONS]
+
+Options:
+  --show-secrets         Display generated secrets (WARNING: not for production)
+
+Note: Must run as root/sudo for K3s installation
 ```
 
 **Bootstrap Actions (Automatic)**:
-1. Creates Kind cluster (or uses existing kubeconfig)
-2. **Generates ALL secrets automatically** (PostgreSQL, Authentik, Dex, API tokens)
-3. Creates auth-system and tekton-pipelines namespaces
-4. **Stores all secrets in Kubernetes** (never prints to stdout)
-5. Installs ArgoCD with proper OIDC configuration
-6. Creates platform-root ArgoCD Application (app-of-apps)
-7. **Waits for ArgoCD to deploy Authentik** (GitOps-managed)
-8. **Creates Authentik API token** via Authentik API
-9. **Achieves complete platform convergence** automatically
-10. Displays access instructions and secret retrieval commands
+1. **Routes to deployment-specific bootstrap script**
+2. Creates or configures Kubernetes cluster (Kind or K3s)
+3. **Generates ALL secrets automatically** (PostgreSQL, Authentik, Dex, API tokens)
+4. Creates platform namespaces (argocd, auth-system, tekton-pipelines, platform-system, external-secrets)
+5. **Stores all secrets in Kubernetes** (never prints to stdout)
+6. Installs ArgoCD with proper OIDC configuration
+7. Creates deployment-specific platform-root ArgoCD Application
+8. **Waits for ArgoCD to deploy all platform components** (GitOps-managed)
+9. **Waits for Authentik and creates API token** via Authentik API
+10. **Achieves complete platform convergence** automatically
+11. Displays access instructions and secret retrieval commands
+
+**Deployment-Specific Paths**:
+- Kind: Uses `platform/base/argocd/apps` → references `platform/deployments/kind/*`
+- K3s: Uses `platform/deployments/k3s/argocd/apps` → references `platform/deployments/k3s/*`
 
 For detailed architecture, see [architecture.md](architecture.md).
 
@@ -108,6 +165,9 @@ kubectl get applications -n argocd
 # cert-manager components should be running
 kubectl get pods -n cert-manager
 
+# External Secrets Operator should be running
+kubectl get pods -n external-secrets
+
 # Certificates should be Ready
 kubectl get certificates -A
 ```
@@ -126,7 +186,21 @@ curl -k https://dex.home.local/.well-known/openid-configuration
 
 **Source**: `platform/auth/authentik/`, `platform/auth/dex/`
 
-**Step 3: Access Platform Services**
+**Step 3: Verify External Secrets Operator**
+```bash
+# Check External Secrets Operator pods
+kubectl get pods -n external-secrets
+
+# Verify ClusterSecretStore CRD is installed
+kubectl get crd clustersecretstores.external-secrets.io
+
+# List any ClusterSecretStores (created when organizations are provisioned)
+kubectl get clustersecretstores
+```
+
+**Source**: `platform/base/external-secrets/`
+
+**Step 4: Access Platform Services**
 
 **Authentik UI (User Management)**:
 ```bash
@@ -158,7 +232,7 @@ kubectl get secret authentik-secrets -n auth-system \
 
 After successful bootstrap and convergence:
 
-**ArgoCD Applications**:
+**ArgoCD Applications** (Kind deployment):
 ```
 NAME                          SYNC STATUS   HEALTH STATUS
 platform-auth                 Synced        Healthy
@@ -167,11 +241,20 @@ platform-cert-foundation      Synced        Healthy
 platform-cert-manager         Synced        Healthy
 platform-controllers          Synced        Healthy
 platform-crds                 Synced        Healthy
+platform-external-secrets     Synced        Healthy
+platform-gpu                  Synced        Healthy
 platform-ingress              Synced        Healthy
 platform-ingress-controller   Synced        Healthy
 platform-rbac                 Synced        Healthy
 platform-root                 Synced        Healthy
 platform-tekton               Synced        Healthy
+```
+
+**ArgoCD Applications** (K3s deployment - additional apps):
+```
+platform-external-dns         Synced        Healthy
+platform-gateway              Synced        Healthy
+platform-gpu-operator         Synced        Healthy
 ```
 
 **Certificates**:
@@ -184,9 +267,10 @@ auth-system   tekton-tls      True    tekton-tls      5m
 ```
 
 **Platform Services**:
-- All pods Running in cert-manager, auth-system, argocd, tekton-pipelines namespaces
+- All pods Running in cert-manager, external-secrets, auth-system, argocd, tekton-pipelines namespaces
 - All Ingress resources configured with TLS certificates
 - Authentication flow working end-to-end
+- External Secrets Operator ready for ClusterSecretStore provisioning
 
 **Source**
 - `platform/bootstrap/bootstrap.sh` - Bootstrap implementation
@@ -330,6 +414,12 @@ kubectl get clusterrolebinding eventlistener-acme-corp
 
 # Verify admin RBAC
 kubectl get role,rolebinding -n org-acme-corp
+
+# Verify External Secrets infrastructure
+kubectl get serviceaccount eso-secrets-reader -n org-acme-corp
+kubectl get role eso-secrets-reader -n org-acme-corp
+kubectl get rolebinding eso-secrets-reader -n org-acme-corp
+kubectl get clustersecretstore org-acme-corp-store
 ```
 
 ### Test Webhook Endpoint
@@ -401,8 +491,8 @@ EOF
 
 ```bash
 # Check RepoBinding status
-kubectl get repobinding my-repo-binding -n pipeline-system
-kubectl describe repobinding my-repo-binding -n pipeline-system
+kubectl get repobinding my-repo-binding -n platform-system
+kubectl describe repobinding my-repo-binding -n platform-system
 
 # Verify organization namespace
 kubectl get namespace org-my-org
@@ -411,7 +501,11 @@ kubectl get namespace org-my-org
 kubectl get serviceaccount pipeline-runner -n my-pipeline
 
 # Verify RBAC in pipeline namespace
-kubectl get role,rolebinding -n my-pipeline
+kubectl get role,rolebinding,clusterrole,clusterrolebinding -n my-pipeline | grep my-pipeline
+
+# Verify ArgoCD AppProject
+kubectl get appproject my-pipeline -n argocd
+kubectl describe appproject my-pipeline -n argocd
 
 # Verify resource limits in pipeline namespace
 kubectl get resourcequota,limitrange -n my-pipeline
@@ -419,11 +513,8 @@ kubectl get resourcequota,limitrange -n my-pipeline
 # Verify network policy in pipeline namespace
 kubectl get networkpolicy -n my-pipeline
 
-# Verify EventListener in organization namespace
-kubectl get eventlistener -n org-my-org
-
-# Verify Ingress in organization namespace
-kubectl get ingress -n org-my-org
+# Verify Tekton resources in organization namespace
+kubectl get trigger,triggertemplate -n org-my-org | grep my-pipeline
 ```
 
 ### Configure GitHub Webhook
