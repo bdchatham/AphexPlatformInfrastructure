@@ -5,13 +5,13 @@ on:
     branches:
       - mainline
     paths:
-      - 'platform/platform-controller/controller/**'
+      - 'platform/base/platform-controller/controller/**'
       - '.github/workflows/platform-controller-image.yaml'
   pull_request:
     branches:
       - mainline
     paths:
-      - 'platform/platform-controller/controller/**'
+      - 'platform/base/platform-controller/controller/**'
   workflow_dispatch:
 
 env:
@@ -53,8 +53,8 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./platform/platform-controller/controller
-          file: ./platform/platform-controller/controller/Dockerfile
+          context: ./platform/base/platform-controller/controller
+          file: ./platform/base/platform-controller/controller/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
