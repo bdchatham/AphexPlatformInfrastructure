@@ -46,6 +46,17 @@ spec:
     - /metadata/annotations
     - /metadata/managedFields
     - /status
+    - /spec/operator
+    - /spec/toolkit
+    - /spec/devicePlugin
+    - /spec/ccManager
+    - /spec/dcgm
+    - /spec/dcgmExporter
+    - /spec/driver
+    - /spec/gfd
+    - /spec/migManager
+    - /spec/nodeStatusExporter
+    - /spec/validator
   syncPolicy:
     automated:
       prune: true
