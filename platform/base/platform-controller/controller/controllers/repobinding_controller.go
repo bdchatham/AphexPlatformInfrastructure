@@ -46,6 +46,7 @@ type RepoBindingReconciler struct {
 // +kubebuilder:rbac:groups=triggers.tekton.dev,resources=triggerbindings,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=triggers.tekton.dev,resources=triggertemplates,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=triggers.tekton.dev,resources=eventlisteners,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=tekton.dev,resources=pipelines,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles RepoBinding create/update/delete events
 func (r *RepoBindingReconciler) Reconcile(ctx context.Context, request ctrl.Request) (ctrl.Result, error) {
