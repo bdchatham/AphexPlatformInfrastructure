@@ -38,6 +38,14 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: gpu-operator
+  ignoreDifferences:
+  - group: nvidia.com
+    kind: ClusterPolicy
+    name: cluster-policy
+    jsonPointers:
+    - /metadata/annotations
+    - /metadata/managedFields
+    - /status
   syncPolicy:
     automated:
       prune: true
