@@ -1,297 +1,20 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: platform-controller
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
 rules:
-# RepoBinding CRD permissions
-- apiGroups:
-  - aphex.io
-  resources:
-  - repobindings
-  verbs:
-  - get
-  - list
-  - watch
-  - update
-  - patch
-  - create
-- apiGroups:
-  - aphex.io
-  resources:
-  - repobindings/status
-  verbs:
-  - get
-  - update
-  - patch
-
-# Organization CRD permissions
-- apiGroups:
-  - aphex.io
-  resources:
-  - organizations
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups:
-  - aphex.io
-  resources:
-  - organizations/status
-  verbs:
-  - get
-  - update
-  - patch
-
-# KnowledgeBase CRD permissions
-- apiGroups:
-  - aphex.io
-  resources:
-  - knowledgebases
-  verbs:
-  - get
-  - list
-  - watch
-  - update
-  - patch
-- apiGroups:
-  - aphex.io
-  resources:
-  - knowledgebases/status
-  verbs:
-  - get
-  - update
-  - patch
-# Namespace permissions
-- apiGroups:
-  - ""
-  resources:
-  - namespaces
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-# ServiceAccount permissions
-- apiGroups:
-  - ""
-  resources:
-  - serviceaccounts
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-# Secret permissions
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-  - delete
-# RBAC permissions (namespace-scoped)
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - roles
-  - rolebindings
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-# RBAC permissions (cluster-scoped)
-- apiGroups:
-  - rbac.authorization.k8s.io
-  resources:
-  - clusterroles
-  - clusterrolebindings
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-
-# ArgoCD AppProject permissions
-- apiGroups:
-  - argoproj.io
-  resources:
-  - appprojects
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-
-# ArgoCD Application permissions (needed to grant via RoleBinding)
-- apiGroups:
-  - argoproj.io
-  resources:
-  - applications
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - patch
-  - delete
-- apiGroups:
-  - argoproj.io
-  resources:
-  - applications/status
-  verbs:
-  - get
-  - list
-  - watch
-
-# All core API permissions for organization admin roles
-- apiGroups:
-  - ""
-  resources:
-  - "*"
-  verbs:
-  - "*"
-
-# Tekton triggers permissions for RepoBinding provisioning
-- apiGroups:
-  - triggers.tekton.dev
-  resources:
-  - triggerbindings
-  - triggertemplates
-  - eventlisteners
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - update
-  - patch
-  - delete
-
-# Events permissions for tenant roles
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - patch
-
-# RepoBinding create permissions for organizations
-- apiGroups:
-  - aphex.io
-  resources:
-  - repobindings
-  verbs:
-  - create
-# Permissions that can be granted to tenant service accounts
 - apiGroups:
   - ""
   resources:
   - configmaps
-  - persistentvolumeclaims
-  - pods
-  - pods/log
-  verbs:
-  - get
-  - list
-  - create
-  - update
-  - delete
-  - watch
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - create
-  - update
-  - delete
-  - get
-  - list
-  - watch
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  verbs:
-  - get
-  - list
-  - watch
-  - create
-  - update
-  - delete
-- apiGroups:
-  - tekton.dev
-  resources:
-  - "*"
-  verbs:
-  - "*"
-# Tekton Triggers permissions (cluster-scoped resources that tenants need read access to)
-- apiGroups:
-  - triggers.tekton.dev
-  resources:
-  - clusterinterceptors
-  - clustertriggerbindings
-  - interceptors
-  verbs:
-  - get
-  - list
-  - watch
-
-# Tekton triggers permissions for RepoBinding provisioning
-- apiGroups:
-  - triggers.tekton.dev
-  resources:
-  - triggerbindings
-  - triggertemplates
-  - eventlisteners
   verbs:
   - create
   - get
   - list
-  - watch
-  - update
   - patch
-  - delete
-# ResourceQuota permissions
-- apiGroups:
-  - ""
-  resources:
-  - resourcequotas
-  verbs:
-  - create
-  - get
-  - list
-  - watch
   - update
-  - patch
-# LimitRange permissions
+  - watch
 - apiGroups:
   - ""
   resources:
@@ -300,10 +23,182 @@ rules:
   - create
   - get
   - list
-  - watch
-  - update
   - patch
-# NetworkPolicy permissions
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - resourcequotas
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aphex.io
+  resources:
+  - agents
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aphex.io
+  resources:
+  - agents/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - agents/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - knowledgebases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aphex.io
+  resources:
+  - knowledgebases/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - knowledgebases/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - organizations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aphex.io
+  resources:
+  - organizations/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - organizations/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - repobindings
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aphex.io
+  resources:
+  - repobindings/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - aphex.io
+  resources:
+  - repobindings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - networking.k8s.io
   resources:
@@ -312,100 +207,61 @@ rules:
   - create
   - get
   - list
-  - watch
-  - update
   - patch
-# External Secrets Operator permissions
+  - update
+  - watch
 - apiGroups:
-  - external-secrets.io
+  - rbac.authorization.k8s.io
   resources:
-  - secretstores
-  - clustersecretstores
+  - rolebindings
   verbs:
   - create
   - get
   - list
-  - watch
-  - update
   - patch
-  - delete
-# Service permissions (for EventListener services)
-- apiGroups:
-  - ""
-  resources:
-  - services
-  verbs:
-  - get
-  - list
+  - update
   - watch
-# Ingress permissions
 - apiGroups:
-  - networking.k8s.io
+  - rbac.authorization.k8s.io
   resources:
-  - ingresses
+  - roles
   verbs:
   - create
   - get
   - list
-  - watch
+  - patch
   - update
-  - patch
-# Event permissions (for logging)
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: platform-controller
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: platform-controller
-subjects:
-- kind: ServiceAccount
-  name: platform-controller
-  namespace: platform-system
----
-# Additional Tekton triggers permissions for missing resources
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: platform-controller-additional
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-rules:
+  - watch
 - apiGroups:
   - triggers.tekton.dev
   resources:
-  - triggers
+  - eventlisteners
   verbs:
+  - create
   - get
   - list
-  - watch
-  - create
-  - update
   - patch
-  - delete
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: platform-controller-additional
-  annotations:
-    argocd.argoproj.io/sync-wave: "1"
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: platform-controller-additional
-subjects:
-- kind: ServiceAccount
-  name: platform-controller
-  namespace: platform-system
+  - update
+  - watch
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - triggerbindings
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - triggertemplates
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
