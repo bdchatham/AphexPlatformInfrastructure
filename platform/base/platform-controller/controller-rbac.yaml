@@ -10,6 +10,7 @@ rules:
   - configmaps
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -55,6 +56,7 @@ rules:
   - secrets
   verbs:
   - create
+  - delete
   - get
   - list
   - patch
@@ -71,6 +73,35 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
 - apiGroups:
   - aphex.io
   resources:
@@ -277,6 +308,24 @@ rules:
   - update
   - watch
 - apiGroups:
+  - tekton.dev
+  resources:
+  - pipelineruns
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - tekton.dev
+  resources:
+  - taskruns
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
   - triggers.tekton.dev
   resources:
   - triggers
@@ -287,6 +336,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - interceptors
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
