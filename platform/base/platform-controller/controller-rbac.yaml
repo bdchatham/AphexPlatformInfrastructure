@@ -406,6 +406,14 @@ rules:
 - apiGroups:
   - argoproj.io
   resources:
+  - applications/status
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - argoproj.io
+  resources:
   - appprojects
   verbs:
   - create
