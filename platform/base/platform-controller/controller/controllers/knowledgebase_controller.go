@@ -70,7 +70,7 @@ func (r *KnowledgeBaseReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	if kb.Spec.MCPServer.Enabled {
+	if kb.Spec.MCPServer != nil {
 		if err := r.reconcileMCPServer(ctx, kb); err != nil {
 			log.Error(err, "Failed to reconcile MCP server")
 			kb.Status.Phase = "Failed"

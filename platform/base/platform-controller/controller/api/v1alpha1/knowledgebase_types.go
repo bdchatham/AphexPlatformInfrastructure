@@ -21,12 +21,8 @@ type Repository struct {
 }
 
 // MCPServerSpec defines the MCP server configuration
+// If this field is set (non-nil), an MCP server will be provisioned
 type MCPServerSpec struct {
-	// Enabled determines whether to provision an MCP server for this knowledge base
-	// +optional
-	// +kubebuilder:default=false
-	Enabled bool `json:"enabled,omitempty"`
-
 	// Port is the port the MCP server listens on (default: 8090)
 	// +optional
 	// +kubebuilder:default=8090
@@ -59,8 +55,9 @@ type KnowledgeBaseSpec struct {
 	Repositories []Repository `json:"repositories"`
 
 	// MCPServer configures the optional MCP server for this knowledge base
+	// If set, an MCP server will be provisioned. If nil/omitted, no MCP server is created.
 	// +optional
-	MCPServer MCPServerSpec `json:"mcpServer,omitempty"`
+	MCPServer *MCPServerSpec `json:"mcpServer,omitempty"`
 }
 
 // MCPServerStatus defines the observed state of the MCP server
@@ -106,7 +103,7 @@ type KnowledgeBaseStatus struct {
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="MCP",type=boolean,JSONPath=`.spec.mcpServer.enabled`
+// +kubebuilder:printcolumn:name="MCP",type=boolean,JSONPath=`.status.mcpServer.deployed`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // KnowledgeBase is the Schema for the knowledgebases API
