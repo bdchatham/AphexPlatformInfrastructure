@@ -70,7 +70,7 @@ func (r *KnowledgeBaseReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	if kb.Spec.MCPServer != nil {
+	if kb.Spec.MCP != nil {
 		if err := r.reconcileMCPServer(ctx, kb); err != nil {
 			log.Error(err, "Failed to reconcile MCP server")
 			kb.Status.Phase = "Failed"
@@ -106,24 +106,21 @@ func (r *KnowledgeBaseReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *KnowledgeBaseReconciler) reconcileMCPServer(ctx context.Context, kb *platformv1alpha1.KnowledgeBase) error {
 	log := log.FromContext(ctx)
 
-	port := kb.Spec.MCPServer.Port
-	if port == 0 {
-		port = 8090
-	}
+	image := kb.Spec.MCP.Image
+	port := kb.Spec.MCP.Port
 
-	image := kb.Spec.MCPServer.Image
-	if image == "" {
-		image = "ghcr.io/bdchatham/archon-mcp-server:latest"
-	}
-
-	queryServiceURL := kb.Spec.MCPServer.QueryServiceURL
+	queryServiceURL := kb.Spec.MCP.QueryServiceURL
 	if queryServiceURL == "" {
 		queryServiceURL = fmt.Sprintf("http://query.%s:8080", kb.Namespace)
 	}
 
+	replicas := kb.Spec.MCP.Replicas
+	if replicas == 0 {
+		replicas = 1
+	}
+
 	deploymentName := fmt.Sprintf("mcp-server-%s", kb.Name)
 	serviceName := fmt.Sprintf("mcp-server-%s", kb.Name)
-	replicas := int32(1)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -287,10 +284,12 @@ func (r *KnowledgeBaseReconciler) reconcileMCPServer(ctx context.Context, kb *pl
 		log.Info("Updated MCP server service", "name", serviceName, "namespace", kb.Namespace)
 	}
 
-	kb.Status.MCPServer.Deployed = true
-	kb.Status.MCPServer.ServiceName = serviceName
-	kb.Status.MCPServer.ServiceURL = fmt.Sprintf("http://%s.%s:%d", serviceName, kb.Namespace, port)
-	kb.Status.MCPServer.ReadyReplicas = existingDeployment.Status.ReadyReplicas
+	kb.Status.MCP.Deployed = true
+	kb.Status.MCP.ServiceName = serviceName
+	kb.Status.MCP.ServiceURL = fmt.Sprintf("http://%s.%s:%d", serviceName, kb.Namespace, port)
+	if existingDeployment.Status.ReadyReplicas > 0 {
+		kb.Status.MCP.ReadyReplicas = existingDeployment.Status.ReadyReplicas
+	}
 
 	return nil
 }
@@ -323,10 +322,10 @@ func (r *KnowledgeBaseReconciler) cleanupMCPServer(ctx context.Context, kb *plat
 		return fmt.Errorf("failed to get service for cleanup: %w", err)
 	}
 
-	kb.Status.MCPServer.Deployed = false
-	kb.Status.MCPServer.ServiceName = ""
-	kb.Status.MCPServer.ServiceURL = ""
-	kb.Status.MCPServer.ReadyReplicas = 0
+	kb.Status.MCP.Deployed = false
+	kb.Status.MCP.ServiceName = ""
+	kb.Status.MCP.ServiceURL = ""
+	kb.Status.MCP.ReadyReplicas = 0
 
 	return nil
 }

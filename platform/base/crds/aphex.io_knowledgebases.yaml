@@ -21,7 +21,7 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.mcpServer.deployed
+    - jsonPath: .status.mcp.deployed
       name: MCP
       type: boolean
     - jsonPath: .metadata.creationTimestamp
@@ -58,27 +58,33 @@ spec:
               displayName:
                 description: DisplayName is the human-readable knowledge base name
                 type: string
-              mcpServer:
+              mcp:
                 description: |-
-                  MCPServer configures the optional MCP server for this knowledge base
+                  MCP configures the optional MCP server for this knowledge base
                   If set, an MCP server will be provisioned. If nil/omitted, no MCP server is created.
                 properties:
                   image:
-                    description: 'Image is the container image for the MCP server
-                      (default: ghcr.io/bdchatham/archon-mcp-server:latest)'
+                    description: Image is the container image for the MCP server
                     type: string
                   port:
-                    default: 8090
-                    description: 'Port is the port the MCP server listens on (default:
-                      8090)'
+                    description: Port is the port the MCP server listens on
                     format: int32
                     maximum: 65535
                     minimum: 1024
                     type: integer
                   queryServiceURL:
-                    description: 'QueryServiceURL is the URL of the query service
-                      (default: http://query.{namespace}:8080)'
+                    description: |-
+                      QueryServiceURL is the URL of the query service
+                      If empty, controller computes as http://query.{namespace}:8080
                     type: string
+                  replicas:
+                    description: Replicas is the number of MCP server replicas
+                    format: int32
+                    minimum: 1
+                    type: integer
+                required:
+                - image
+                - port
                 type: object
               repositories:
                 description: Repositories is the list of repositories to track
@@ -115,8 +121,8 @@ spec:
                 description: LastReconcileTime is the timestamp of the last reconciliation
                 format: date-time
                 type: string
-              mcpServer:
-                description: MCPServer contains the status of the MCP server (if enabled)
+              mcp:
+                description: MCP contains the status of the MCP server (if enabled)
                 properties:
                   deployed:
                     description: Deployed indicates whether the MCP server is deployed

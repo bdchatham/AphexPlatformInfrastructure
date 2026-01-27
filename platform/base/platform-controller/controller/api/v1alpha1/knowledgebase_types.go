@@ -20,23 +20,28 @@ type Repository struct {
 	Paths []string `json:"paths,omitempty"`
 }
 
-// MCPServerSpec defines the MCP server configuration
+// MCPConfig defines the MCP server configuration
 // If this field is set (non-nil), an MCP server will be provisioned
-type MCPServerSpec struct {
-	// Port is the port the MCP server listens on (default: 8090)
-	// +optional
-	// +kubebuilder:default=8090
+type MCPConfig struct {
+	// Image is the container image for the MCP server
+	// +kubebuilder:validation:Required
+	Image string `json:"image"`
+
+	// Port is the port the MCP server listens on
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Minimum=1024
 	// +kubebuilder:validation:Maximum=65535
-	Port int32 `json:"port,omitempty"`
+	Port int32 `json:"port"`
 
-	// Image is the container image for the MCP server (default: ghcr.io/bdchatham/archon-mcp-server:latest)
-	// +optional
-	Image string `json:"image,omitempty"`
-
-	// QueryServiceURL is the URL of the query service (default: http://query.{namespace}:8080)
+	// QueryServiceURL is the URL of the query service
+	// If empty, controller computes as http://query.{namespace}:8080
 	// +optional
 	QueryServiceURL string `json:"queryServiceURL,omitempty"`
+
+	// Replicas is the number of MCP server replicas
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Replicas int32 `json:"replicas,omitempty"`
 }
 
 // KnowledgeBaseSpec defines the desired state of KnowledgeBase
@@ -54,14 +59,14 @@ type KnowledgeBaseSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Repositories []Repository `json:"repositories"`
 
-	// MCPServer configures the optional MCP server for this knowledge base
+	// MCP configures the optional MCP server for this knowledge base
 	// If set, an MCP server will be provisioned. If nil/omitted, no MCP server is created.
 	// +optional
-	MCPServer *MCPServerSpec `json:"mcpServer,omitempty"`
+	MCP *MCPConfig `json:"mcp,omitempty"`
 }
 
-// MCPServerStatus defines the observed state of the MCP server
-type MCPServerStatus struct {
+// MCPStatus defines the observed state of the MCP server
+type MCPStatus struct {
 	// Deployed indicates whether the MCP server is deployed
 	// +optional
 	Deployed bool `json:"deployed,omitempty"`
@@ -93,9 +98,9 @@ type KnowledgeBaseStatus struct {
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
 
-	// MCPServer contains the status of the MCP server (if enabled)
+	// MCP contains the status of the MCP server (if enabled)
 	// +optional
-	MCPServer MCPServerStatus `json:"mcpServer,omitempty"`
+	MCP MCPStatus `json:"mcp,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -103,7 +108,7 @@ type KnowledgeBaseStatus struct {
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="MCP",type=boolean,JSONPath=`.status.mcpServer.deployed`
+// +kubebuilder:printcolumn:name="MCP",type=boolean,JSONPath=`.status.mcp.deployed`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // KnowledgeBase is the Schema for the knowledgebases API
