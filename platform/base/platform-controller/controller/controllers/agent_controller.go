@@ -152,17 +152,16 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 						{
 							Name:  "model-server",
 							Image: image,
+							Args: []string{
+								"--model", agent.Spec.Model.Name,
+								"--host", "0.0.0.0",
+								"--port", fmt.Sprintf("%d", port),
+							},
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
 									ContainerPort: port,
 									Protocol:      corev1.ProtocolTCP,
-								},
-							},
-							Env: []corev1.EnvVar{
-								{
-									Name:  "MODEL_NAME",
-									Value: agent.Spec.Model.Name,
 								},
 							},
 							Resources: corev1.ResourceRequirements{
@@ -189,12 +188,9 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 	}
 
 	if agent.Spec.Model.Quantization != "" {
-		deployment.Spec.Template.Spec.Containers[0].Env = append(
-			deployment.Spec.Template.Spec.Containers[0].Env,
-			corev1.EnvVar{
-				Name:  "QUANTIZATION",
-				Value: agent.Spec.Model.Quantization,
-			},
+		deployment.Spec.Template.Spec.Containers[0].Args = append(
+			deployment.Spec.Template.Spec.Containers[0].Args,
+			"--quantization", agent.Spec.Model.Quantization,
 		)
 	}
 
