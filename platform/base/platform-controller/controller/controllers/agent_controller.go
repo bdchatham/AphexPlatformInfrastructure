@@ -184,6 +184,8 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 
 	if agent.Spec.Model.GPUCount > 0 {
 		deployment.Spec.Template.Spec.Containers[0].Resources.Limits["nvidia.com/gpu"] = *resource.NewQuantity(int64(agent.Spec.Model.GPUCount), resource.DecimalSI)
+		runtimeClassName := "nvidia"
+		deployment.Spec.Template.Spec.RuntimeClassName = &runtimeClassName
 	}
 
 	if agent.Spec.Model.Quantization != "" {
