@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	platformv1alpha1 "github.com/bdchatham/AphexPlatformInfrastructure/platform/platform-controller/controller/api/v1alpha1"
 )
 
@@ -178,4 +179,14 @@ func isValidBranchName(branch string) bool {
 	}
 
 	return true
+}
+
+// mustParseQuantity parses a resource quantity string and panics on error
+// This is safe to use for hardcoded values in controller logic
+func mustParseQuantity(s string) resource.Quantity {
+	q, err := resource.ParseQuantity(s)
+	if err != nil {
+		panic(fmt.Sprintf("invalid quantity %q: %v", s, err))
+	}
+	return q
 }

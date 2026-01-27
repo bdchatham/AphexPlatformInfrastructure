@@ -21,6 +21,9 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .spec.mcpServer.enabled
+      name: MCP
+      type: boolean
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -55,6 +58,31 @@ spec:
               displayName:
                 description: DisplayName is the human-readable knowledge base name
                 type: string
+              mcpServer:
+                description: MCPServer configures the optional MCP server for this
+                  knowledge base
+                properties:
+                  enabled:
+                    default: false
+                    description: Enabled determines whether to provision an MCP server
+                      for this knowledge base
+                    type: boolean
+                  port:
+                    default: 8090
+                    description: 'Port is the port the MCP server listens on (default:
+                      8090)'
+                    format: int32
+                    maximum: 65535
+                    minimum: 1024
+                    type: integer
+                  replicas:
+                    default: 1
+                    description: 'Replicas is the number of MCP server replicas (default:
+                      1)'
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
               repositories:
                 description: Repositories is the list of repositories to track
                 items:
@@ -88,6 +116,25 @@ spec:
                 description: LastReconcileTime is the timestamp of the last reconciliation
                 format: date-time
                 type: string
+              mcpServer:
+                description: MCPServer contains the status of the MCP server (if enabled)
+                properties:
+                  deployed:
+                    description: Deployed indicates whether the MCP server is deployed
+                    type: boolean
+                  readyReplicas:
+                    description: ReadyReplicas is the number of ready MCP server replicas
+                    format: int32
+                    type: integer
+                  serviceName:
+                    description: ServiceName is the Kubernetes service name for the
+                      MCP server
+                    type: string
+                  serviceURL:
+                    description: ServiceURL is the internal cluster URL for the MCP
+                      server
+                    type: string
+                type: object
               message:
                 description: Message provides human-readable status information
                 type: string

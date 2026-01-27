@@ -19,6 +19,27 @@ type Repository struct {
 	Paths []string `json:"paths,omitempty"`
 }
 
+// MCPServerSpec defines the MCP server configuration
+type MCPServerSpec struct {
+	// Enabled determines whether to provision an MCP server for this knowledge base
+	// +optional
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Port is the port the MCP server listens on (default: 8090)
+	// +optional
+	// +kubebuilder:default=8090
+	// +kubebuilder:validation:Minimum=1024
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// Replicas is the number of MCP server replicas (default: 1)
+	// +optional
+	// +kubebuilder:default=1
+	// +kubebuilder:validation:Minimum=1
+	Replicas int32 `json:"replicas,omitempty"`
+}
+
 // KnowledgeBaseSpec defines the desired state of KnowledgeBase
 type KnowledgeBaseSpec struct {
 	// DisplayName is the human-readable knowledge base name
@@ -33,6 +54,29 @@ type KnowledgeBaseSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	Repositories []Repository `json:"repositories"`
+
+	// MCPServer configures the optional MCP server for this knowledge base
+	// +optional
+	MCPServer MCPServerSpec `json:"mcpServer,omitempty"`
+}
+
+// MCPServerStatus defines the observed state of the MCP server
+type MCPServerStatus struct {
+	// Deployed indicates whether the MCP server is deployed
+	// +optional
+	Deployed bool `json:"deployed,omitempty"`
+
+	// ServiceName is the Kubernetes service name for the MCP server
+	// +optional
+	ServiceName string `json:"serviceName,omitempty"`
+
+	// ServiceURL is the internal cluster URL for the MCP server
+	// +optional
+	ServiceURL string `json:"serviceURL,omitempty"`
+
+	// ReadyReplicas is the number of ready MCP server replicas
+	// +optional
+	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
 }
 
 // KnowledgeBaseStatus defines the observed state of KnowledgeBase
@@ -48,6 +92,10 @@ type KnowledgeBaseStatus struct {
 	// LastReconcileTime is the timestamp of the last reconciliation
 	// +optional
 	LastReconcileTime *metav1.Time `json:"lastReconcileTime,omitempty"`
+
+	// MCPServer contains the status of the MCP server (if enabled)
+	// +optional
+	MCPServer MCPServerStatus `json:"mcpServer,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -55,6 +103,7 @@ type KnowledgeBaseStatus struct {
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="MCP",type=boolean,JSONPath=`.spec.mcpServer.enabled`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // KnowledgeBase is the Schema for the knowledgebases API
