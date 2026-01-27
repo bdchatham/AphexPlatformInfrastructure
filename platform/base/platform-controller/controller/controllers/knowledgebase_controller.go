@@ -111,13 +111,19 @@ func (r *KnowledgeBaseReconciler) reconcileMCPServer(ctx context.Context, kb *pl
 		port = 8090
 	}
 
-	replicas := kb.Spec.MCPServer.Replicas
-	if replicas == 0 {
-		replicas = 1
+	image := kb.Spec.MCPServer.Image
+	if image == "" {
+		image = "ghcr.io/bdchatham/archon-mcp-server:latest"
+	}
+
+	queryServiceURL := kb.Spec.MCPServer.QueryServiceURL
+	if queryServiceURL == "" {
+		queryServiceURL = fmt.Sprintf("http://query.%s:8080", kb.Namespace)
 	}
 
 	deploymentName := fmt.Sprintf("mcp-server-%s", kb.Name)
 	serviceName := fmt.Sprintf("mcp-server-%s", kb.Name)
+	replicas := int32(1)
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -151,7 +157,7 @@ func (r *KnowledgeBaseReconciler) reconcileMCPServer(ctx context.Context, kb *pl
 					Containers: []corev1.Container{
 						{
 							Name:  "mcp-server",
-							Image: "ghcr.io/bdchatham/archon-mcp-server:latest",
+							Image: image,
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
@@ -162,7 +168,7 @@ func (r *KnowledgeBaseReconciler) reconcileMCPServer(ctx context.Context, kb *pl
 							Env: []corev1.EnvVar{
 								{
 									Name:  "QUERY_SERVICE_URL",
-									Value: fmt.Sprintf("http://query.%s:8080", kb.Namespace),
+									Value: queryServiceURL,
 								},
 							},
 							Resources: corev1.ResourceRequirements{
@@ -331,18 +337,16 @@ func (r *KnowledgeBaseReconciler) validateSpec(kb *platformv1alpha1.KnowledgeBas
 	}
 
 	for i, repo := range kb.Spec.Repositories {
-		if !strings.HasPrefix(repo.URL, "https://github.com/") {
-			return fmt.Errorf("repository[%d]: URL must start with https://github.com/", i)
+		if repo.URL == "" {
+			return fmt.Errorf("repository[%d]: URL cannot be empty", i)
+		}
+
+		if !strings.HasPrefix(repo.URL, "http://") && !strings.HasPrefix(repo.URL, "https://") {
+			return fmt.Errorf("repository[%d]: URL must start with http:// or https://", i)
 		}
 
 		if repo.Branch != "" && !isValidBranchName(repo.Branch) {
 			return fmt.Errorf("repository[%d]: invalid branch name '%s'", i, repo.Branch)
-		}
-
-		for j, path := range repo.Paths {
-			if !strings.HasPrefix(path, ".kiro/docs") {
-				return fmt.Errorf("repository[%d].paths[%d]: path must start with .kiro/docs", i, j)
-			}
 		}
 	}
 

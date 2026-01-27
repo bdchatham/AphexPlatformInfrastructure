@@ -67,6 +67,10 @@ spec:
                     description: Enabled determines whether to provision an MCP server
                       for this knowledge base
                     type: boolean
+                  image:
+                    description: 'Image is the container image for the MCP server
+                      (default: ghcr.io/bdchatham/archon-mcp-server:latest)'
+                    type: string
                   port:
                     default: 8090
                     description: 'Port is the port the MCP server listens on (default:
@@ -75,13 +79,10 @@ spec:
                     maximum: 65535
                     minimum: 1024
                     type: integer
-                  replicas:
-                    default: 1
-                    description: 'Replicas is the number of MCP server replicas (default:
-                      1)'
-                    format: int32
-                    minimum: 1
-                    type: integer
+                  queryServiceURL:
+                    description: 'QueryServiceURL is the URL of the query service
+                      (default: http://query.{namespace}:8080)'
+                    type: string
                 type: object
               repositories:
                 description: Repositories is the list of repositories to track
@@ -92,13 +93,15 @@ spec:
                       description: 'Branch is the Git branch to track (default: main)'
                       type: string
                     paths:
-                      description: 'Paths are the documentation paths to track (default:
-                        [".kiro/docs"])'
+                      description: |-
+                        Paths are the documentation paths to track (default: [".kiro/docs"])
+                        Supports glob patterns (e.g., "docs/**/*.md", ".kiro/docs/**")
                       items:
                         type: string
                       type: array
                     url:
-                      description: URL is the GitHub repository URL (https://github.com/org/repo)
+                      description: URL is the repository URL (supports GitHub, GitLab,
+                        Bitbucket, etc.)
                       type: string
                   required:
                   - url

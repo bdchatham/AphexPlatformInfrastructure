@@ -6,7 +6,7 @@ import (
 
 // Repository defines a single repository to track
 type Repository struct {
-	// URL is the GitHub repository URL (https://github.com/org/repo)
+	// URL is the repository URL (supports GitHub, GitLab, Bitbucket, etc.)
 	// +kubebuilder:validation:Required
 	URL string `json:"url"`
 
@@ -15,6 +15,7 @@ type Repository struct {
 	Branch string `json:"branch,omitempty"`
 
 	// Paths are the documentation paths to track (default: [".kiro/docs"])
+	// Supports glob patterns (e.g., "docs/**/*.md", ".kiro/docs/**")
 	// +optional
 	Paths []string `json:"paths,omitempty"`
 }
@@ -33,11 +34,13 @@ type MCPServerSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port,omitempty"`
 
-	// Replicas is the number of MCP server replicas (default: 1)
+	// Image is the container image for the MCP server (default: ghcr.io/bdchatham/archon-mcp-server:latest)
 	// +optional
-	// +kubebuilder:default=1
-	// +kubebuilder:validation:Minimum=1
-	Replicas int32 `json:"replicas,omitempty"`
+	Image string `json:"image,omitempty"`
+
+	// QueryServiceURL is the URL of the query service (default: http://query.{namespace}:8080)
+	// +optional
+	QueryServiceURL string `json:"queryServiceURL,omitempty"`
 }
 
 // KnowledgeBaseSpec defines the desired state of KnowledgeBase
