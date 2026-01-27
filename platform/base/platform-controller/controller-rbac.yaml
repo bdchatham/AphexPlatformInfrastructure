@@ -346,6 +346,22 @@ rules:
   - list
   - watch
 - apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - clusterinterceptors
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - triggers.tekton.dev
+  resources:
+  - clustertriggerbindings
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterroles
