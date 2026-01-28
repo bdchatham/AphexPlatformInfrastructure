@@ -156,6 +156,7 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 								"--model", agent.Spec.Model.Name,
 								"--host", "0.0.0.0",
 								"--port", fmt.Sprintf("%d", port),
+								"--gpu-memory-utilization", "0.9",
 								"--max-model-len", "8192",
 							},
 							Ports: []corev1.ContainerPort{
