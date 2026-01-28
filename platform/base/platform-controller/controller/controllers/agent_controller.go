@@ -105,6 +105,41 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platformv1alpha1.Agent) error {
 	log := log.FromContext(ctx)
 
+	pvcName := fmt.Sprintf("%s-model-cache", agent.Name)
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pvcName,
+			Namespace: agent.Namespace,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: mustParseQuantity("50Gi"),
+				},
+			},
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(agent, pvc, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set controller reference on PVC: %w", err)
+	}
+
+	existingPVC := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, client.ObjectKey{Name: pvcName, Namespace: agent.Namespace}, existingPVC)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, pvc); err != nil {
+				return fmt.Errorf("failed to create PVC: %w", err)
+			}
+			log.Info("Created model cache PVC", "name", pvcName, "namespace", agent.Namespace)
+		} else {
+			return fmt.Errorf("failed to get PVC: %w", err)
+		}
+	}
+
 	port := agent.Spec.Model.Port
 	if port == 0 {
 		port = 8000
@@ -188,7 +223,9 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 						{
 							Name: "model-cache",
 							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: fmt.Sprintf("%s-model-cache", agent.Name),
+								},
 							},
 						},
 					},
@@ -215,7 +252,7 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 	}
 
 	existingDeployment := &appsv1.Deployment{}
-	err := r.Get(ctx, client.ObjectKey{Name: deploymentName, Namespace: agent.Namespace}, existingDeployment)
+	err = r.Get(ctx, client.ObjectKey{Name: deploymentName, Namespace: agent.Namespace}, existingDeployment)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			if err := r.Create(ctx, deployment); err != nil {
