@@ -195,6 +195,16 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 								"--max-model-len", "8192",
 								"--enforce-eager",
 							},
+							Env: []corev1.EnvVar{
+								{
+									Name:  "NCCL_P2P_DISABLE",
+									Value: "1",
+								},
+								{
+									Name:  "NCCL_IB_DISABLE",
+									Value: "1",
+								},
+							},
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "http",
