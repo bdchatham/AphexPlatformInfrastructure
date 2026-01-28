@@ -176,6 +176,20 @@ func (r *AgentReconciler) reconcileModelServer(ctx context.Context, agent *platf
 									corev1.ResourceCPU:    mustParseQuantity("4"),
 								},
 							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      "model-cache",
+									MountPath: "/root/.cache/huggingface",
+								},
+							},
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "model-cache",
+							VolumeSource: corev1.VolumeSource{
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
+							},
 						},
 					},
 				},
