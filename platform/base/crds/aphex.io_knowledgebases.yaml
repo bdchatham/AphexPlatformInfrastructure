@@ -78,6 +78,7 @@ spec:
                       If empty, controller computes as http://query.{namespace}:8080
                     type: string
                   replicas:
+                    default: 1
                     description: Replicas is the number of MCP server replicas
                     format: int32
                     minimum: 1
@@ -92,7 +93,8 @@ spec:
                   description: Repository defines a single repository to track
                   properties:
                     branch:
-                      description: 'Branch is the Git branch to track (default: main)'
+                      default: mainline
+                      description: 'Branch is the Git branch to track (default: mainline)'
                       type: string
                     paths:
                       description: |-

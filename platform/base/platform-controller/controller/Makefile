@@ -31,6 +31,11 @@ run: fmt vet
 manifests: controller-gen
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:artifacts:config=../../crds
 
+# Generate code (DeepCopy, etc.)
+.PHONY: generate
+generate: controller-gen
+	$(CONTROLLER_GEN) object paths="./api/..."
+
 # Install controller-gen if not present
 .PHONY: controller-gen
 controller-gen:

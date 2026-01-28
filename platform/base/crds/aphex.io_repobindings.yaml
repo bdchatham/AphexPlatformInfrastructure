@@ -14,7 +14,23 @@ spec:
     singular: repobinding
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.aphexOrg
+      name: Org
+      type: string
+    - jsonPath: .spec.repoName
+      name: Repo
+      type: string
+    - jsonPath: .spec.pipelineName
+      name: Pipeline
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: RepoBinding is the Schema for the repobindings API
@@ -77,14 +93,6 @@ spec:
           status:
             description: RepoBindingStatus defines the observed state of RepoBinding
             properties:
-              allowlistUpdated:
-                description: AllowlistUpdated indicates if the repository was added
-                  to the allowlist
-                type: boolean
-              eventListenerCreated:
-                description: EventListenerCreated indicates if the EventListener was
-                  created
-                type: boolean
               lastReconcileTime:
                 description: LastReconcileTime is the timestamp of the last reconciliation
                 format: date-time
@@ -95,10 +103,6 @@ spec:
                 type: string
               namespaceCreated:
                 description: NamespaceCreated indicates if the tenant namespace was
-                  created
-                type: boolean
-              networkPolicyCreated:
-                description: NetworkPolicyCreated indicates if the NetworkPolicy was
                   created
                 type: boolean
               phase:
@@ -114,10 +118,6 @@ spec:
                 description: PipelineCreated indicates if the Pipeline resource was
                   created
                 type: boolean
-              quotasCreated:
-                description: QuotasCreated indicates if ResourceQuota and LimitRange
-                  were created
-                type: boolean
               rbacCreated:
                 description: RBACCreated indicates if RBAC was configured
                 type: boolean
@@ -125,13 +125,9 @@ spec:
                 description: ServiceAccountCreated indicates if the service account
                   was created
                 type: boolean
-              terraformSecretCreated:
-                description: TerraformSecretCreated indicates if the Terraform backend
-                  secret was created
-                type: boolean
               triggerBindingCreated:
-                description: TriggerBindingCreated indicates if the TriggerBinding
-                  was created
+                description: TriggerBindingCreated indicates if the EventListener
+                  namespace was updated
                 type: boolean
               triggerCreated:
                 description: TriggerCreated indicates if the Trigger was created
@@ -145,7 +141,7 @@ spec:
                   webhook configuration
                 type: string
               webhookURL:
-                description: WebhookURL is the Lighthouse webhook endpoint URL
+                description: WebhookURL is the webhook endpoint URL
                 type: string
             type: object
         type: object

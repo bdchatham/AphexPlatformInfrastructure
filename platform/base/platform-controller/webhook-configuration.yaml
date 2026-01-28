@@ -1,0 +1,157 @@
+# ValidatingWebhookConfiguration for Platform Controller CRDs
+# This implements Requirement 19: Validating Admission Webhook
+# THE Platform_Controller SHALL implement a ValidatingWebhookConfiguration for all CRDs.
+#
+# Note: This configuration requires cert-manager to be installed for automatic
+# certificate management. The webhook server must be enabled with --enable-webhooks flag.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: platform-controller-validating-webhook
+  annotations:
+    cert-manager.io/inject-ca-from: platform-system/platform-controller-serving-cert
+  labels:
+    app.kubernetes.io/name: platform-controller
+    app.kubernetes.io/component: webhook
+spec:
+  webhooks:
+    # RepoBinding validation webhook
+    - name: vrepobinding.platform.aphex.io
+      admissionReviewVersions:
+        - v1
+      clientConfig:
+        service:
+          name: platform-controller-webhook
+          namespace: platform-system
+          path: /validate-aphex-io-v1alpha1-repobinding
+          port: 9443
+      failurePolicy: Fail
+      matchPolicy: Equivalent
+      rules:
+        - apiGroups:
+            - aphex.io
+          apiVersions:
+            - v1alpha1
+          operations:
+            - CREATE
+            - UPDATE
+          resources:
+            - repobindings
+          scope: Namespaced
+      sideEffects: None
+      timeoutSeconds: 10
+
+    # Organization validation webhook
+    - name: vorganization.platform.aphex.io
+      admissionReviewVersions:
+        - v1
+      clientConfig:
+        service:
+          name: platform-controller-webhook
+          namespace: platform-system
+          path: /validate-aphex-io-v1alpha1-organization
+          port: 9443
+      failurePolicy: Fail
+      matchPolicy: Equivalent
+      rules:
+        - apiGroups:
+            - aphex.io
+          apiVersions:
+            - v1alpha1
+          operations:
+            - CREATE
+            - UPDATE
+          resources:
+            - organizations
+          scope: Namespaced
+      sideEffects: None
+      timeoutSeconds: 10
+
+    # Agent validation webhook
+    - name: vagent.platform.aphex.io
+      admissionReviewVersions:
+        - v1
+      clientConfig:
+        service:
+          name: platform-controller-webhook
+          namespace: platform-system
+          path: /validate-aphex-io-v1alpha1-agent
+          port: 9443
+      failurePolicy: Fail
+      matchPolicy: Equivalent
+      rules:
+        - apiGroups:
+            - aphex.io
+          apiVersions:
+            - v1alpha1
+          operations:
+            - CREATE
+            - UPDATE
+          resources:
+            - agents
+          scope: Namespaced
+      sideEffects: None
+      timeoutSeconds: 10
+
+    # KnowledgeBase validation webhook
+    - name: vknowledgebase.platform.aphex.io
+      admissionReviewVersions:
+        - v1
+      clientConfig:
+        service:
+          name: platform-controller-webhook
+          namespace: platform-system
+          path: /validate-aphex-io-v1alpha1-knowledgebase
+          port: 9443
+      failurePolicy: Fail
+      matchPolicy: Equivalent
+      rules:
+        - apiGroups:
+            - aphex.io
+          apiVersions:
+            - v1alpha1
+          operations:
+            - CREATE
+            - UPDATE
+          resources:
+            - knowledgebases
+          scope: Namespaced
+      sideEffects: None
+      timeoutSeconds: 10
+---
+# Service for webhook server
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-controller-webhook
+  namespace: platform-system
+  labels:
+    app.kubernetes.io/name: platform-controller
+    app.kubernetes.io/component: webhook
+spec:
+  ports:
+    - name: https
+      port: 9443
+      targetPort: 9443
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: platform-controller
+---
+# Certificate for webhook TLS (requires cert-manager)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: platform-controller-serving-cert
+  namespace: platform-system
+  labels:
+    app.kubernetes.io/name: platform-controller
+    app.kubernetes.io/component: webhook
+spec:
+  dnsNames:
+    - platform-controller-webhook.platform-system.svc
+    - platform-controller-webhook.platform-system.svc.cluster.local
+  issuerRef:
+    kind: ClusterIssuer
+    name: selfsigned-issuer
+  secretName: platform-controller-webhook-cert

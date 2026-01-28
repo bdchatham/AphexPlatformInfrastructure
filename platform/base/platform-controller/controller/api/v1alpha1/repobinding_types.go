@@ -54,22 +54,10 @@ type RepoBindingStatus struct {
 	// RBACCreated indicates if RBAC was configured
 	RBACCreated bool `json:"rbacCreated,omitempty"`
 
-	// QuotasCreated indicates if ResourceQuota and LimitRange were created
-	QuotasCreated bool `json:"quotasCreated,omitempty"`
+	// PipelineCreated indicates if the Pipeline resource was created
+	PipelineCreated bool `json:"pipelineCreated,omitempty"`
 
-	// NetworkPolicyCreated indicates if the NetworkPolicy was created
-	NetworkPolicyCreated bool `json:"networkPolicyCreated,omitempty"`
-
-	// TerraformSecretCreated indicates if the Terraform backend secret was created
-	TerraformSecretCreated bool `json:"terraformSecretCreated,omitempty"`
-
-	// AllowlistUpdated indicates if the repository was added to the allowlist
-	AllowlistUpdated bool `json:"allowlistUpdated,omitempty"`
-
-	// EventListenerCreated indicates if the EventListener was created
-	EventListenerCreated bool `json:"eventListenerCreated,omitempty"`
-
-	// TriggerBindingCreated indicates if the TriggerBinding was created
+	// TriggerBindingCreated indicates if the EventListener namespace was updated
 	TriggerBindingCreated bool `json:"triggerBindingCreated,omitempty"`
 
 	// TriggerTemplateCreated indicates if the TriggerTemplate was created
@@ -78,13 +66,10 @@ type RepoBindingStatus struct {
 	// TriggerCreated indicates if the Trigger was created
 	TriggerCreated bool `json:"triggerCreated,omitempty"`
 
-	// PipelineCreated indicates if the Pipeline resource was created
-	PipelineCreated bool `json:"pipelineCreated,omitempty"`
-
 	// WebhookSecret is the generated webhook secret for GitHub webhook configuration
 	WebhookSecret string `json:"webhookSecret,omitempty"`
 
-	// WebhookURL is the Lighthouse webhook endpoint URL
+	// WebhookURL is the webhook endpoint URL
 	WebhookURL string `json:"webhookURL,omitempty"`
 
 	// LastReconcileTime is the timestamp of the last reconciliation
@@ -92,9 +77,13 @@ type RepoBindingStatus struct {
 }
 
 // +kubebuilder:object:root=true
-// +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:printcolumn:name="Org",type=string,JSONPath=`.spec.aphexOrg`
+// +kubebuilder:printcolumn:name="Repo",type=string,JSONPath=`.spec.repoName`
+// +kubebuilder:printcolumn:name="Pipeline",type=string,JSONPath=`.spec.pipelineName`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // RepoBinding is the Schema for the repobindings API
 type RepoBinding struct {

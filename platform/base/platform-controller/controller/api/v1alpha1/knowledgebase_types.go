@@ -10,7 +10,8 @@ type Repository struct {
 	// +kubebuilder:validation:Required
 	URL string `json:"url"`
 
-	// Branch is the Git branch to track (default: main)
+	// Branch is the Git branch to track (default: mainline)
+	// +kubebuilder:default:="mainline"
 	// +optional
 	Branch string `json:"branch,omitempty"`
 
@@ -39,8 +40,9 @@ type MCPConfig struct {
 	QueryServiceURL string `json:"queryServiceURL,omitempty"`
 
 	// Replicas is the number of MCP server replicas
-	// +optional
+	// +kubebuilder:default:=1
 	// +kubebuilder:validation:Minimum=1
+	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
 }
 

@@ -79,6 +79,11 @@ spec:
                 type: string
               phase:
                 description: Phase represents the organization provisioning status
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
                 type: string
               webhookURL:
                 description: WebhookURL is the external webhook URL for GitHub integration
