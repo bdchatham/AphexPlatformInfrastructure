@@ -47,7 +47,9 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     verbs: ["bind"]
-    resourceNames: ["organization-admin"]
+    resourceNames: 
+      - "organization-admin"
+      - "eventlistener-access"
   - apiGroups: ["external-secrets.io"]
     resources: ["clustersecretstores", "externalsecrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
