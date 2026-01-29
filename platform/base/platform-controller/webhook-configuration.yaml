@@ -14,9 +14,8 @@ metadata:
   labels:
     app.kubernetes.io/name: platform-controller
     app.kubernetes.io/component: webhook
-spec:
-  webhooks:
-    # RepoBinding validation webhook
+webhooks:
+  # RepoBinding validation webhook
     - name: vrepobinding.platform.aphex.io
       admissionReviewVersions:
         - v1
