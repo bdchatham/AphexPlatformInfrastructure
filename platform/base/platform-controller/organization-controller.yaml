@@ -38,6 +38,11 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles", "clusterrolebindings", "roles", "rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Allow binding the organization-admin ClusterRole without needing those permissions
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["organization-admin"]
   - apiGroups: ["external-secrets.io"]
     resources: ["clustersecretstores", "externalsecrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
