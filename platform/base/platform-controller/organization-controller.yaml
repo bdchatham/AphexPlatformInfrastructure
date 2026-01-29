@@ -1,0 +1,148 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: organization-controller
+  namespace: platform-system
+  labels:
+    app: organization-controller
+    app.kubernetes.io/name: organization-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: aphex-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: organization-controller
+rules:
+  - apiGroups: ["aphex.io"]
+    resources: ["organizations"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["aphex.io"]
+    resources: ["organizations/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["aphex.io"]
+    resources: ["organizations/finalizers"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["namespaces", "secrets", "configmaps", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["external-secrets.io"]
+    resources: ["clustersecretstores", "externalsecrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["eventlisteners"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: organization-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: organization-controller
+subjects:
+  - kind: ServiceAccount
+    name: organization-controller
+    namespace: platform-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: organization-controller
+  namespace: platform-system
+  labels:
+    app: organization-controller
+    app.kubernetes.io/name: organization-controller
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/part-of: aphex-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: organization-controller
+  template:
+    metadata:
+      labels:
+        app: organization-controller
+        app.kubernetes.io/name: organization-controller
+        app.kubernetes.io/component: controller
+        app.kubernetes.io/part-of: aphex-platform
+    spec:
+      serviceAccountName: organization-controller
+      containers:
+        - name: manager
+          image: ghcr.io/bdchatham/organization-controller:latest
+          args:
+            - --leader-elect=true
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+          env:
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflare-credentials
+                  key: api-token
+                  optional: true
+            - name: CLOUDFLARE_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cloudflare-credentials
+                  key: account-id
+                  optional: true
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            capabilities:
+              drop:
+                - ALL
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
