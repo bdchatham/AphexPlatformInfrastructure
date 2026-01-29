@@ -42,7 +42,7 @@ rules:
     resources: ["clustersecretstores", "externalsecrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["triggers.tekton.dev"]
-    resources: ["eventlisteners"]
+    resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
