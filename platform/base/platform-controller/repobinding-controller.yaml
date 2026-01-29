@@ -125,7 +125,8 @@ spec:
             - --leader-elect=true
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
-            - --webhook-server-port=9443
+            - --enable-webhooks
+            - --webhook-port=9443
           ports:
             - name: metrics
               containerPort: 8080
