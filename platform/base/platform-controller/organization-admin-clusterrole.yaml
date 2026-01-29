@@ -1,0 +1,36 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: organization-admin
+  labels:
+    app.kubernetes.io/name: platform-controller
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/part-of: aphex-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+rules:
+  # Manage Aphex platform resources
+  - apiGroups: ["aphex.io"]
+    resources: ["repobindings", "agents", "knowledgebases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  
+  # View organizations (read-only, can't modify their own org)
+  - apiGroups: ["aphex.io"]
+    resources: ["organizations"]
+    verbs: ["get", "list", "watch"]
+  
+  # View core resources
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "serviceaccounts", "services", "pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+  
+  # View Tekton pipelines and runs
+  - apiGroups: ["tekton.dev"]
+    resources: ["pipelines", "pipelineruns", "tasks", "taskruns"]
+    verbs: ["get", "list", "watch"]
+  
+  # View Tekton triggers
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
+    verbs: ["get", "list", "watch"]

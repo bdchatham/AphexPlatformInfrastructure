@@ -5,5 +5,6 @@ resources:
   - agent-controller.yaml
   - knowledgebase-controller.yaml
   - organization-controller.yaml
+  - organization-admin-clusterrole.yaml
   - repobinding-controller.yaml
   - webhook-configuration.yaml
