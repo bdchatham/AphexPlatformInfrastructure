@@ -1,18 +1,18 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-crds
+  name: controller-knowledgebase
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-wave: "20"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/AphexControllerRuntime.git
+    repoURL: https://github.com/bdchatham/AphexKnowledgeBaseController.git
     targetRevision: HEAD
-    path: crds
+    path: manifests
   destination:
     server: https://kubernetes.default.svc
     namespace: platform-system
