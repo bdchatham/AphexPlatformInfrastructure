@@ -123,10 +123,17 @@ install_k3s() {
 }
 
 configure_nvidia_runtime() {
-  if ! nvidia-ctk runtime configure --runtime=containerd --set-as-default=false 2>/dev/null; then
+  local k3s_containerd_config="/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl"
+  
+  mkdir -p "$(dirname "$k3s_containerd_config")"
+  
+  if ! nvidia-ctk runtime configure \
+    --runtime=containerd \
+    --config="$k3s_containerd_config" \
+    --set-as-default=false 2>/dev/null; then
     log_warning "nvidia-ctk configure skipped (may already be configured)"
   fi
-  log_success "NVIDIA runtime available"
+  log_success "NVIDIA runtime configured for k3s containerd"
 }
 
 generate_secrets() {
