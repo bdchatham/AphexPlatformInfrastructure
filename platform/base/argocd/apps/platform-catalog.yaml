@@ -10,9 +10,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: https://github.com/bdchatham/AphexPlatformInfrastructure.git
+    repoURL: https://github.com/bdchatham/AphexPipelineResources.git
     targetRevision: HEAD
-    path: platform/base/catalog
+    path: tekton
   destination:
     server: https://kubernetes.default.svc
     namespace: platform-system
