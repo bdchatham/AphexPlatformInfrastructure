@@ -4,6 +4,7 @@ metadata:
   name: argocd-cm
   namespace: argocd
 data:
+  application.namespaces: "*"
   url: https://argocd.home.local
   oidc.config: |
     name: Dex
