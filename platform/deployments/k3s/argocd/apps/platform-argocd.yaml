@@ -32,8 +32,9 @@ spec:
     - group: ""
       kind: ConfigMap
       name: argocd-cm
-      jsonPointers:
-        - /data
+      jqPathExpressions:
+        - .data
+        - .metadata.labels
     - group: ""
       kind: Secret
       jsonPointers:
