@@ -25,7 +25,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-ARGOCD_VERSION="v2.9.3"
+ARGOCD_VERSION="v3.3.0"
 SHOW_SECRETS=false
 
 # Parse arguments
