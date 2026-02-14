@@ -37,6 +37,13 @@ spec:
         - /metadata/labels
         - /metadata/annotations
     - group: ""
+      kind: ConfigMap
+      name: argocd-cmd-params-cm
+      jsonPointers:
+        - /data
+        - /metadata/labels
+        - /metadata/annotations
+    - group: ""
       kind: Secret
       jsonPointers:
         - /data
