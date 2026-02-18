@@ -2,13 +2,13 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: platform-gateway
-  namespace: kong-system
+  namespace: kube-system
 spec:
-  gatewayClassName: kong
+  gatewayClassName: traefik
   listeners:
     - name: https
       protocol: HTTPS
-      port: 443
+      port: 8443
       hostname: "*.arbiter-dev.com"
       tls:
         mode: Terminate
@@ -18,15 +18,10 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
-    - name: api
-      protocol: HTTPS
-      port: 443
-      hostname: "aphex.arbiter-dev.com"
-      tls:
-        mode: Terminate
-        certificateRefs:
-          - name: wildcard-arbiter-dev-tls
-            kind: Secret
+    - name: http
+      protocol: HTTP
+      port: 8000
+      hostname: "*.arbiter-dev.com"
       allowedRoutes:
         namespaces:
           from: All
