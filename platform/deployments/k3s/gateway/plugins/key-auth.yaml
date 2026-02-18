@@ -3,9 +3,8 @@ kind: KongPlugin
 metadata:
   name: mcp-key-auth
   namespace: kong-system
-spec:
-  plugin: key-auth
-  config:
-    key_names:
-      - apikey
-    hide_credentials: true
+plugin: key-auth
+config:
+  key_names:
+    - apikey
+  hide_credentials: true

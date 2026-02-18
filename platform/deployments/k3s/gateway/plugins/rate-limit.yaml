@@ -3,10 +3,9 @@ kind: KongPlugin
 metadata:
   name: mcp-rate-limit
   namespace: kong-system
-spec:
-  plugin: rate-limiting
-  config:
-    minute: 100
-    policy: local
-    fault_tolerant: true
-    hide_client_headers: false
+plugin: rate-limiting
+config:
+  minute: 100
+  policy: local
+  fault_tolerant: true
+  hide_client_headers: false
