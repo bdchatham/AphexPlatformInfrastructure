@@ -25,3 +25,15 @@ spec:
       allowedRoutes:
         namespaces:
           from: All
+    - name: api
+      protocol: HTTPS
+      port: 8443
+      hostname: "aphex.arbiter-dev.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-arbiter-dev-tls
+            kind: Secret
+      allowedRoutes:
+        namespaces:
+          from: All
