@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - gateway-api-crds.yaml
+  - gateway-class.yaml
   - gateway.yaml
   - routes/argocd.yaml
   - routes/auth.yaml
