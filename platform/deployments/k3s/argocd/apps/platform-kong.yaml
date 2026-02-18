@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-kong
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://charts.konghq.com
+    chart: kong
+    targetRevision: 2.47.0
+    helm:
+      values: |
+        ingressController:
+          enabled: true
+          env:
+            feature_gates: GatewayAlpha=true
+        gateway:
+          env:
+            database: "off"
+          proxy:
+            type: LoadBalancer
+            http:
+              enabled: true
+            tls:
+              enabled: true
+              servicePort: 443
+        admin:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kong-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -2,7 +2,7 @@ apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
   name: wildcard-arbiter-dev
-  namespace: kube-system
+  namespace: kong-system
 spec:
   secretName: wildcard-arbiter-dev-tls
   issuerRef:

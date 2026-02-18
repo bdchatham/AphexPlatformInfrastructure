@@ -3,9 +3,10 @@ kind: Kustomization
 
 resources:
   - gateway-api-crds.yaml
-  - traefik-config.yaml
   - gateway.yaml
   - routes/argocd.yaml
   - routes/auth.yaml
   - routes/dex.yaml
   - routes/tekton.yaml
+  - plugins/rate-limit.yaml
+  - plugins/key-auth.yaml

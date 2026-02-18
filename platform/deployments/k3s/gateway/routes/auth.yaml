@@ -6,7 +6,7 @@ metadata:
 spec:
   parentRefs:
     - name: platform-gateway
-      namespace: kube-system
+      namespace: kong-system
   hostnames:
     - auth.arbiter-dev.com
   rules:
